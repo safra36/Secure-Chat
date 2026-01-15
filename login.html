@@ -2016,6 +2016,37 @@
             lightboxImage.src = '';
         }
 
+        async function sendWithRetry(url, options, maxRetries = 2) {
+            const maxAttempts = maxRetries + 1; // 1 initial + 2 retries = 3 total
+            const delays = [500, 1000]; // Exponential backoff in milliseconds
+            
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                try {
+                    const response = await authenticatedFetch(url, options);
+                    
+                    // Don't retry on auth errors (401, 403)
+                    if (response.status === 401 || response.status === 403) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+                    
+                    return response;
+                } catch (error) {
+                    // If this was the last attempt, throw the error
+                    if (attempt === maxAttempts - 1) {
+                        throw error;
+                    }
+                    
+                    // Wait before retrying (exponential backoff)
+                    const delay = delays[attempt] || 1000;
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+        }
+
         async function sendMessage() {
             const message = messageInput.value.trim();
             const hasImage = selectedImage !== null;
@@ -2059,13 +2090,12 @@
             }
 
             try {
-                const response = await authenticatedFetch(`/send/${currentChat.handle}`, {
+                const response = await sendWithRetry(`/send/${currentChat.handle}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(messageData)
                 });
 
-                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                 fetchMessages();
             } catch (error) {
                 showToast('Failed to send message', 'error');
@@ -2091,15 +2121,11 @@
             };
 
             try {
-                const response = await authenticatedFetch(`/send/${currentChat.handle}`, {
+                const response = await sendWithRetry(`/send/${currentChat.handle}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(messageData)
                 });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
 
                 fetchMessages();
             } catch (error) {
