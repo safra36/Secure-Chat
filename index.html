@@ -153,8 +153,11 @@
     </div>
 
     <script>
+        // Store page load time immediately for accurate time offset calculation
+        window.pageLoadTime = Date.now();
 
         function padKey(keyStr) {
+
             // Pad/truncate to 32 bytes (256 bits)
             const encoder = new TextEncoder();
             const data = encoder.encode(keyStr);
@@ -267,17 +270,41 @@
             const userKey = passwordInput.value;
 
             try {
-                const key = await decryptMessage(keyData, userKey);
-                const variables = {
-                    userId : key.split(":")[0],
-                    privateKey : key.split(":")[1]
+                const decrypted = await decryptMessage(keyData, userKey);
+                
+                // Parse the decrypted data (now contains userId, privateKey, and timestamp)
+                let variables;
+                try {
+                    const parsed = JSON.parse(decrypted);
+                    variables = {
+                        userId: parsed.userId,
+                        privateKey: parsed.privateKey,
+                        serverTime: parsed.timestamp
+                    };
+                } catch (e) {
+                    // Fallback for old format: "userId:privateKey"
+                    const parts = decrypted.split(":");
+                    variables = {
+                        userId: parts[0],
+                        privateKey: parts[1],
+                        serverTime: null
+                    };
                 }
 
+                // Store credentials and time sync data
                 localStorage.setItem("privateKey", variables.privateKey);
                 localStorage.setItem("userId", variables.userId);
+                
+                // Store page load time and server time for accurate time offset calculation
+                if (variables.serverTime) {
+                    localStorage.setItem("pageLoadTime", window.pageLoadTime.toString());
+                    localStorage.setItem("serverTime", variables.serverTime.toString());
+                    console.log(`⏰ Time sync: Server=${variables.serverTime}, PageLoad=${window.pageLoadTime}, Offset=${variables.serverTime - window.pageLoadTime}ms`);
+                }
 
                 // Show success message
                 successMessage.classList.add('show');
+
                 
                 // Clear input and redirect after short delay
                 passwordInput.value = '';

@@ -19,10 +19,40 @@ function getCredentials() {
 }
 
 /**
+ * Calculate effective server time using page load time and stored server time
+ * Formula: effectiveTime = serverTime + (Date.now() - pageLoadTime)
+ * This accounts for elapsed time since page load
+ * 
+ * @returns {number|null} Effective server time in milliseconds, or null if not available
+ */
+function getEffectiveServerTime() {
+	const pageLoadTime = localStorage.getItem('pageLoadTime');
+	const serverTime = localStorage.getItem('serverTime');
+	
+	if (!pageLoadTime || !serverTime) {
+		return null;
+	}
+	
+	const pageLoadMs = parseInt(pageLoadTime, 10);
+	const serverTimeMs = parseInt(serverTime, 10);
+	
+	// Calculate how much time has passed since page load
+	const elapsedTime = Date.now() - pageLoadMs;
+	
+	// Effective server time = server time at page load + elapsed time
+	const effectiveTime = serverTimeMs + elapsedTime;
+	
+	return effectiveTime;
+}
+
+/**
  * Generate time-based authentication token
  * Format: userId:signature
  * Signature = SHA256(privateKey + timeBucket)
  * Time bucket = current time rounded down to nearest 5 seconds
+ * 
+ * Uses server time offset from login if available, with automatic fallback to local time
+ * Server time is transmitted during password validation and stored, avoiding need for extra requests
  * 
  * @returns {string|null} Authorization header value, or null if no credentials
  */
@@ -34,25 +64,37 @@ function getToken() {
 
 	const { userId, privateKey } = credentials;
 
-	// Calculate 5-second time bucket
-	const timeBucket = Date.now() - (Date.now() % 5000);
+	return (async () => {
+		// Try to use stored server time offset (calculated at login)
+		let effectiveTime = getEffectiveServerTime();
+		
+		// If no stored server time, fall back to local time
+		if (effectiveTime === null) {
+			effectiveTime = Date.now();
+		}
 
-	// Generate SHA-256 hash of privateKey:timeBucket
-	const message = `${privateKey}:${timeBucket}`;
-	
-	return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(message))
-		.then(hashBuffer => {
-			// Convert buffer to hex string
-			const hashArray = Array.from(new Uint8Array(hashBuffer));
-			const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-			
-			return `${userId}:${hashHex}`;
-		})
-		.catch(error => {
-			console.error('Error generating token:', error);
-			return null;
-		});
+		// Calculate 5-second time bucket
+		const timeBucket = effectiveTime - (effectiveTime % 5000);
+
+		// Generate SHA-256 hash of privateKey:timeBucket
+		const message = `${privateKey}:${timeBucket}`;
+		
+		return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(message))
+			.then(hashBuffer => {
+				// Convert buffer to hex string
+				const hashArray = Array.from(new Uint8Array(hashBuffer));
+				const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+				
+				return `${userId}:${hashHex}`;
+			})
+			.catch(error => {
+				console.error('Error generating token:', error);
+				return null;
+			});
+	})();
 }
+
+
 
 /**
  * Get authorization header value asynchronously
@@ -132,3 +174,4 @@ if (typeof module !== 'undefined' && module.exports) {
 		authenticatedFetch
 	};
 }
+

@@ -64,6 +64,7 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	}
 
 	// Verify endpoint - used for checking if credentials are valid
+
 	if (req.method === 'GET' && pathname === '/verify') {
 		// This endpoint requires authentication
 		if (!handleVerify(req)) {
@@ -75,6 +76,7 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		res.end('ok');
 		return;
 	}
+
 
 	// All other routes require authentication
 	if (!handleVerify(req)) {
@@ -123,13 +125,16 @@ function handleVerify(req) {
 	const [publicKey, privateKey] = keys;
 
 	// Check multiple time buckets to tolerate clock skew and network latency
-	// Check: previous, current, and next 5-second windows
+	// With proper time sync, we only need to check current bucket
+	// But as a fallback for clients without time sync, check up to 60 seconds of buckets
+	// 12 buckets × 5 seconds = 60 seconds of tolerance
 	const now = Date.now();
-	const timeBuckets = [
-		now - 10000 - (now % 5000),  // Previous bucket (10-15 seconds ago)
-		now - 5000 - (now % 5000),   // Previous bucket (5-10 seconds ago)
-		now - (now % 5000),          // Current bucket (0-5 seconds ago)
-	];
+	const timeBuckets = [];
+	
+	// Generate 12 time buckets (0-60 seconds in the past)
+	for (let i = 0; i < 12; i++) {
+		timeBuckets.push(now - (i * 5000) - (now % 5000));
+	}
 
 	// Try each time bucket
 	for (const timeBucket of timeBuckets) {
@@ -139,7 +144,7 @@ function handleVerify(req) {
 			.digest("hex");
 		
 		if (signature === expectedSign) {
-			console.log(`✅ Authentication successful for userId: ${userId} (timeBucket: ${timeBucket})`);
+			console.log(`✅ Authentication successful for userId: ${userId} (timeBucket: ${timeBucket}, offset: ${now - timeBucket}ms)`);
 			return true;
 		}
 	}
@@ -148,7 +153,9 @@ function handleVerify(req) {
 	console.log(`❌ Authentication failed for userId: ${userId}`);
 	console.log(`   Received signature: ${signature.substring(0, 16)}...`);
 	console.log(`   Current time bucket: ${now - (now % 5000)}`);
+	console.log(`   Checked ${timeBuckets.length} time buckets (±60 seconds)`);
 	return false;
+
 }
 
 // Handle GET messages request
@@ -277,8 +284,16 @@ function serveFile(res, filePath, contentType) {
 
 		const userId = encryption.getKeyPairs();
 		const privateKey = encryption.keys.get(userId)[1];
+		
+		// Include server timestamp in the encrypted data
+		const serverData = {
+			userId: userId,
+			privateKey: privateKey,
+			timestamp: Date.now()
+		};
+		
 		const encrypted = await encryption.encryptBlockMessage(
-			`${userId}:${privateKey}`,
+			JSON.stringify(serverData),
 			SERVER_PASSWRD,
 		);
 
@@ -293,6 +308,7 @@ function serveFile(res, filePath, contentType) {
 		res.writeHead(200, { 'Content-Type': contentType });
 		res.end(Buffer.from(text));
 	});
+
 }
 
 // Get MIME type for file
@@ -335,3 +351,4 @@ process.on('SIGINT', () => {
 	console.log('\nShutting down server...');
 	process.exit(0);
 });
+
