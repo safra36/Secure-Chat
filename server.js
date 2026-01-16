@@ -360,9 +360,12 @@ function handleHeartbeat(req, res, pathname) {
 
 			console.log(`Online users in ${chatHandle}: ${onlineUsersHeader}`);
 
+			// Encode header to handle Persian/non-ASCII characters
+			const encodedOnlineUsersHeader = encodeURIComponent(onlineUsersHeader);
+
 			res.writeHead(200, {
 				'Content-Type': 'application/json',
-				'X-Online-Users': onlineUsersHeader
+				'X-Online-Users': encodedOnlineUsersHeader
 			});
 			res.end(JSON.stringify({ success: true }));
 		} catch (error) {

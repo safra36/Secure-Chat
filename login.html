@@ -1661,8 +1661,11 @@
                 return;
             }
 
+            // Decode header value since it was URL-encoded on the server for non-ASCII characters
+            const decodedHeaderValue = decodeURIComponent(headerValue);
+
             // Parse header: userName|status,userName|status,...
-            const users = headerValue.split(',').map(userStr => {
+            const users = decodedHeaderValue.split(',').map(userStr => {
                 const [userName, status] = userStr.split('|');
                 return { userName, status };
             });
