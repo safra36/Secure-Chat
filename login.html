@@ -1301,6 +1301,10 @@
         let connectionStatus = 'disconnected'; // 'connected', 'connecting', 'disconnected'
         const messageDeliveryStatus = new Map(); // Store delivery status by message ID
 
+        // Authentication failure tracking
+        let failedAuthAttempts = 0;
+        const AUTH_FAILURE_THRESHOLD = 3; // Redirect to login after 3 consecutive 401s
+
         // Initialize the app
         document.addEventListener('DOMContentLoaded', async () => {
             if (!validateCredentials()) {
@@ -1575,6 +1579,21 @@
                     body: JSON.stringify({ userName: userName })
                 });
 
+                // Check for authentication failure
+                if (response.status === 401) {
+                    failedAuthAttempts++;
+                    console.warn(`Authentication failed on heartbeat. Attempts: ${failedAuthAttempts}/${AUTH_FAILURE_THRESHOLD}`);
+                    
+                    if (failedAuthAttempts >= AUTH_FAILURE_THRESHOLD) {
+                        console.error('Persistent authentication failures detected. Redirecting to login...');
+                        logout(true); // Automatic logout without confirmation
+                    }
+                    throw new Error(`Heartbeat failed: ${response.status}`);
+                }
+
+                // Reset counter on successful response
+                failedAuthAttempts = 0;
+
                 if (!response.ok) {
                     throw new Error(`Heartbeat failed: ${response.status}`);
                 }
@@ -1686,6 +1705,21 @@
                     method: 'GET',
                     headers: { 'Content-Type': 'application/json' }
                 });
+
+                // Check for authentication failure
+                if (response.status === 401) {
+                    failedAuthAttempts++;
+                    console.warn(`Authentication failed. Attempts: ${failedAuthAttempts}/${AUTH_FAILURE_THRESHOLD}`);
+                    
+                    if (failedAuthAttempts >= AUTH_FAILURE_THRESHOLD) {
+                        console.error('Persistent authentication failures detected. Redirecting to login...');
+                        logout(true); // Automatic logout without confirmation
+                    }
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                // Reset counter on successful response
+                failedAuthAttempts = 0;
 
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
