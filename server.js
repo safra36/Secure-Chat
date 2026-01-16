@@ -8,6 +8,14 @@ const crypto = require('crypto');
 // In-memory storage for messages (in production, use a database)
 const messagesStorage = new Map();
 
+// In-memory storage for user heartbeats and online status
+// Structure: chatHandle -> userId -> { lastHeartbeat, userName }
+const userHeartbeats = new Map();
+
+// Grace period for marking users as offline (in milliseconds)
+const OFFLINE_GRACE_PERIOD = 30000; // 30 seconds
+const OFFLINE_THRESHOLD = 15000; // 15 seconds before grace period
+
 const tlsOptions = {
 	key: fs.readFileSync(path.join(__dirname, 'cert', 'key.pem')),
 	cert: fs.readFileSync(path.join(__dirname, 'cert', 'cert.pem')),
@@ -96,6 +104,12 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	if (req.method === 'POST' && pathname.startsWith('/send/')) {
 		console.log('Handling POST /send/');
 		handleSendMessage(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/heartbeat/')) {
+		console.log('Handling POST /heartbeat/');
+		handleHeartbeat(req, res, pathname);
 		return;
 	}
 
@@ -266,6 +280,95 @@ function handleSendMessage(req, res, pathname) {
 			console.error('Error parsing message data:', error);
 			res.writeHead(400, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ error: 'Invalid message data' }));
+		}
+	});
+}
+
+// Handle heartbeat request
+function handleHeartbeat(req, res, pathname) {
+	console.log(`POST heartbeat request for path: ${pathname}`);
+
+	// Extract chat handle and userId from Authorization header
+	const authorization = req.headers.authorization;
+	if (!authorization) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Missing authorization' }));
+		return;
+	}
+
+	const [userId] = authorization.split(':');
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+
+	if (!chatHandle) {
+		console.log('Chat handle is required');
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	let body = '';
+
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const heartbeatData = JSON.parse(body);
+			const { userName } = heartbeatData;
+
+			const now = Date.now();
+
+			// Initialize chat entry if needed
+			if (!userHeartbeats.has(chatHandle)) {
+				userHeartbeats.set(chatHandle, new Map());
+			}
+
+			const chatUsers = userHeartbeats.get(chatHandle);
+
+			// Clean up expired heartbeats (grace period passed)
+			for (const [uid, userData] of chatUsers.entries()) {
+				if (now - userData.lastHeartbeat > OFFLINE_GRACE_PERIOD) {
+					chatUsers.delete(uid);
+					console.log(`Removed offline user ${uid} from chat ${chatHandle}`);
+				}
+			}
+
+			// Update the current user's heartbeat
+			chatUsers.set(userId, {
+				lastHeartbeat: now,
+				userName: userName || 'Unknown'
+			});
+
+			console.log(`Heartbeat from ${userId} (${userName}) in chat ${chatHandle}`);
+
+			// Build online users header
+			// Format: userName|status,userName|status,...
+			const onlineUsersArray = Array.from(chatUsers.entries()).map(([uid, userData]) => {
+				let status = 'online';
+				const timeSinceHeartbeat = now - userData.lastHeartbeat;
+
+				if (timeSinceHeartbeat > OFFLINE_THRESHOLD) {
+					status = 'offline_recent';
+				}
+
+				return `${userData.userName}|${status}`;
+			});
+
+			const onlineUsersHeader = onlineUsersArray.join(',');
+
+			console.log(`Online users in ${chatHandle}: ${onlineUsersHeader}`);
+
+			res.writeHead(200, {
+				'Content-Type': 'application/json',
+				'X-Online-Users': onlineUsersHeader
+			});
+			res.end(JSON.stringify({ success: true }));
+		} catch (error) {
+			console.error('Error processing heartbeat:', error);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid heartbeat data' }));
 		}
 	});
 }

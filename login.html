@@ -605,6 +605,26 @@
 
         .message-sender {
             font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .status-indicator {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            transition: background-color 0.3s ease;
+        }
+
+        .status-indicator.online {
+            background-color: var(--success);
+            box-shadow: 0 0 4px rgba(46, 204, 113, 0.6);
+        }
+
+        .status-indicator.offline {
+            background-color: var(--text-secondary);
         }
 
         .message-time {
@@ -1276,6 +1296,11 @@
         const renderedMessageIds = new Set();
         const activeAudioPlayers = new Map();
 
+        // Heartbeat and connection status
+        let heartbeatInterval = null;
+        let connectionStatus = 'disconnected'; // 'connected', 'connecting', 'disconnected'
+        const messageDeliveryStatus = new Map(); // Store delivery status by message ID
+
         // Initialize the app
         document.addEventListener('DOMContentLoaded', async () => {
             if (!validateCredentials()) {
@@ -1506,18 +1531,128 @@
 
             renderedMessageIds.clear();
             messagesContainer.innerHTML = '';
+            messageDeliveryStatus.clear();
 
             startPolling();
-
-            statusDot.className = 'status-dot connected';
-            statusText.textContent = 'Connected';
+            startHeartbeat();
         }
 
         function backToChatList() {
             stopPolling();
+            stopHeartbeat();
             chatContainer.style.display = 'none';
             chatListContainer.style.display = 'flex';
             renderChatList();
+        }
+
+        function startHeartbeat() {
+            if (heartbeatInterval) return;
+
+            // Send initial heartbeat
+            sendHeartbeat();
+
+            // Send heartbeat every 5 seconds
+            heartbeatInterval = setInterval(sendHeartbeat, 5000);
+        }
+
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
+
+        async function sendHeartbeat() {
+            if (!currentChat) return;
+
+            try {
+                connectionStatus = 'connecting';
+                updateConnectionStatus();
+
+                const response = await authenticatedFetch(`/heartbeat/${currentChat.handle}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userName: userName })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Heartbeat failed: ${response.status}`);
+                }
+
+                // Parse X-Online-Users header
+                const onlineUsersHeader = response.headers.get('X-Online-Users');
+                if (onlineUsersHeader) {
+                    parseOnlineUsers(onlineUsersHeader);
+                }
+
+                connectionStatus = 'connected';
+                updateConnectionStatus();
+            } catch (error) {
+                console.error('Heartbeat error:', error);
+                connectionStatus = 'disconnected';
+                updateConnectionStatus();
+            }
+        }
+
+        function parseOnlineUsers(headerValue) {
+            if (!headerValue || headerValue.trim() === '') {
+                return;
+            }
+
+            // Parse header: userName|status,userName|status,...
+            const users = headerValue.split(',').map(userStr => {
+                const [userName, status] = userStr.split('|');
+                return { userName, status };
+            });
+
+            console.log('Online users:', users);
+            // Store for future use and update indicators
+            currentChat.onlineUsers = users;
+            
+            // Update message status indicators without re-rendering
+            updateMessageStatusIndicators(users);
+        }
+
+        function updateConnectionStatus() {
+            if (connectionStatus === 'connected') {
+                statusDot.className = 'status-dot connected';
+                statusText.textContent = 'Connected';
+            } else if (connectionStatus === 'connecting') {
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Connecting...';
+            } else {
+                statusDot.className = 'status-dot disconnected';
+                statusText.textContent = 'Offline';
+            }
+        }
+
+        function updateMessageStatusIndicators(onlineUsers) {
+            // Find all status indicators with data-status-user attribute
+            const indicators = document.querySelectorAll('[data-status-user]');
+            
+            // Create a map for faster lookup
+            const userStatusMap = {};
+            onlineUsers.forEach(user => {
+                userStatusMap[user.userName] = user.status;
+            });
+            
+            // Update each indicator
+            indicators.forEach(indicator => {
+                const userName = indicator.getAttribute('data-status-user');
+                const status = userStatusMap[userName];
+                
+                if (status) {
+                    // Remove existing status classes
+                    indicator.classList.remove('online', 'offline');
+                    
+                    // Add appropriate class based on status
+                    if (status === 'online') {
+                        indicator.classList.add('online');
+                    } else {
+                        indicator.classList.add('offline');
+                    }
+                }
+            });
         }
 
         function startPolling() {
@@ -1632,7 +1767,14 @@
                     headerDiv.className = 'message-header';
                     const senderSpan = document.createElement('span');
                     senderSpan.className = 'message-sender';
-                    senderSpan.textContent = senderName;
+                    
+                    // Add status indicator with data attribute
+                    const statusIndicator = document.createElement('span');
+                    statusIndicator.className = 'status-indicator offline'; // Default to offline
+                    statusIndicator.setAttribute('data-status-user', senderName);
+                    
+                    senderSpan.appendChild(statusIndicator);
+                    senderSpan.appendChild(document.createTextNode(senderName));
                     headerDiv.appendChild(senderSpan);
                     messageBubble.appendChild(headerDiv);
                 }
