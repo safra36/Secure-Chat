@@ -1757,7 +1757,11 @@
                 try {
                     senderName = await decryptMessage(message.encryptedName, currentChat.encryptionKey);
                 } catch (err) {
-                    senderName = '[Unknown]';
+                    // Failed to decrypt sender name - skip this message entirely
+                    console.warn('Failed to decrypt sender name for message:', message.id);
+                    allMessages.push(message);
+                    renderedMessageIds.add(message.id);
+                    continue;
                 }
 
                 const isOwn = senderName === userName;
@@ -1801,7 +1805,11 @@
                         contentHtml = `<div class="message-content">${escapeHtml(decrypted)}</div>`;
                     }
                 } catch (err) {
-                    contentHtml = `<div class="message-content">[Decryption failed]</div>`;
+                    // Failed to decrypt message content - skip this message entirely
+                    console.warn('Failed to decrypt message content for message:', message.id, err);
+                    allMessages.push(message);
+                    renderedMessageIds.add(message.id);
+                    continue;
                 }
 
                 // Create message bubble
