@@ -1305,6 +1305,10 @@
         let failedAuthAttempts = 0;
         const AUTH_FAILURE_THRESHOLD = 3; // Redirect to login after 3 consecutive 401s
 
+        // Message caching with localStorage
+        const MAX_CACHED_MESSAGES_PER_CHAT = 500;
+        let lastFetchTime = 0; // Track last successful fetch timestamp for incremental updates
+
         // Initialize the app
         document.addEventListener('DOMContentLoaded', async () => {
             if (!validateCredentials()) {
@@ -1537,6 +1541,12 @@
             messagesContainer.innerHTML = '';
             messageDeliveryStatus.clear();
 
+            // Load cached messages from localStorage
+            loadCachedMessages(handle);
+            
+            // Track the last fetch time for incremental updates
+            lastFetchTime = 0;
+
             startPolling();
             startHeartbeat();
         }
@@ -1733,6 +1743,9 @@
         }
 
         async function appendMessages(messages) {
+            // Collect all messages (both cached and new) for caching
+            let allMessages = [];
+            
             for (const message of messages) {
                 if (renderedMessageIds.has(message.id)) continue;
 
@@ -1850,6 +1863,35 @@
                 }
                 const textContent = tempDiv.textContent || tempDiv.innerText || 'Media message';
                 updateLastMessage(currentChat.handle, textContent, message.timestamp);
+                
+                // Add to all messages for caching
+                allMessages.push(message);
+            }
+
+            // Save new messages to cache (merge with existing cache)
+            if (allMessages.length > 0 && currentChat) {
+                const cacheKey = `messages_${currentChat.handle}`;
+                const cachedMessagesJson = localStorage.getItem(cacheKey);
+                let existingMessages = [];
+                
+                if (cachedMessagesJson) {
+                    try {
+                        existingMessages = JSON.parse(cachedMessagesJson);
+                    } catch (e) {
+                        console.error('Error parsing cache:', e);
+                    }
+                }
+                
+                // Merge: keep existing messages and add new ones, avoiding duplicates by ID
+                const messageMap = new Map();
+                existingMessages.forEach(msg => messageMap.set(msg.id, msg));
+                allMessages.forEach(msg => messageMap.set(msg.id, msg));
+                
+                const mergedMessages = Array.from(messageMap.values()).sort((a, b) => {
+                    return new Date(a.timestamp) - new Date(b.timestamp);
+                });
+                
+                saveCachedMessages(currentChat.handle, mergedMessages);
             }
         }
 
@@ -2309,13 +2351,55 @@
             }
         }
 
-        function logout() {
-            // Call the auth.js logout function with automatic=false to show confirmation
-            window.logout(false);
-        }
 
         function saveChats() {
             localStorage.setItem('chats', JSON.stringify(chats));
+        }
+
+        // Message caching helpers
+        function loadCachedMessages(chatHandle) {
+            const cacheKey = `messages_${chatHandle}`;
+            const cachedMessagesJson = localStorage.getItem(cacheKey);
+            
+            if (!cachedMessagesJson) {
+                console.log(`No cached messages for chat: ${chatHandle}`);
+                return;
+            }
+
+            try {
+                const cachedMessages = JSON.parse(cachedMessagesJson);
+                console.log(`Loaded ${cachedMessages.length} cached messages for chat: ${chatHandle}`);
+                
+                // Render all cached messages
+                appendMessages(cachedMessages).catch(err => {
+                    console.error('Error rendering cached messages:', err);
+                });
+            } catch (error) {
+                console.error('Error loading cached messages:', error);
+            }
+        }
+
+        function saveCachedMessages(chatHandle, messages) {
+            const cacheKey = `messages_${chatHandle}`;
+            
+            try {
+                // Keep only latest MAX_CACHED_MESSAGES_PER_CHAT messages
+                const messagesToCache = messages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
+                localStorage.setItem(cacheKey, JSON.stringify(messagesToCache));
+                
+                // Also save last fetch timestamp
+                const lastFetchKey = `lastFetch_${chatHandle}`;
+                if (messages.length > 0) {
+                    const lastMessage = messages[messages.length - 1];
+                    localStorage.setItem(lastFetchKey, lastMessage.timestamp);
+                }
+            } catch (error) {
+                console.error('Error saving cached messages:', error);
+                // If storage quota exceeded, clear oldest chat cache
+                if (error.name === 'QuotaExceededError') {
+                    console.warn('localStorage quota exceeded, clearing old caches');
+                }
+            }
         }
 
         // Encryption functions
@@ -2451,3 +2535,4 @@
     </script>
 </body>
 </html>
+    </script>
