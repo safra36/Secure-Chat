@@ -304,6 +304,22 @@
             align-items: center;
             justify-content: center;
             padding: 0 6px;
+            animation: badgePulse 2s ease-in-out infinite;
+        }
+
+        @keyframes badgePulse {
+            0%, 100% {
+                transform: scale(1);
+            }
+            50% {
+                transform: scale(1.1);
+            }
+        }
+
+        .message-status-icon {
+            font-size: 12px;
+            margin-left: 6px;
+            display: inline-block;
         }
 
         .delete-btn {
@@ -1309,6 +1325,11 @@
         const MAX_CACHED_MESSAGES_PER_CHAT = 1000;
         let lastFetchTime = 0; // Track last successful fetch timestamp for incremental updates
 
+        // Chat list polling for background updates
+        let chatListPollingInterval = null;
+        let shouldPollBackgroundChats = false; // Track if we should poll other chats
+        const isChatListVisible = () => chatListContainer.style.display === 'flex';
+
         // Initialize the app
         document.addEventListener('DOMContentLoaded', async () => {
             if (!validateCredentials()) {
@@ -1394,6 +1415,7 @@
         function showChatList() {
             chatListContainer.style.display = 'flex';
             renderChatList();
+            startChatListPolling();
         }
 
         function renderChatList(filter = '') {
@@ -1433,6 +1455,10 @@
                     ? formatTime(new Date(chat.lastMessageTime))
                     : '';
 
+                const unreadBadge = chat.unreadCount && chat.unreadCount > 0 
+                    ? `<div class="unread-badge">${Math.min(chat.unreadCount, 99)}</div>`
+                    : '';
+
                 chatItem.innerHTML = `
                     <div class="chat-avatar">${avatarInitial}</div>
                     <div class="chat-info">
@@ -1442,6 +1468,7 @@
                         </div>
                         <div class="chat-preview">
                             <div class="last-message">${escapeHtml(chat.lastMessage || 'No messages yet')}</div>
+                            ${unreadBadge}
                         </div>
                     </div>
                     <button class="delete-btn" onclick="event.stopPropagation(); deleteChat('${chat.handle}')">🗑</button>
@@ -1541,6 +1568,10 @@
             messagesContainer.innerHTML = '';
             messageDeliveryStatus.clear();
 
+            // Clear unread count when opening the chat
+            currentChat.unreadCount = 0;
+            saveChats();
+
             // Load cached messages from localStorage
             loadCachedMessages(handle);
             
@@ -1557,6 +1588,8 @@
             chatContainer.style.display = 'none';
             chatListContainer.style.display = 'flex';
             renderChatList();
+            // Restart polling on the other chats when going back to list
+            startChatListPolling();
         }
 
         function startHeartbeat() {
@@ -2242,6 +2275,134 @@
             lightboxImage.src = '';
         }
 
+        // Notification sound function (Web Audio API beep)
+        function playNotificationSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const now = audioCtx.currentTime;
+                
+                // Create a simple beep: 800Hz for 150ms
+                const osc = audioCtx.createOscillator();
+                const gainNode = audioCtx.createGain();
+                
+                osc.connect(gainNode);
+                gainNode.connect(audioCtx.destination);
+                
+                osc.frequency.value = 800;
+                gainNode.gain.setValueAtTime(0.3, now);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
+                
+                osc.start(now);
+                osc.stop(now + 0.15);
+            } catch (err) {
+                console.log('Could not play notification sound:', err);
+            }
+        }
+
+        // Start polling chat list in background
+        function startChatListPolling() {
+            if (chatListPollingInterval) return;
+
+            // Poll every 12-15 seconds with some randomness
+            const pollInterval = 12000 + Math.random() * 3000;
+            chatListPollingInterval = setInterval(pollAllChatsForNewMessages, pollInterval);
+            
+            // Poll immediately
+            pollAllChatsForNewMessages();
+        }
+
+        function stopChatListPolling() {
+            if (chatListPollingInterval) {
+                clearInterval(chatListPollingInterval);
+                chatListPollingInterval = null;
+            }
+        }
+
+        async function pollAllChatsForNewMessages() {
+            // Poll all chats that are not currently being viewed
+            for (const chat of chats) {
+                if (currentChat && currentChat.handle === chat.handle) {
+                    continue; // Skip the current chat, it's already being polled
+                }
+
+                try {
+                    // Get the last message ID for this chat from cache
+                    const cacheKey = `messages_${chat.handle}`;
+                    const cachedMessagesJson = localStorage.getItem(cacheKey);
+                    let lastId = '';
+                    
+                    if (cachedMessagesJson) {
+                        try {
+                            const cachedMessages = JSON.parse(cachedMessagesJson);
+                            if (cachedMessages.length > 0) {
+                                const lastMessage = cachedMessages[cachedMessages.length - 1];
+                                lastId = lastMessage.id;
+                            }
+                        } catch (e) {
+                            console.error('Error parsing cache for polling:', e);
+                        }
+                    }
+
+                    // Fetch new messages
+                    const url = lastId 
+                        ? `/messages/${chat.handle}?after=${encodeURIComponent(lastId)}`
+                        : `/messages/${chat.handle}`;
+
+                    const response = await authenticatedFetch(url, {
+                        method: 'GET',
+                        headers: { 'Content-Type': 'application/json' }
+                    });
+
+                    if (!response.ok) {
+                        continue; // Skip this chat if fetch failed
+                    }
+
+                    const messages = await response.json();
+
+                    if (messages.length > 0) {
+                        // Cache new messages
+                        const cacheKey = `messages_${chat.handle}`;
+                        const cachedMessagesJson = localStorage.getItem(cacheKey);
+                        let existingMessages = [];
+                        
+                        if (cachedMessagesJson) {
+                            try {
+                                existingMessages = JSON.parse(cachedMessagesJson);
+                            } catch (e) {
+                                console.error('Error parsing cache:', e);
+                            }
+                        }
+
+                        // Merge messages
+                        const messageMap = new Map();
+                        existingMessages.forEach(msg => messageMap.set(msg.id, msg));
+                        messages.forEach(msg => messageMap.set(msg.id, msg));
+
+                        const mergedMessages = Array.from(messageMap.values()).sort((a, b) => {
+                            return new Date(a.timestamp) - new Date(b.timestamp);
+                        });
+
+                        saveCachedMessages(chat.handle, mergedMessages);
+
+                        // Update unread count
+                        chat.unreadCount = (chat.unreadCount || 0) + messages.length;
+
+                        // Update last message
+                        const lastMessage = messages[messages.length - 1];
+                        chat.lastMessage = 'New message...';
+                        chat.lastMessageTime = lastMessage.timestamp;
+
+                        // Play sound and update badge
+                        playNotificationSound();
+                        saveChats();
+                        renderChatList();
+                    }
+                } catch (error) {
+                    console.error(`Error polling chat ${chat.handle}:`, error);
+                }
+            }
+        }
+
         async function sendWithRetry(url, options, maxRetries = 2) {
             const maxAttempts = maxRetries + 1; // 1 initial + 2 retries = 3 total
             const delays = [500, 1000]; // Exponential backoff in milliseconds
@@ -2544,3 +2705,4 @@
 </body>
 </html>
     </script>
+</html>
