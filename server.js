@@ -628,9 +628,10 @@ function handleUploadComplete(req, res, pathname) {
 			messageContentStorage.set(contentKey, encryptedContent);
 			console.log(`Cached encrypted content for key: ${contentKey}`);
 
-			// Store compression metadata
-			messageMetadata.set(encryptedTimestamp, { isCompressed: isCompressed || false });
-			console.log(`Stored compression metadata for message ${encryptedTimestamp}: ${isCompressed}`);
+			// Store compression metadata using messageId (which is encryptedTimestamp)
+			const messageId = encryptedTimestamp;
+			messageMetadata.set(messageId, { isCompressed: isCompressed || false });
+			console.log(`Stored compression metadata for message ${messageId}: ${isCompressed}`);
 
 			// Decrypt timestamp for validation (security check)
 			try {

@@ -1523,12 +1523,22 @@
         let lastFetchTime = 0; // Track last successful fetch timestamp for incremental updates
 
         // Global polling cursors - maps chatHandle to last polled message timestamp
-        let pollingCursors = {};
+        // Load from localStorage if available
+        let pollingCursors = JSON.parse(localStorage.getItem('pollingCursors') || '{}');
 
         // Chat list polling for background updates
         let chatListPollingInterval = null;
         let shouldPollBackgroundChats = false; // Track if we should poll other chats
         const isChatListVisible = () => chatListContainer.style.display === 'flex';
+
+        // Function to persist polling cursors to localStorage
+        function savePollingCursors() {
+            try {
+                localStorage.setItem('pollingCursors', JSON.stringify(pollingCursors));
+            } catch (error) {
+                console.warn('Failed to save polling cursors:', error);
+            }
+        }
 
         // ==================== TIME SYNCHRONIZATION ====================
 
@@ -1680,6 +1690,34 @@
             const timeSinceLastSync = Date.now() - lastTimeSyncTime;
             if (timeSinceLastSync > TIME_SYNC_INTERVAL) {
                 await syncServerTime();
+            }
+        }
+
+        // Sort messages by DECRYPTED timestamp (async version for cache sorting)
+        async function sortMessagesByDecryptedTimestamp(messages) {
+            try {
+                // Create array of [message, decryptedTimestamp] pairs
+                const messagesWithTimestamps = await Promise.all(
+                    messages.map(async (msg) => {
+                        try {
+                            const timestamp = await decryptServerTimestamp(msg.encryptedTimestamp);
+                            return { message: msg, timestamp };
+                        } catch (err) {
+                            console.warn(`Failed to decrypt timestamp for message ${msg.id}, using 0`);
+                            return { message: msg, timestamp: 0 };
+                        }
+                    })
+                );
+
+                // Sort by timestamp numerically
+                messagesWithTimestamps.sort((a, b) => a.timestamp - b.timestamp);
+
+                // Return sorted messages
+                return messagesWithTimestamps.map(item => item.message);
+            } catch (error) {
+                console.error('Error sorting messages by timestamp:', error);
+                // Fallback: return unsorted messages
+                return messages;
             }
         }
 
@@ -2143,6 +2181,7 @@
                 if (newMessagesReceived && messages.length > 0) {
                     const latestMessage = messages[messages.length - 1];
                     pollingCursors[currentChat.handle] = latestMessage.id; // Use encrypted timestamp from server
+                    savePollingCursors(); // Persist to localStorage
                 }
             } catch (error) {
                 console.error('Fetch error:', error);
@@ -2152,9 +2191,12 @@
         async function appendMessages(messages) {
             // Collect all messages (both cached and new) for caching
             let allMessages = [];
+            let hasNewMessages = false;
             
             for (const message of messages) {
                 if (renderedMessageIds.has(message.id)) continue;
+
+                hasNewMessages = true;
 
                 const messageElement = document.createElement('div');
                 messageElement.className = 'message-group';
@@ -2335,9 +2377,6 @@
                 messagesContainer.appendChild(messageElement);
                 renderedMessageIds.add(message.id);
 
-                // Scroll to bottom
-                messagesContainer.scrollTop = messagesContainer.scrollHeight;
-
                 // Update last message in chat list
                 const tempDiv = document.createElement('div');
                 if (typeof contentHtml === 'string') {
@@ -2379,20 +2418,20 @@
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                 allMessages.forEach(msg => messageMap.set(msg.id, msg));
 
-                // Sort by encrypted timestamp (they maintain chronological order when encrypted)
-                const mergedMessages = Array.from(messageMap.values()).sort((a, b) => {
-                    return a.encryptedTimestamp.localeCompare(b.encryptedTimestamp);
-                });
+                // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
+                const unsortedMessages = Array.from(messageMap.values());
+                const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
 
                 // Update polling cursor to the latest message timestamp for this chat
                 if (mergedMessages.length > 0) {
                     const latestMessage = mergedMessages[mergedMessages.length - 1];
-                    pollingCursors[currentChat.handle] = latestMessage.encryptedTimestamp;
+                    pollingCursors[currentChat.handle] = latestMessage.id;
                 }
 
                 saveCachedMessages(currentChat.handle, mergedMessages);
             }
         }
+
 
         function updateLastMessage(handle, messageContent, timestamp) {
             const chat = chats.find(c => c.handle === handle);
@@ -2836,11 +2875,16 @@
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => messageMap.set(msg.id, msg));
 
-                        const mergedMessages = Array.from(messageMap.values()).sort((a, b) => {
-                            return a.encryptedTimestamp.localeCompare(b.encryptedTimestamp);
-                        });
+                        // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
+                        const unsortedMessages = Array.from(messageMap.values());
+                        const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
 
                         saveCachedMessages(chat.handle, mergedMessages);
+
+                        // Update polling cursor for this chat
+                        const latestMessage = messages[messages.length - 1];
+                        pollingCursors[chat.handle] = latestMessage.id;
+                        savePollingCursors(); // Persist to localStorage
 
                         // Update unread count
                         chat.unreadCount = (chat.unreadCount || 0) + messages.length;
@@ -3410,23 +3454,50 @@
                 // If content is compressed, decompress it first using Pako
                 if (isCompressed) {
                     try {
-                        // Convert base64 to binary
-                        const compressedBinary = atob(encryptedBase64);
-                        const compressedBytes = new Uint8Array(compressedBinary.length);
-                        for (let i = 0; i < compressedBinary.length; i++) {
-                            compressedBytes[i] = compressedBinary.charCodeAt(i);
+                        // Validate that Pako is available
+                        if (typeof pako === 'undefined') {
+                            console.warn('Pako library not available, attempting to use content as-is');
+                            // Continue with current encryptedBase64 (might fail later if actually compressed)
+                        } else {
+                            // Convert base64 to binary
+                            const compressedBinary = atob(encryptedBase64);
+                            const compressedBytes = new Uint8Array(compressedBinary.length);
+                            for (let i = 0; i < compressedBinary.length; i++) {
+                                compressedBytes[i] = compressedBinary.charCodeAt(i);
+                            }
+
+                            console.log(`Attempting to decompress ${compressedBytes.length} bytes...`);
+
+                            // Decompress using Pako (inflate) with safe error handling
+                            let decompressedArray;
+                            try {
+                                decompressedArray = pako.inflate(compressedBytes);
+                            } catch (pakoError) {
+                                // If Pako inflate fails, it might mean:
+                                // 1. Data is not actually compressed (server flag is wrong)
+                                // 2. Data is corrupted
+                                // 3. Data is using a different compression format
+                                console.warn('Pako inflate failed:', pakoError.message);
+                                console.warn('Attempting fallback: using content as-is (assuming not compressed)');
+                                
+                                // Try using the data as-is without decompression
+                                // This handles cases where the isCompressed flag is incorrect
+                                decompressedArray = compressedBytes;
+                            }
+
+                            // Convert decompressed bytes back to base64
+                            try {
+                                const decompressedBase64 = btoa(String.fromCharCode.apply(null, decompressedArray));
+                                encryptedBase64 = decompressedBase64;
+                                console.log(`Decompression complete: ${compressedBytes.length} bytes -> ${decompressedArray.length} bytes`);
+                            } catch (btoa_err) {
+                                console.error('Error converting decompressed data to base64:', btoa_err);
+                                throw new Error('Failed to encode decompressed content');
+                            }
                         }
-
-                        // Decompress using Pako (inflate)
-                        const decompressedArray = pako.inflate(compressedBytes);
-
-                        // Convert decompressed bytes back to base64
-                        const decompressedBase64 = btoa(String.fromCharCode.apply(null, decompressedArray));
-                        encryptedBase64 = decompressedBase64;
-
-                        console.log(`Decompressed content: ${compressedBytes.length} bytes -> ${decompressedArray.length} bytes`);
                     } catch (decompressErr) {
                         console.error('Decompression error:', decompressErr);
+                        showToast(`Decompression failed: ${decompressErr.message}`, 'error');
                         throw new Error('Failed to decompress content');
                     }
                 }
