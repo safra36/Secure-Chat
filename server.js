@@ -370,7 +370,7 @@ function handleHeartbeat(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const heartbeatData = JSON.parse(body);
-			const { userName } = heartbeatData;
+			const { encryptedUserName } = heartbeatData;
 
 			const now = Date.now();
 
@@ -389,16 +389,16 @@ function handleHeartbeat(req, res, pathname) {
 				}
 			}
 
-			// Update the current user's heartbeat
+			// Update the current user's heartbeat - store encrypted user name
 			chatUsers.set(userId, {
 				lastHeartbeat: now,
-				userName: userName || 'Unknown'
+				encryptedUserName: encryptedUserName || 'Unknown'
 			});
 
-			console.log(`Heartbeat from ${userId} (${userName}) in chat ${chatHandle}`);
+			console.log(`Heartbeat from ${userId} (${encryptedUserName}) in chat ${chatHandle}`);
 
 			// Build online users header
-			// Format: userName|status,userName|status,...
+			// Format: encryptedUserName|status,encryptedUserName|status,...
 			const onlineUsersArray = Array.from(chatUsers.entries()).map(([uid, userData]) => {
 				let status = 'online';
 				const timeSinceHeartbeat = now - userData.lastHeartbeat;
@@ -407,7 +407,7 @@ function handleHeartbeat(req, res, pathname) {
 					status = 'offline_recent';
 				}
 
-				return `${userData.userName}|${status}`;
+				return `${userData.encryptedUserName}|${status}`;
 			});
 
 			const onlineUsersHeader = onlineUsersArray.join(',');

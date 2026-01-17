@@ -1784,10 +1784,13 @@
                 connectionStatus = 'connecting';
                 updateConnectionStatus();
 
+                // Encrypt the userName before sending
+                const encryptedUserName = await encryptMessage(userName, currentChat.encryptionKey);
+
                 const response = await authenticatedFetch(`/heartbeat/${currentChat.handle}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userName: userName })
+                    body: JSON.stringify({ encryptedUserName: encryptedUserName })
                 });
 
                 // Check for authentication failure
@@ -1824,7 +1827,7 @@
             }
         }
 
-        function parseOnlineUsers(headerValue) {
+        async function parseOnlineUsers(headerValue) {
             if (!headerValue || headerValue.trim() === '') {
                 return;
             }
@@ -1832,11 +1835,19 @@
             // Decode header value since it was URL-encoded on the server for non-ASCII characters
             const decodedHeaderValue = decodeURIComponent(headerValue);
 
-            // Parse header: userName|status,userName|status,...
-            const users = decodedHeaderValue.split(',').map(userStr => {
-                const [userName, status] = userStr.split('|');
-                return { userName, status };
-            });
+            // Parse header: encryptedUserName|status,encryptedUserName|status,...
+            const users = await Promise.all(decodedHeaderValue.split(',').map(async (userStr) => {
+                const [encryptedUserName, status] = userStr.split('|');
+                try {
+                    // Decrypt the user name using the chat's encryption key
+                    const userName = await decryptMessage(encryptedUserName, currentChat.encryptionKey);
+                    return { userName, status };
+                } catch (err) {
+                    // If decryption fails, return the encrypted value as fallback
+                    console.warn('Failed to decrypt user name:', err);
+                    return { userName: encryptedUserName, status };
+                }
+            }));
 
             console.log('Online users:', users);
             // Store for future use and update indicators
