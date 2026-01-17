@@ -20,6 +20,10 @@ const userHeartbeats = new Map();
 // Structure: sessionId -> { chatHandle, chunks: Map(chunkIndex -> data), totalChunks, createdAt, messageType, isCompressed }
 const uploadSessions = new Map();
 
+// In-memory storage for message metadata including compression flag
+// Structure: messageId -> { isCompressed }
+const messageMetadata = new Map();
+
 // Grace period for marking users as offline (in milliseconds)
 const OFFLINE_GRACE_PERIOD = 30000; // 30 seconds
 const OFFLINE_THRESHOLD = 15000; // 15 seconds before grace period
@@ -161,7 +165,7 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	}
 
 	if (req.method === 'GET' && pathname.startsWith('/download-content/')) {
-		console.log('Handling GET /download-content/');
+		console.log(`Handling GET /download-content/`);
 		handleDownloadContent(req, res, pathname);
 		return;
 	}
@@ -590,7 +594,7 @@ function handleUploadComplete(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const completeData = JSON.parse(body);
-			const { sessionId, encryptedName, encryptedTimestamp, messageType } = completeData;
+			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed } = completeData;
 
 			const session = uploadSessions.get(sessionId);
 			if (!session) {
@@ -623,6 +627,10 @@ function handleUploadComplete(req, res, pathname) {
 			const contentKey = `${chatHandle}:${encryptedTimestamp}`;
 			messageContentStorage.set(contentKey, encryptedContent);
 			console.log(`Cached encrypted content for key: ${contentKey}`);
+
+			// Store compression metadata
+			messageMetadata.set(encryptedTimestamp, { isCompressed: isCompressed || false });
+			console.log(`Stored compression metadata for message ${encryptedTimestamp}: ${isCompressed}`);
 
 			// Decrypt timestamp for validation (security check)
 			try {
@@ -731,18 +739,21 @@ function handleUploadCancel(req, res, pathname) {
 function handleDownloadContent(req, res, pathname) {
 	console.log(`GET download-content request for path: ${pathname}`);
 
-	// Extract messageId and chatHandle from URL path
-	// Format: /download-content/messageId/chatHandle
+	// Extract chatHandle and encoded messageId from URL path
+	// Format: /download-content/chatHandle/encodedMessageId
 	const parts = pathname.split('/');
-	const messageId = parts[2];
-	const chatHandle = parts[3];
+	const chatHandle = parts[2];
+	const encodedMessageId = parts[3];
 
-	if (!messageId || !chatHandle) {
-		console.log('Message ID and chat handle are required');
+	if (!chatHandle || !encodedMessageId) {
+		console.log('Chat handle and message ID are required');
 		res.writeHead(400, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({ error: 'Message ID and chat handle are required' }));
+		res.end(JSON.stringify({ error: 'Chat handle and message ID are required' }));
 		return;
 	}
+
+	// URL-decode the messageId
+	const messageId = decodeURIComponent(encodedMessageId);
 
 	const contentKey = `${chatHandle}:${messageId}`;
 	const contentData = messageContentStorage.get(contentKey);
@@ -756,11 +767,14 @@ function handleDownloadContent(req, res, pathname) {
 
 	console.log(`Serving content for message ${messageId} (${contentData.length} bytes)`);
 
-	res.writeHead(200, {
-		'Content-Type': 'application/octet-stream',
-		'X-Content-Size': contentData.length
-	});
-	res.end(Buffer.from(contentData, 'base64'));
+	// Get compression metadata
+	const metadata = messageMetadata.get(messageId) || { isCompressed: false };
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ 
+		encryptedContent: contentData,
+		isCompressed: metadata.isCompressed
+	}));
 }
 
 // Serve static files

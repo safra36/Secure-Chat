@@ -1251,32 +1251,45 @@
 
     <script>
         // ==================== COMPRESSION UTILITIES ====================
-        
-        // Compress data using Brotli
+
+        // Compress data using Brotli via Pako
         async function compressData(data) {
             try {
-                // Initialize Brotli if not already done
-                if (typeof BrotliDecode === 'undefined') {
-                    // Fallback: if Brotli not available, return original data
-                    console.warn('Brotli library not loaded, skipping compression');
-                    return { 
-                        compressed: data, 
-                        isCompressed: false 
+                // Check if we have access to compression APIs
+                if (typeof pako === 'undefined') {
+                    console.warn('Pako library not available, skipping compression');
+                    return {
+                        compressed: data,
+                        isCompressed: false
                     };
                 }
-                
-                // For now, we'll use a simple approach since Brotli.js is primarily for decompression
-                // In production, use a compression library like pako or fflate
-                console.log('Compression would reduce size from', data.byteLength, 'bytes');
-                return { 
-                    compressed: data, 
-                    isCompressed: false 
+
+                // Skip compression for small data (under 1KB) to avoid overhead
+                if (data.byteLength < 1024) {
+                    console.log(`Data too small for compression (${data.byteLength} bytes), skipping`);
+                    return {
+                        compressed: data,
+                        isCompressed: false
+                    };
+                }
+
+                console.log(`Compressing ${data.byteLength} bytes with Brotli...`);
+
+                // Use Pako for compression - it provides good compression ratios
+                const compressedArray = pako.deflate(new Uint8Array(data));
+                const compressionRatio = (data.byteLength - compressedArray.length) / data.byteLength * 100;
+
+                console.log(`✅ Compression complete: ${data.byteLength} → ${compressedArray.length} bytes (${compressionRatio.toFixed(1)}% reduction)`);
+
+                return {
+                    compressed: compressedArray.buffer, // Return as ArrayBuffer
+                    isCompressed: true
                 };
             } catch (error) {
                 console.error('Compression error:', error);
-                return { 
-                    compressed: data, 
-                    isCompressed: false 
+                return {
+                    compressed: data,
+                    isCompressed: false
                 };
             }
         }
@@ -2174,6 +2187,7 @@
 
                 const isVoice = message.type === 'voice';
                 const isImage = message.type === 'image';
+                const isMedia = isVoice || isImage;
 
                 let contentHtml = '';
 
@@ -2182,12 +2196,12 @@
                         // Check if content is already cached (full content, not placeholder)
                         const cachedContent = localStorage.getItem(`content_${message.id}`);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
-                            // Content is cached, decrypt and render
+                            // Content is cached, decrypt and render immediately
                             const decryptedAudioBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
                             const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
                             const audioUrl = URL.createObjectURL(audioBlob);
                             const audio = new Audio(audioUrl);
-                            
+
                             await new Promise(resolve => {
                                 audio.addEventListener('loadedmetadata', () => {
                                     resolve(audio.duration);
@@ -2199,58 +2213,62 @@
 
                             const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
                             contentHtml = voicePlayer;
-                        } else if (message.encryptedContent === null) {
-                            // Deferred content: show download button only for receivers
-                            // Senders should NOT show download button - their content should be cached
+                        } else if (message.encryptedContent === null && !isOwn) {
+                            // Only receivers see download button for deferred content
                             contentHtml = createDeferredContentButton(message.id, 'voice');
-                        } else if (isOwn) {
-                            // Sender: cache it locally and render immediately
-                            localStorage.setItem(`content_${message.id}`, message.encryptedContent);
-                            const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
-                            const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
-                            const audioUrl = URL.createObjectURL(audioBlob);
-                            const audio = new Audio(audioUrl);
-                            
-                            await new Promise(resolve => {
-                                audio.addEventListener('loadedmetadata', () => {
-                                    resolve(audio.duration);
-                                });
-                                audio.addEventListener('error', () => {
-                                    resolve(0);
-                                });
-                            });
-
-                            const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
-                            contentHtml = voicePlayer;
                         } else {
-                            // Receiver: show download button for deferred content
-                            contentHtml = createDeferredContentButton(message.id, 'voice');
+                            // Sender has content in message.encryptedContent OR receiver still downloading
+                            if (message.encryptedContent) {
+                                // Cache and render immediately
+                                localStorage.setItem(`content_${message.id}`, message.encryptedContent);
+                                const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                                const audioUrl = URL.createObjectURL(audioBlob);
+                                const audio = new Audio(audioUrl);
+
+                                await new Promise(resolve => {
+                                    audio.addEventListener('loadedmetadata', () => {
+                                        resolve(audio.duration);
+                                    });
+                                    audio.addEventListener('error', () => {
+                                        resolve(0);
+                                    });
+                                });
+
+                                const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                                contentHtml = voicePlayer;
+                            } else {
+                                // Fallback: no content available
+                                contentHtml = `<div class="message-error">🎤 Voice message unavailable</div>`;
+                            }
                         }
                     } else if (isImage) {
                         // Check if content is already cached
                         const cachedContent = localStorage.getItem(`content_${message.id}`);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
-                            // Content is cached, decrypt and render
+                            // Content is cached, decrypt and render immediately
                             const decryptedImageBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
                             const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
                             const imageUrl = URL.createObjectURL(imageBlob);
 
                             contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
-                        } else if (message.encryptedContent === null) {
-                            // Deferred content: show download button only for receivers
-                            // Senders should NOT show download button - their content should be cached
+                        } else if (message.encryptedContent === null && !isOwn) {
+                            // Only receivers see download button for deferred content
                             contentHtml = createDeferredContentButton(message.id, 'image');
-                        } else if (isOwn) {
-                            // Sender: cache it locally and render immediately
-                            localStorage.setItem(`content_${message.id}`, message.encryptedContent);
-                            const decryptedImageBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
-                            const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
-                            const imageUrl = URL.createObjectURL(imageBlob);
-
-                            contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
                         } else {
-                            // Receiver: show download button for deferred content
-                            contentHtml = createDeferredContentButton(message.id, 'image');
+                            // Sender has content in message.encryptedContent OR receiver still downloading
+                            if (message.encryptedContent) {
+                                // Cache and render immediately
+                                localStorage.setItem(`content_${message.id}`, message.encryptedContent);
+                                const decryptedImageBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                                const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
+                                const imageUrl = URL.createObjectURL(imageBlob);
+
+                                contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
+                            } else {
+                                // Fallback: no content available
+                                contentHtml = `<div class="message-error">🖼️ Image unavailable</div>`;
+                            }
                         }
                     } else {
                         const decrypted = await decryptMessage(message.encryptedContent, currentChat.encryptionKey);
@@ -2936,15 +2954,28 @@
             }
         }
 
+        // Global flag to prevent race conditions
+        let isUploading = false;
+        let currentUploadSessionId = null;
+
         async function sendImageChunked() {
             if (!selectedImage || !currentChat) {
                 showToast('No image selected', 'error');
                 return;
             }
 
+            if (isUploading) {
+                showToast('Upload already in progress', 'error');
+                return;
+            }
+
+            isUploading = true;
+            const uploader = new ChunkedUploader();
+            currentUploadSessionId = uploader.sessionId;
+
             try {
                 showToast('Uploading image...', 'info');
-                
+
                 // Convert base64 to binary
                 const base64Data = selectedImage.split(',')[1];
                 const binaryString = atob(base64Data);
@@ -2956,7 +2987,7 @@
 
                 // 1. Encrypt the image
                 const encryptedImage = await encryptBinary(imageData, currentChat.encryptionKey);
-                
+
                 // Convert encrypted data back to binary
                 const encryptedBinaryString = atob(encryptedImage);
                 const encryptedBytes = new Uint8Array(encryptedBinaryString.length);
@@ -2968,7 +2999,7 @@
                 const compressionResult = await compressData(encryptedBytes.buffer);
                 const compressedData = compressionResult.compressed;
                 const isCompressed = compressionResult.isCompressed;
-                
+
                 console.log(`Compression: ${encryptedBytes.buffer.byteLength} bytes -> ${compressedData.byteLength} bytes (compressed: ${isCompressed})`);
 
                 // Convert compressed data back to binary if needed
@@ -2982,16 +3013,21 @@
                     finalData = compressedBytes.buffer;
                 }
 
-                // 3. Chunk and upload
-                const uploader = new ChunkedUploader();
+                // 3. Chunk and upload with progress
                 await uploader.uploadChunked(
                     currentChat.handle,
                     finalData,
                     'image',
                     (progress) => {
                         console.log(`Upload progress: ${progress.toFixed(0)}%`);
+                        // Could show progress in UI here
                     }
                 );
+
+                // Check if upload was cancelled
+                if (currentUploadSessionId !== uploader.sessionId) {
+                    throw new Error('Upload was cancelled');
+                }
 
                 // Finalize upload
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
@@ -3008,7 +3044,6 @@
                 );
 
                 // CACHE THE ENCRYPTED IMAGE LOCALLY FOR SENDER
-                // Use the messageId from the server response
                 const actualMessageId = result.messageId;
                 localStorage.setItem(`content_${actualMessageId}`, encryptedImage);
 
@@ -3017,7 +3052,23 @@
                 fetchMessages();
             } catch (error) {
                 console.error('Image upload error:', error);
+
+                // Try to cancel the upload if it's still active
+                if (uploader && uploader.sessionId === currentUploadSessionId) {
+                    try {
+                        await uploader.cancel(currentChat.handle);
+                    } catch (cancelError) {
+                        console.error('Failed to cancel upload:', cancelError);
+                    }
+                }
+
                 showToast('Failed to send image', 'error');
+
+                // Clean up on failure
+                cleanupFailedUpload(uploader);
+            } finally {
+                isUploading = false;
+                currentUploadSessionId = null;
             }
         }
 
@@ -3077,13 +3128,17 @@
                 await ensureTimeSynced();
                 const currentTime = getSyncedServerTime();
                 const encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
-                await uploader.finalize(
+                const result = await uploader.finalize(
                     currentChat.handle,
                     encryptedName,
                     encryptedTimestamp,
                     'voice',
                     isCompressed
                 );
+
+                // CACHE THE ENCRYPTED AUDIO LOCALLY FOR SENDER
+                const actualMessageId = result.messageId;
+                localStorage.setItem(`content_${actualMessageId}`, encryptedAudio);
 
                 showToast('Voice message sent successfully!', 'success');
                 fetchMessages();
@@ -3336,8 +3391,11 @@
                     btn.disabled = true;
                 }
 
-                // Download encrypted content from server
-                const response = await authenticatedFetch(`/download-content/${messageId}/${currentChat.handle}`, {
+                // URL-encode the messageId to handle special characters
+                const encodedMessageId = encodeURIComponent(messageId);
+
+                // Download encrypted content from server (NEW FORMAT: /download-content/chatHandle/encodedMessageId)
+                const response = await authenticatedFetch(`/download-content/${currentChat.handle}/${encodedMessageId}`, {
                     method: 'GET'
                 });
 
@@ -3345,10 +3403,35 @@
                     throw new Error(`Download failed: ${response.status}`);
                 }
 
-                const encryptedData = await response.arrayBuffer();
-                const encryptedBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedData)));
+                const data = await response.json();
+                let encryptedBase64 = data.encryptedContent;
+                const isCompressed = data.isCompressed || false;
 
-                // Cache the encrypted content
+                // If content is compressed, decompress it first using Pako
+                if (isCompressed) {
+                    try {
+                        // Convert base64 to binary
+                        const compressedBinary = atob(encryptedBase64);
+                        const compressedBytes = new Uint8Array(compressedBinary.length);
+                        for (let i = 0; i < compressedBinary.length; i++) {
+                            compressedBytes[i] = compressedBinary.charCodeAt(i);
+                        }
+
+                        // Decompress using Pako (inflate)
+                        const decompressedArray = pako.inflate(compressedBytes);
+
+                        // Convert decompressed bytes back to base64
+                        const decompressedBase64 = btoa(String.fromCharCode.apply(null, decompressedArray));
+                        encryptedBase64 = decompressedBase64;
+
+                        console.log(`Decompressed content: ${compressedBytes.length} bytes -> ${decompressedArray.length} bytes`);
+                    } catch (decompressErr) {
+                        console.error('Decompression error:', decompressErr);
+                        throw new Error('Failed to decompress content');
+                    }
+                }
+
+                // Cache the encrypted content (now decompressed)
                 localStorage.setItem(`content_${messageId}`, encryptedBase64);
 
                 showToast(`${contentType === 'voice' ? 'Voice' : 'Image'} cached!`, 'success');
@@ -3431,6 +3514,51 @@
                 }
             }
         }
+
+        // Cleanup function for failed uploads
+        function cleanupFailedUpload(uploader) {
+            try {
+                // Clean up image selection on failure
+                window.removeImage();
+
+                // Clear any upload state
+                localStorage.removeItem(`upload_session_${uploader?.sessionId}`);
+            } catch (error) {
+                console.error('Error during upload cleanup:', error);
+            }
+        }
+
+        // Enhanced voice message sending with race condition protection
+        async function sendVoiceMessageWithRetry(audioBlob) {
+            // Prevent concurrent voice message sends
+            if (window.isVoiceUploading) {
+                showToast('Voice upload already in progress', 'error');
+                return;
+            }
+
+            window.isVoiceUploading = true;
+
+            try {
+                await sendVoiceMessage(audioBlob);
+            } finally {
+                window.isVoiceUploading = false;
+            }
+        }
+
+        // Override the original sendVoiceMessage to use the retry wrapper
+        const originalSendVoiceMessage = sendVoiceMessage;
+        sendVoiceMessage = async function(audioBlob) {
+            if (window.isVoiceUploading) {
+                showToast('Voice upload already in progress', 'error');
+                return;
+            }
+            window.isVoiceUploading = true;
+            try {
+                await originalSendVoiceMessage(audioBlob);
+            } finally {
+                window.isVoiceUploading = false;
+            }
+        };
     </script>
 </body>
 </html>
