@@ -8,6 +8,10 @@ const crypto = require('crypto');
 // In-memory storage for messages (in production, use a database)
 const messagesStorage = new Map();
 
+// In-memory storage for message content (for deferred downloads)
+// Structure: messageId -> { chatHandle, content, createdAt }
+const messageContentStorage = new Map();
+
 // In-memory storage for user heartbeats and online status
 // Structure: chatHandle -> userId -> { lastHeartbeat, userName }
 const userHeartbeats = new Map();
@@ -146,6 +150,12 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	if (req.method === 'POST' && pathname.startsWith('/upload-cancel/')) {
 		console.log('Handling POST /upload-cancel/');
 		handleUploadCancel(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'GET' && pathname.startsWith('/download-content/')) {
+		console.log('Handling GET /download-content/');
+		handleDownloadContent(req, res, pathname);
 		return;
 	}
 
@@ -302,10 +312,18 @@ function handleSendMessage(req, res, pathname) {
 			messagesStorage.get(chatHandle).push(message);
 			console.log(`Stored message for chat handle: ${chatHandle}`);
 
+			// Store encrypted content for deferred downloads
+			const contentKey = `${chatHandle}:${message.id}`;
+			messageContentStorage.set(contentKey, messageData.content);
+			console.log(`Cached content for message ${message.id}`);
+
 			// Keep only last 100 messages
 			const chatMessages = messagesStorage.get(chatHandle);
 			if (chatMessages.length > 100) {
-				chatMessages.shift();
+				const removedMsg = chatMessages.shift();
+				// Also remove from content storage
+				const oldContentKey = `${chatHandle}:${removedMsg.id}`;
+				messageContentStorage.delete(oldContentKey);
 				console.log(`Trimmed messages for chat handle: ${chatHandle}`);
 			}
 
@@ -548,11 +566,16 @@ function handleUploadComplete(req, res, pathname) {
 			// Combine all chunks into single buffer
 			const encryptedContent = Buffer.concat(assembledChunks).toString('base64');
 
-			// Create message object
+			// Store encrypted content for deferred downloads using composite key
+			const contentKey = `${chatHandle}:${timestamp}`;
+			messageContentStorage.set(contentKey, encryptedContent);
+			console.log(`Cached encrypted content for key: ${contentKey}`);
+
+			// Create message object WITHOUT the full encrypted content (it's stored separately for deferred loading)
 			const message = {
 				sender: null, // Will use encryptedName for sender
 				encryptedName: encryptedName,
-				encryptedContent: encryptedContent,
+				encryptedContent: null, // Content is stored separately, not in message
 				timestamp: timestamp,
 				type: messageType || 'file',
 				id: timestamp
@@ -568,7 +591,10 @@ function handleUploadComplete(req, res, pathname) {
 			// Keep only last 100 messages
 			const chatMessages = messagesStorage.get(chatHandle);
 			if (chatMessages.length > 100) {
-				chatMessages.shift();
+				const removedMsg = chatMessages.shift();
+				// Also remove from content storage
+				const oldContentKey = `${chatHandle}:${removedMsg.id}`;
+				messageContentStorage.delete(oldContentKey);
 				console.log(`Trimmed messages for chat handle: ${chatHandle}`);
 			}
 
@@ -636,6 +662,42 @@ function handleUploadCancel(req, res, pathname) {
 			res.end(JSON.stringify({ error: 'Failed to cancel upload' }));
 		}
 	});
+}
+
+// Handle download content request - serves deferred binary data
+function handleDownloadContent(req, res, pathname) {
+	console.log(`GET download-content request for path: ${pathname}`);
+
+	// Extract messageId and chatHandle from URL path
+	// Format: /download-content/messageId/chatHandle
+	const parts = pathname.split('/');
+	const messageId = parts[2];
+	const chatHandle = parts[3];
+
+	if (!messageId || !chatHandle) {
+		console.log('Message ID and chat handle are required');
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Message ID and chat handle are required' }));
+		return;
+	}
+
+	const contentKey = `${chatHandle}:${messageId}`;
+	const contentData = messageContentStorage.get(contentKey);
+
+	if (!contentData) {
+		console.log(`Content not found for key: ${contentKey}`);
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Content not found' }));
+		return;
+	}
+
+	console.log(`Serving content for message ${messageId} (${contentData.length} bytes)`);
+
+	res.writeHead(200, {
+		'Content-Type': 'application/octet-stream',
+		'X-Content-Size': contentData.length
+	});
+	res.end(Buffer.from(contentData, 'base64'));
 }
 
 // Serve static files
@@ -719,4 +781,3 @@ process.on('SIGINT', () => {
 	console.log('\nShutting down server...');
 	process.exit(0);
 });
-

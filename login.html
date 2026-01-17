@@ -1981,39 +1981,95 @@
 
                 try {
                     if (isVoice) {
-                        const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
-                        const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
-                        const audioUrl = URL.createObjectURL(audioBlob);
-                        const audio = new Audio(audioUrl);
-                        
-                        // Wait for metadata to get duration
-                        await new Promise(resolve => {
-                            audio.addEventListener('loadedmetadata', () => {
-                                resolve(audio.duration);
+                        // Check if content is already cached (full content, not placeholder)
+                        const cachedContent = localStorage.getItem(`content_${message.id}`);
+                        if (cachedContent && cachedContent !== 'PLACEHOLDER') {
+                            // Content is cached, decrypt and render
+                            const decryptedAudioBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
+                            const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                            const audioUrl = URL.createObjectURL(audioBlob);
+                            const audio = new Audio(audioUrl);
+                            
+                            await new Promise(resolve => {
+                                audio.addEventListener('loadedmetadata', () => {
+                                    resolve(audio.duration);
+                                });
+                                audio.addEventListener('error', () => {
+                                    resolve(0);
+                                });
                             });
-                            audio.addEventListener('error', () => {
-                                resolve(0);
-                            });
-                        });
 
-                        const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
-                        contentHtml = voicePlayer;
+                            const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                            contentHtml = voicePlayer;
+                        } else if (message.encryptedContent === null) {
+                            // Deferred content: show download button only for receivers
+                            // Senders should NOT show download button - their content should be cached
+                            contentHtml = createDeferredContentButton(message.id, 'voice');
+                        } else if (isOwn) {
+                            // Sender: cache it locally and render immediately
+                            localStorage.setItem(`content_${message.id}`, message.encryptedContent);
+                            const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                            const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                            const audioUrl = URL.createObjectURL(audioBlob);
+                            const audio = new Audio(audioUrl);
+                            
+                            await new Promise(resolve => {
+                                audio.addEventListener('loadedmetadata', () => {
+                                    resolve(audio.duration);
+                                });
+                                audio.addEventListener('error', () => {
+                                    resolve(0);
+                                });
+                            });
+
+                            const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                            contentHtml = voicePlayer;
+                        } else {
+                            // Receiver: show download button for deferred content
+                            contentHtml = createDeferredContentButton(message.id, 'voice');
+                        }
                     } else if (isImage) {
-                        const decryptedImageBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
-                        const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
-                        const imageUrl = URL.createObjectURL(imageBlob);
+                        // Check if content is already cached
+                        const cachedContent = localStorage.getItem(`content_${message.id}`);
+                        if (cachedContent && cachedContent !== 'PLACEHOLDER') {
+                            // Content is cached, decrypt and render
+                            const decryptedImageBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
+                            const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
+                            const imageUrl = URL.createObjectURL(imageBlob);
 
-                        contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
+                            contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
+                        } else if (message.encryptedContent === null) {
+                            // Deferred content: show download button only for receivers
+                            // Senders should NOT show download button - their content should be cached
+                            contentHtml = createDeferredContentButton(message.id, 'image');
+                        } else if (isOwn) {
+                            // Sender: cache it locally and render immediately
+                            localStorage.setItem(`content_${message.id}`, message.encryptedContent);
+                            const decryptedImageBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                            const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
+                            const imageUrl = URL.createObjectURL(imageBlob);
+
+                            contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
+                        } else {
+                            // Receiver: show download button for deferred content
+                            contentHtml = createDeferredContentButton(message.id, 'image');
+                        }
                     } else {
                         const decrypted = await decryptMessage(message.encryptedContent, currentChat.encryptionKey);
                         contentHtml = `<div class="message-content">${escapeHtml(decrypted)}</div>`;
                     }
                 } catch (err) {
-                    // Failed to decrypt message content - skip this message entirely
-                    console.warn('Failed to decrypt message content for message:', message.id, err);
-                    allMessages.push(message);
-                    renderedMessageIds.add(message.id);
-                    continue;
+                    // For deferred content, just show the download button
+                    if (isVoice || isImage) {
+                        const contentType = isVoice ? 'voice' : 'image';
+                        contentHtml = createDeferredContentButton(message.id, contentType);
+                    } else {
+                        // Failed to decrypt message content - skip this message entirely
+                        console.warn('Failed to decrypt message content for message:', message.id, err);
+                        allMessages.push(message);
+                        renderedMessageIds.add(message.id);
+                        continue;
+                    }
                 }
 
                 // Create message bubble
@@ -2708,12 +2764,18 @@
 
                 // Finalize upload
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
-                await uploader.finalize(
+                const messageId = new Date().toISOString();
+                const result = await uploader.finalize(
                     currentChat.handle,
                     encryptedName,
                     'image',
                     isCompressed
                 );
+
+                // CACHE THE ENCRYPTED IMAGE LOCALLY FOR SENDER
+                // Use the messageId from the server response
+                const actualMessageId = result.messageId;
+                localStorage.setItem(`content_${actualMessageId}`, encryptedImage);
 
                 showToast('Image sent successfully!', 'success');
                 window.removeImage();
@@ -2971,6 +3033,164 @@
                 );
             } catch (err) {
                 throw err;
+            }
+        }
+
+        // Create a deferred content button for images/voice that need downloading
+        function createDeferredContentButton(messageId, contentType) {
+            const container = document.createElement('div');
+            container.className = 'deferred-content';
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+            container.style.justifyContent = 'center';
+            container.style.padding = '12px';
+            container.style.background = 'rgba(0, 0, 0, 0.1)';
+            container.style.borderRadius = '8px';
+            container.style.minHeight = '60px';
+            container.style.gap = '8px';
+            container.style.flexDirection = 'column';
+
+            const label = document.createElement('div');
+            label.textContent = contentType === 'voice' ? '🎤 Voice message' : '🖼️ Image';
+            label.style.fontSize = '14px';
+            label.style.color = 'inherit';
+
+            const btn = document.createElement('button');
+            btn.textContent = '⬇️ Download';
+            btn.style.padding = '6px 12px';
+            btn.style.background = 'rgba(79, 195, 247, 0.2)';
+            btn.style.border = '1px solid rgba(79, 195, 247, 0.4)';
+            btn.style.color = 'inherit';
+            btn.style.borderRadius = '6px';
+            btn.style.cursor = 'pointer';
+            btn.style.fontSize = '12px';
+            btn.style.transition = 'all 0.3s ease';
+
+            btn.addEventListener('mouseover', () => {
+                btn.style.background = 'rgba(79, 195, 247, 0.3)';
+            });
+
+            btn.addEventListener('mouseout', () => {
+                btn.style.background = 'rgba(79, 195, 247, 0.2)';
+            });
+
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                await downloadDeferredContent(messageId, contentType, btn);
+            });
+
+            container.appendChild(label);
+            container.appendChild(btn);
+
+            return container;
+        }
+
+        // Download deferred content from server
+        async function downloadDeferredContent(messageId, contentType, downloadBtn) {
+            if (!currentChat) return;
+
+            let btn = downloadBtn;
+            const originalText = btn ? btn.textContent : '⬇️ Download';
+
+            try {
+                if (btn) {
+                    btn.textContent = '⏳ Downloading...';
+                    btn.disabled = true;
+                }
+
+                // Download encrypted content from server
+                const response = await authenticatedFetch(`/download-content/${messageId}/${currentChat.handle}`, {
+                    method: 'GET'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Download failed: ${response.status}`);
+                }
+
+                const encryptedData = await response.arrayBuffer();
+                const encryptedBase64 = btoa(String.fromCharCode(...new Uint8Array(encryptedData)));
+
+                // Cache the encrypted content
+                localStorage.setItem(`content_${messageId}`, encryptedBase64);
+
+                showToast(`${contentType === 'voice' ? 'Voice' : 'Image'} cached!`, 'success');
+
+                // Re-render the message with actual content
+                const messageGroup = document.querySelector(`[data-message-id="${messageId}"]`);
+                if (messageGroup) {
+                    const messageBubble = messageGroup.querySelector('.message');
+                    if (messageBubble) {
+                        try {
+                            // Find the deferred content element to replace
+                            const deferredElement = messageBubble.querySelector('.deferred-content');
+                            
+                            if (!deferredElement) {
+                                console.warn('Deferred element not found');
+                                if (btn) {
+                                    btn.textContent = originalText;
+                                    btn.disabled = false;
+                                }
+                                return;
+                            }
+                            
+                            if (contentType === 'voice') {
+                                const decryptedAudioBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                                const audioUrl = URL.createObjectURL(audioBlob);
+                                const audio = new Audio(audioUrl);
+                                
+                                await new Promise(resolve => {
+                                    audio.addEventListener('loadedmetadata', () => {
+                                        resolve(audio.duration);
+                                    });
+                                    audio.addEventListener('error', () => {
+                                        resolve(0);
+                                    });
+                                });
+
+                                const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                                
+                                // Replace the deferred element with the voice player
+                                if (deferredElement.parentElement) {
+                                    deferredElement.parentElement.replaceChild(voicePlayer, deferredElement);
+                                }
+                            } else if (contentType === 'image') {
+                                const decryptedImageBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
+                                const imageUrl = URL.createObjectURL(imageBlob);
+
+                                const imgHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
+                                
+                                // Replace the deferred element with new image content
+                                const newContentDiv = document.createElement('div');
+                                newContentDiv.innerHTML = imgHtml;
+                                
+                                if (deferredElement.parentElement) {
+                                    deferredElement.parentElement.replaceChild(newContentDiv, deferredElement);
+                                }
+                            }
+                        } catch (err) {
+                            console.error('Error rendering downloaded content:', err);
+                            showToast('Error displaying content', 'error');
+                            if (btn) {
+                                btn.textContent = originalText;
+                                btn.disabled = false;
+                            }
+                        }
+                    }
+                }
+
+                if (btn) {
+                    btn.textContent = originalText;
+                    btn.disabled = false;
+                }
+            } catch (error) {
+                console.error('Download error:', error);
+                showToast(`Failed to download ${contentType}`, 'error');
+                if (btn) {
+                    btn.textContent = '⬇️ Download';
+                    btn.disabled = false;
+                }
             }
         }
     </script>
