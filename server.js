@@ -253,18 +253,44 @@ function handleGetMessages(req, res, pathname) {
 		`Total stored messages for "${chatHandle}": ${allMessages.length}`,
 	);
 
-	// If an "after" id is provided, filter out earlier messages
+	// If an "after" id is provided, filter out earlier messages using chronological comparison
 	let filteredMessages;
 	if (after) {
-		filteredMessages = allMessages.filter((msg) => msg.id > after);
-		console.log(
-			`Filtering after ${after}: ${filteredMessages.length} new messages`,
-		);
+		try {
+			const afterTimestamp = decryptTimestamp(after);
+			filteredMessages = allMessages.filter((msg) => {
+				try {
+					const msgTimestamp = decryptTimestamp(msg.encryptedTimestamp);
+					return msgTimestamp > afterTimestamp;
+				} catch (err) {
+					console.warn('Skipping message with invalid timestamp:', err);
+					return false;
+				}
+			});
+			console.log(
+				`Filtering after timestamp ${afterTimestamp}: ${filteredMessages.length} new messages`,
+			);
+		} catch (err) {
+			console.warn('Failed to decrypt after parameter, returning all messages:', err);
+			filteredMessages = allMessages;
+		}
 	} else {
 		filteredMessages = allMessages;
 	}
 
-	// Send the (possibly filtered) list
+	// Sort messages chronologically by decrypted timestamp
+	filteredMessages.sort((a, b) => {
+		try {
+			const aTime = decryptTimestamp(a.encryptedTimestamp);
+			const bTime = decryptTimestamp(b.encryptedTimestamp);
+			return aTime - bTime;
+		} catch (err) {
+			console.warn('Sort error for messages:', err);
+			return 0; // Keep relative order if decryption fails
+		}
+	});
+
+	// Send the (filtered and sorted) list
 	res.writeHead(200, { 'Content-Type': 'application/json' });
 	res.end(JSON.stringify(filteredMessages));
 }

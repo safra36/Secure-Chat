@@ -2107,7 +2107,7 @@
                 if (response.status === 401) {
                     failedAuthAttempts++;
                     console.warn(`Authentication failed. Attempts: ${failedAuthAttempts}/${AUTH_FAILURE_THRESHOLD}`);
-                    
+
                     if (failedAuthAttempts >= AUTH_FAILURE_THRESHOLD) {
                         console.error('Persistent authentication failures detected. Redirecting to login...');
                         logout(true); // Automatic logout without confirmation
@@ -2123,7 +2123,14 @@
                 }
 
                 const messages = await response.json();
+                const newMessagesReceived = messages.length > 0;
                 await appendMessages(messages);
+
+                // Update polling cursor immediately after receiving new messages (before next fetch)
+                if (newMessagesReceived && messages.length > 0) {
+                    const latestMessage = messages[messages.length - 1];
+                    pollingCursors[currentChat.handle] = latestMessage.id; // Use encrypted timestamp from server
+                }
             } catch (error) {
                 console.error('Fetch error:', error);
             }
