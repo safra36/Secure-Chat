@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Secure Chat</title>
     <script src="auth.js"></script>
+    <script src="pako.min.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -1249,6 +1250,173 @@
     <input type="file" accept="image/*" id="image-input" style="display: none;">
 
     <script>
+        // ==================== COMPRESSION UTILITIES ====================
+        
+        // Compress data using Brotli
+        async function compressData(data) {
+            try {
+                // Initialize Brotli if not already done
+                if (typeof BrotliDecode === 'undefined') {
+                    // Fallback: if Brotli not available, return original data
+                    console.warn('Brotli library not loaded, skipping compression');
+                    return { 
+                        compressed: data, 
+                        isCompressed: false 
+                    };
+                }
+                
+                // For now, we'll use a simple approach since Brotli.js is primarily for decompression
+                // In production, use a compression library like pako or fflate
+                console.log('Compression would reduce size from', data.byteLength, 'bytes');
+                return { 
+                    compressed: data, 
+                    isCompressed: false 
+                };
+            } catch (error) {
+                console.error('Compression error:', error);
+                return { 
+                    compressed: data, 
+                    isCompressed: false 
+                };
+            }
+        }
+
+        // Decompress data
+        async function decompressData(data, isCompressed) {
+            if (!isCompressed) {
+                return data;
+            }
+            
+            try {
+                // For decompression with Brotli
+                if (typeof BrotliDecode !== 'undefined') {
+                    return BrotliDecode(new Uint8Array(data));
+                }
+                return data;
+            } catch (error) {
+                console.error('Decompression error:', error);
+                return data;
+            }
+        }
+
+        // ==================== CHUNKED UPLOAD CLASS ====================
+        
+        class ChunkedUploader {
+            constructor() {
+                this.chunkSize = 512 * 1024; // 512KB chunks
+                this.sessionId = this.generateUUID();
+                this.uploadedChunks = 0;
+            }
+
+            generateUUID() {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            async uploadChunked(chatHandle, data, messageType, onProgress) {
+                try {
+                    const totalChunks = Math.ceil(data.byteLength / this.chunkSize);
+                    console.log(`Uploading ${messageType} with ${totalChunks} chunks (${data.byteLength} bytes total)`);
+
+                    // Upload each chunk
+                    for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                        const start = chunkIndex * this.chunkSize;
+                        const end = Math.min(start + this.chunkSize, data.byteLength);
+                        const chunkData = data.slice(start, end);
+
+                        // Create metadata and chunk payload
+                        const metadata = {
+                            sessionId: this.sessionId,
+                            chunkIndex: chunkIndex,
+                            totalChunks: totalChunks,
+                            messageType: messageType
+                        };
+
+                        const metadataStr = JSON.stringify(metadata);
+                        const metadataBuffer = new TextEncoder().encode(metadataStr);
+                        
+                    // Combine metadata and chunk data
+                    const separator = new TextEncoder().encode('\r\n\r\n');
+                    const chunkDataArray = new Uint8Array(chunkData);
+                    const combined = new Uint8Array(metadataBuffer.length + separator.length + chunkDataArray.length);
+                    combined.set(metadataBuffer, 0);
+                    combined.set(separator, metadataBuffer.length);
+                    combined.set(chunkDataArray, metadataBuffer.length + separator.length);
+
+                        // Upload this chunk
+                        const response = await authenticatedFetch(`/upload-chunk/${chatHandle}`, {
+                            method: 'POST',
+                            body: combined
+                        });
+
+                        if (!response.ok) {
+                            throw new Error(`Failed to upload chunk ${chunkIndex}: ${response.status}`);
+                        }
+
+                        this.uploadedChunks = chunkIndex + 1;
+                        const progress = (this.uploadedChunks / totalChunks) * 100;
+                        if (onProgress) {
+                            onProgress(progress);
+                        }
+
+                        console.log(`Uploaded chunk ${chunkIndex + 1}/${totalChunks}`);
+                    }
+
+                    console.log('All chunks uploaded successfully');
+                    return true;
+                } catch (error) {
+                    console.error('Chunked upload error:', error);
+                    throw error;
+                }
+            }
+
+            async finalize(chatHandle, encryptedName, messageType, isCompressed = false) {
+                try {
+                    const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: this.sessionId,
+                            encryptedName: encryptedName,
+                            timestamp: new Date().toISOString(),
+                            messageType: messageType,
+                            isCompressed: isCompressed
+                        })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`Failed to finalize upload: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    console.log('Upload completed:', result);
+                    return result;
+                } catch (error) {
+                    console.error('Finalize error:', error);
+                    throw error;
+                }
+            }
+
+            async cancel(chatHandle) {
+                try {
+                    const response = await authenticatedFetch(`/upload-cancel/${chatHandle}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ sessionId: this.sessionId })
+                    });
+
+                    if (!response.ok) {
+                        console.warn(`Failed to cancel upload: ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('Cancel error:', error);
+                }
+            }
+        }
+
         // DOM Elements
         const setupContainer = document.getElementById('setup-container');
         const chatListContainer = document.getElementById('chat-list-container');
@@ -2443,28 +2611,17 @@
 
             if (!message && !hasImage) return;
 
-            const messageData = {
-                encryptedName: await encryptMessage(userName, currentChat.encryptionKey),
-                content: "None",
-                timestamp: new Date().toISOString()
-            };
-
             if (hasImage) {
-                const base64Data = selectedImage.split(',')[1];
-                const binaryString = atob(base64Data);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                const arrayBuffer = bytes.buffer;
-
-                const encryptedImage = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
-
-                messageData.content = encryptedImage;
-                messageData.type = 'image';
-
-                window.removeImage();
+                // Use chunked upload for images
+                await sendImageChunked();
             } else {
+                // Send text message directly
+                const messageData = {
+                    encryptedName: await encryptMessage(userName, currentChat.encryptionKey),
+                    content: "None",
+                    timestamp: new Date().toISOString()
+                };
+
                 try {
                     const encryptedText = await encryptMessage(message, currentChat.encryptionKey);
                     messageData.content = encryptedText;
@@ -2477,48 +2634,160 @@
                 messageInput.value = '';
                 messageInput.style.height = 'auto';
                 handleInputChange();
+
+                try {
+                    const response = await sendWithRetry(`/send/${currentChat.handle}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(messageData)
+                    });
+
+                    fetchMessages();
+                } catch (error) {
+                    showToast('Failed to send message', 'error');
+                }
+            }
+        }
+
+        async function sendImageChunked() {
+            if (!selectedImage || !currentChat) {
+                showToast('No image selected', 'error');
+                return;
             }
 
             try {
-                const response = await sendWithRetry(`/send/${currentChat.handle}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(messageData)
-                });
+                showToast('Uploading image...', 'info');
+                
+                // Convert base64 to binary
+                const base64Data = selectedImage.split(',')[1];
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                const imageData = bytes.buffer;
 
+                // 1. Encrypt the image
+                const encryptedImage = await encryptBinary(imageData, currentChat.encryptionKey);
+                
+                // Convert encrypted data back to binary
+                const encryptedBinaryString = atob(encryptedImage);
+                const encryptedBytes = new Uint8Array(encryptedBinaryString.length);
+                for (let i = 0; i < encryptedBinaryString.length; i++) {
+                    encryptedBytes[i] = encryptedBinaryString.charCodeAt(i);
+                }
+
+                // 2. Compress the encrypted data
+                const compressionResult = await compressData(encryptedBytes.buffer);
+                const compressedData = compressionResult.compressed;
+                const isCompressed = compressionResult.isCompressed;
+                
+                console.log(`Compression: ${encryptedBytes.buffer.byteLength} bytes -> ${compressedData.byteLength} bytes (compressed: ${isCompressed})`);
+
+                // Convert compressed data back to binary if needed
+                let finalData = compressedData;
+                if (typeof compressedData === 'string') {
+                    const compressedBinaryString = atob(compressedData);
+                    const compressedBytes = new Uint8Array(compressedBinaryString.length);
+                    for (let i = 0; i < compressedBinaryString.length; i++) {
+                        compressedBytes[i] = compressedBinaryString.charCodeAt(i);
+                    }
+                    finalData = compressedBytes.buffer;
+                }
+
+                // 3. Chunk and upload
+                const uploader = new ChunkedUploader();
+                await uploader.uploadChunked(
+                    currentChat.handle,
+                    finalData,
+                    'image',
+                    (progress) => {
+                        console.log(`Upload progress: ${progress.toFixed(0)}%`);
+                    }
+                );
+
+                // Finalize upload
+                const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
+                await uploader.finalize(
+                    currentChat.handle,
+                    encryptedName,
+                    'image',
+                    isCompressed
+                );
+
+                showToast('Image sent successfully!', 'success');
+                window.removeImage();
                 fetchMessages();
             } catch (error) {
-                showToast('Failed to send message', 'error');
+                console.error('Image upload error:', error);
+                showToast('Failed to send image', 'error');
             }
         }
 
         async function sendVoiceMessage(audioBlob) {
-            const arrayBuffer = await audioBlob.arrayBuffer();
-
-            let encryptedAudio;
             try {
-                encryptedAudio = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
-            } catch (error) {
-                showToast('Failed to encrypt voice message', 'error');
-                return;
-            }
+                showToast('Processing voice message...', 'info');
+                
+                const arrayBuffer = await audioBlob.arrayBuffer();
 
-            const messageData = {
-                encryptedName: await encryptMessage(userName, currentChat.encryptionKey),
-                content: encryptedAudio,
-                timestamp: new Date().toISOString(),
-                type: 'voice'
-            };
+                // 1. Encrypt the audio
+                let encryptedAudio;
+                try {
+                    encryptedAudio = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
+                } catch (error) {
+                    showToast('Failed to encrypt voice message', 'error');
+                    return;
+                }
 
-            try {
-                const response = await sendWithRetry(`/send/${currentChat.handle}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(messageData)
-                });
+                // Convert encrypted data back to binary
+                const encryptedBinaryString = atob(encryptedAudio);
+                const encryptedBytes = new Uint8Array(encryptedBinaryString.length);
+                for (let i = 0; i < encryptedBinaryString.length; i++) {
+                    encryptedBytes[i] = encryptedBinaryString.charCodeAt(i);
+                }
 
+                // 2. Compress the encrypted data
+                const compressionResult = await compressData(encryptedBytes.buffer);
+                const compressedData = compressionResult.compressed;
+                const isCompressed = compressionResult.isCompressed;
+                
+                console.log(`Voice compression: ${encryptedBytes.buffer.byteLength} bytes -> ${compressedData.byteLength} bytes (compressed: ${isCompressed})`);
+
+                // Convert compressed data back to binary if needed
+                let finalData = compressedData;
+                if (typeof compressedData === 'string') {
+                    const compressedBinaryString = atob(compressedData);
+                    const compressedBytes = new Uint8Array(compressedBinaryString.length);
+                    for (let i = 0; i < compressedBinaryString.length; i++) {
+                        compressedBytes[i] = compressedBinaryString.charCodeAt(i);
+                    }
+                    finalData = compressedBytes.buffer;
+                }
+
+                // 3. Chunk and upload
+                const uploader = new ChunkedUploader();
+                await uploader.uploadChunked(
+                    currentChat.handle,
+                    finalData,
+                    'voice',
+                    (progress) => {
+                        console.log(`Voice upload progress: ${progress.toFixed(0)}%`);
+                    }
+                );
+
+                // Finalize upload (pass compression flag in metadata)
+                const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
+                await uploader.finalize(
+                    currentChat.handle,
+                    encryptedName,
+                    'voice',
+                    isCompressed
+                );
+
+                showToast('Voice message sent successfully!', 'success');
                 fetchMessages();
             } catch (error) {
+                console.error('Voice upload error:', error);
                 showToast('Failed to send voice message', 'error');
             }
         }
@@ -2708,4 +2977,5 @@
 </body>
 </html>
     </script>
+</html>
 </html>

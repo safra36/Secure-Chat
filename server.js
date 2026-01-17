@@ -12,9 +12,27 @@ const messagesStorage = new Map();
 // Structure: chatHandle -> userId -> { lastHeartbeat, userName }
 const userHeartbeats = new Map();
 
+// In-memory storage for upload sessions
+// Structure: sessionId -> { chatHandle, chunks: Map(chunkIndex -> data), totalChunks, createdAt, messageType, isCompressed }
+const uploadSessions = new Map();
+
 // Grace period for marking users as offline (in milliseconds)
 const OFFLINE_GRACE_PERIOD = 30000; // 30 seconds
 const OFFLINE_THRESHOLD = 15000; // 15 seconds before grace period
+
+// Upload session timeout (5 minutes)
+const UPLOAD_SESSION_TIMEOUT = 5 * 60 * 1000;
+
+// Cleanup old upload sessions periodically
+setInterval(() => {
+	const now = Date.now();
+	for (const [sessionId, session] of uploadSessions.entries()) {
+		if (now - session.createdAt > UPLOAD_SESSION_TIMEOUT) {
+			console.log(`Cleaning up expired upload session: ${sessionId}`);
+			uploadSessions.delete(sessionId);
+		}
+	}
+}, 60000); // Check every 60 seconds
 
 const tlsOptions = {
 	key: fs.readFileSync(path.join(__dirname, 'cert', 'key.pem')),
@@ -110,6 +128,24 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	if (req.method === 'POST' && pathname.startsWith('/heartbeat/')) {
 		console.log('Handling POST /heartbeat/');
 		handleHeartbeat(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/upload-chunk/')) {
+		console.log('Handling POST /upload-chunk/');
+		handleUploadChunk(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/upload-complete/')) {
+		console.log('Handling POST /upload-complete/');
+		handleUploadComplete(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/upload-cancel/')) {
+		console.log('Handling POST /upload-cancel/');
+		handleUploadCancel(req, res, pathname);
 		return;
 	}
 
@@ -372,6 +408,232 @@ function handleHeartbeat(req, res, pathname) {
 			console.error('Error processing heartbeat:', error);
 			res.writeHead(400, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ error: 'Invalid heartbeat data' }));
+		}
+	});
+}
+
+// Handle upload chunk request
+function handleUploadChunk(req, res, pathname) {
+	console.log(`POST upload-chunk request for path: ${pathname}`);
+
+	// Extract chat handle from URL path
+	// Format: /upload-chunk/chatHandle
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+
+	if (!chatHandle) {
+		console.log('Chat handle is required');
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	let bodyChunks = [];
+
+	req.on('data', (chunk) => {
+		bodyChunks.push(chunk);
+	});
+
+	req.on('end', () => {
+		try {
+			// Concatenate all chunks into a single Buffer
+			const body = Buffer.concat(bodyChunks);
+			
+			// For simplicity, we'll parse the multipart data
+			// Format: JSON metadata followed by binary chunk data
+			const dataStr = body.toString('utf8');
+			const metadataEnd = dataStr.indexOf('\r\n\r\n');
+			
+			if (metadataEnd === -1) {
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid chunk format' }));
+				return;
+			}
+
+			const metadataStr = dataStr.substring(0, metadataEnd);
+			const metadata = JSON.parse(metadataStr);
+			const { sessionId, chunkIndex, totalChunks, messageType } = metadata;
+
+			// Extract binary chunk data as a Buffer slice
+			const chunkDataStart = metadataEnd + 4;
+			const chunkData = body.slice(chunkDataStart);
+
+			console.log(`Received chunk ${chunkIndex}/${totalChunks} for session ${sessionId}`);
+
+			// Get or create upload session
+			let session = uploadSessions.get(sessionId);
+			if (!session) {
+				session = {
+					chatHandle: chatHandle,
+					chunks: new Map(),
+					totalChunks: totalChunks,
+					createdAt: Date.now(),
+					messageType: messageType
+				};
+				uploadSessions.set(sessionId, session);
+				console.log(`Created new upload session: ${sessionId}`);
+			}
+
+			// Store the chunk as a Buffer
+			session.chunks.set(chunkIndex, chunkData);
+			console.log(`Stored chunk ${chunkIndex}, total chunks received: ${session.chunks.size}/${totalChunks}`);
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				success: true,
+				sessionId: sessionId,
+				chunkIndex: chunkIndex,
+				receivedChunks: session.chunks.size,
+				totalChunks: totalChunks
+			}));
+		} catch (error) {
+			console.error('Error processing chunk:', error);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid chunk data' }));
+		}
+	});
+}
+
+// Handle upload complete request - assemble chunks and store message
+function handleUploadComplete(req, res, pathname) {
+	console.log(`POST upload-complete request for path: ${pathname}`);
+
+	// Extract chat handle from URL path
+	// Format: /upload-complete/chatHandle
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+
+	if (!chatHandle) {
+		console.log('Chat handle is required');
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	let body = '';
+
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const completeData = JSON.parse(body);
+			const { sessionId, encryptedName, timestamp, messageType } = completeData;
+
+			const session = uploadSessions.get(sessionId);
+			if (!session) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Upload session not found' }));
+				return;
+			}
+
+			// Verify all chunks were received
+			if (session.chunks.size !== session.totalChunks) {
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({
+					error: `Incomplete upload. Expected ${session.totalChunks} chunks, got ${session.chunks.size}`
+				}));
+				return;
+			}
+
+			// Assemble chunks in order
+			const sortedChunkIndices = Array.from(session.chunks.keys()).sort((a, b) => a - b);
+			const assembledChunks = [];
+			
+			for (const index of sortedChunkIndices) {
+				assembledChunks.push(session.chunks.get(index));
+			}
+
+			// Combine all chunks into single buffer
+			const encryptedContent = Buffer.concat(assembledChunks).toString('base64');
+
+			// Create message object
+			const message = {
+				sender: null, // Will use encryptedName for sender
+				encryptedName: encryptedName,
+				encryptedContent: encryptedContent,
+				timestamp: timestamp,
+				type: messageType || 'file',
+				id: timestamp
+			};
+
+			// Store message
+			if (!messagesStorage.has(chatHandle)) {
+				messagesStorage.set(chatHandle, []);
+			}
+			messagesStorage.get(chatHandle).push(message);
+			console.log(`Stored message for chat handle: ${chatHandle}`);
+
+			// Keep only last 100 messages
+			const chatMessages = messagesStorage.get(chatHandle);
+			if (chatMessages.length > 100) {
+				chatMessages.shift();
+				console.log(`Trimmed messages for chat handle: ${chatHandle}`);
+			}
+
+			// Clean up session
+			uploadSessions.delete(sessionId);
+			console.log(`Cleaned up upload session: ${sessionId}`);
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				success: true,
+				messageId: message.id,
+				messageType: messageType
+			}));
+		} catch (error) {
+			console.error('Error completing upload:', error);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Failed to complete upload' }));
+		}
+	});
+}
+
+// Handle upload cancel request
+function handleUploadCancel(req, res, pathname) {
+	console.log(`POST upload-cancel request for path: ${pathname}`);
+
+	// Extract chat handle from URL path
+	// Format: /upload-cancel/chatHandle
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+
+	if (!chatHandle) {
+		console.log('Chat handle is required');
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	let body = '';
+
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const cancelData = JSON.parse(body);
+			const { sessionId } = cancelData;
+
+			const session = uploadSessions.get(sessionId);
+			if (!session) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Upload session not found' }));
+				return;
+			}
+
+			// Clean up session
+			uploadSessions.delete(sessionId);
+			console.log(`Cancelled upload session: ${sessionId}`);
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ success: true }));
+		} catch (error) {
+			console.error('Error cancelling upload:', error);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Failed to cancel upload' }));
 		}
 	});
 }
