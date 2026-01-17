@@ -1373,7 +1373,7 @@
                 }
             }
 
-            async finalize(chatHandle, encryptedName, messageType, isCompressed = false) {
+            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false) {
                 try {
                     const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
                         method: 'POST',
@@ -1381,7 +1381,7 @@
                         body: JSON.stringify({
                             sessionId: this.sessionId,
                             encryptedName: encryptedName,
-                            timestamp: new Date().toISOString(),
+                            encryptedTimestamp: encryptedTimestamp,
                             messageType: messageType,
                             isCompressed: isCompressed
                         })
@@ -1469,6 +1469,22 @@
         let recordingStartTime = null;
         let recordingTimer = null;
 
+        // Time synchronization
+        let timeOffset = 0; // Offset between client and server time (client_time - server_time)
+        let lastTimeSyncTime = 0;
+        const TIME_SYNC_INTERVAL = 60000; // Re-sync every 60 seconds
+        
+        // Get server encryption key from localStorage (set during login on index.html)
+        function getServerEncryptionKey() {
+            const key = localStorage.getItem("serverPassword");
+            if (!key) {
+                console.error("Server password not found in localStorage. User must authenticate first.");
+                window.location.href = "/";
+                return null;
+            }
+            return key;
+        }
+
         // Waveform visualization
         let audioContext = null;
         let analyser = null;
@@ -1493,10 +1509,166 @@
         const MAX_CACHED_MESSAGES_PER_CHAT = 1000;
         let lastFetchTime = 0; // Track last successful fetch timestamp for incremental updates
 
+        // Global polling cursors - maps chatHandle to last polled message timestamp
+        let pollingCursors = {};
+
         // Chat list polling for background updates
         let chatListPollingInterval = null;
         let shouldPollBackgroundChats = false; // Track if we should poll other chats
         const isChatListVisible = () => chatListContainer.style.display === 'flex';
+
+        // ==================== TIME SYNCHRONIZATION ====================
+
+        // Decrypt timestamp from server
+        async function decryptServerTimestamp(encryptedTimestamp) {
+            try {
+                const SERVER_ENCRYPTION_KEY = getServerEncryptionKey();
+                if (!SERVER_ENCRYPTION_KEY) return null;
+
+                // Convert base64 to binary
+                const data = new Uint8Array(atob(encryptedTimestamp).split('').map(c => c.charCodeAt(0)));
+
+                // Extract components: IV (12 bytes) + encrypted data + auth tag (16 bytes)
+                const iv = data.slice(0, 12);
+                const authTag = data.slice(-16);
+                const encrypted = data.slice(12, -16);
+
+                // Create key for Web Crypto API
+                const cryptoKey = await crypto.subtle.importKey(
+                    'raw',
+                    padKey(SERVER_ENCRYPTION_KEY),
+                    { name: 'AES-GCM' },
+                    false,
+                    ['decrypt']
+                );
+
+                // Combine encrypted data with auth tag for Web Crypto API format
+                const combinedEncrypted = new Uint8Array(encrypted.length + authTag.length);
+                combinedEncrypted.set(encrypted, 0);
+                combinedEncrypted.set(authTag, encrypted.length);
+
+                const decrypted = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv: iv },
+                    cryptoKey,
+                    combinedEncrypted
+                );
+
+                return parseInt(new TextDecoder().decode(decrypted), 10);
+            } catch (error) {
+                console.error('Failed to decrypt server timestamp:', error);
+                throw error;
+            }
+        }
+
+        // Encrypt timestamp using server key
+        async function encryptTimestampWithServerKey(timestamp) {
+            try {
+                const SERVER_ENCRYPTION_KEY = getServerEncryptionKey();
+                if (!SERVER_ENCRYPTION_KEY) return null;
+
+                const encoder = new TextEncoder();
+                const data = encoder.encode(timestamp.toString());
+                const iv = crypto.getRandomValues(new Uint8Array(12));
+
+                const cryptoKey = await crypto.subtle.importKey(
+                    'raw',
+                    padKey(SERVER_ENCRYPTION_KEY),
+                    { name: 'AES-GCM' },
+                    false,
+                    ['encrypt']
+                );
+
+                const encrypted = await crypto.subtle.encrypt(
+                    { name: 'AES-GCM', iv: iv },
+                    cryptoKey,
+                    data
+                );
+
+                // Combine IV and encrypted data
+                const result = new Uint8Array(iv.length + encrypted.byteLength);
+                result.set(iv, 0);
+                result.set(new Uint8Array(encrypted), iv.length);
+
+                // Convert to base64 for transmission
+                return btoa(String.fromCharCode(...result));
+            } catch (error) {
+                console.error('Timestamp encryption error:', error);
+                throw error;
+            }
+        }
+
+        // Sync time with server
+        async function syncServerTime() {
+            try {
+                const clientTime = Date.now();
+                const response = await fetch('/time-sync', {
+                    method: 'GET',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    console.warn('Failed to sync server time:', response.status);
+                    return false;
+                }
+
+                const data = await response.json();
+                const encryptedTime = data.encryptedTime;
+
+                // Decrypt server time
+                try {
+                    const SERVER_ENCRYPTION_KEY = getServerEncryptionKey();
+                    if (!SERVER_ENCRYPTION_KEY) return false;
+
+                    const serverTimeBinary = new Uint8Array(atob(encryptedTime).split('').map(c => c.charCodeAt(0)));
+                    const iv = serverTimeBinary.slice(0, 12);
+                    const encrypted = serverTimeBinary.slice(12);
+
+                    const cryptoKey = await crypto.subtle.importKey(
+                        'raw',
+                        padKey(SERVER_ENCRYPTION_KEY),
+                        { name: 'AES-GCM' },
+                        false,
+                        ['decrypt']
+                    );
+
+                    // For client-side decryption without auth tag validation
+                    const decrypted = await crypto.subtle.decrypt(
+                        { name: 'AES-GCM', iv: iv, tagLength: 128 },
+                        cryptoKey,
+                        encrypted
+                    );
+
+                    const serverTime = parseInt(new TextDecoder().decode(decrypted), 10);
+                    
+                    // Calculate time offset (how far ahead/behind we are)
+                    timeOffset = clientTime - serverTime;
+                    lastTimeSyncTime = clientTime;
+
+                    console.log(`✅ Time synced. Server: ${serverTime}ms, Client: ${clientTime}ms, Offset: ${timeOffset}ms`);
+                    return true;
+                } catch (decryptErr) {
+                    console.warn('Failed to decrypt server time:', decryptErr);
+                    return false;
+                }
+            } catch (error) {
+                console.error('Time sync error:', error);
+                return false;
+            }
+        }
+
+        // Get synchronized server time
+        function getSyncedServerTime() {
+            const clientNow = Date.now();
+            return clientNow - timeOffset;
+        }
+
+        // Check if time needs re-syncing
+        async function ensureTimeSynced() {
+            const timeSinceLastSync = Date.now() - lastTimeSyncTime;
+            if (timeSinceLastSync > TIME_SYNC_INTERVAL) {
+                await syncServerTime();
+            }
+        }
 
         // Initialize the app
         document.addEventListener('DOMContentLoaded', async () => {
@@ -1919,13 +2091,13 @@
         async function fetchMessages() {
             if (!currentChat) return;
 
-            const lastId = [...renderedMessageIds].sort().pop() || '';
+            // Use global polling cursor for this chat, not local rendered message IDs
+            const pollingCursor = pollingCursors[currentChat.handle] || '';
+            const url = pollingCursor
+                ? `/messages/${currentChat.handle}?after=${encodeURIComponent(pollingCursor)}`
+                : `/messages/${currentChat.handle}`;
 
             try {
-                const url = lastId 
-                    ? `/messages/${currentChat.handle}?after=${encodeURIComponent(lastId)}` 
-                    : `/messages/${currentChat.handle}`;
-                
                 const response = await authenticatedFetch(url, {
                     method: 'GET',
                     headers: { 'Content-Type': 'application/json' }
@@ -1982,8 +2154,16 @@
                 const isOwn = senderName === userName;
                 const bubbleClass = isOwn ? 'own' : 'received';
 
-                const time = new Date(message.timestamp);
-                const timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                // Decrypt server timestamp and apply time offset for display
+                let timeStr = '';
+                try {
+                    const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
+                    const syncedTimestamp = serverTimestamp + timeOffset;
+                    const time = new Date(syncedTimestamp);
+                    timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                } catch (err) {
+                    timeStr = '--:--';
+                }
 
                 const isVoice = message.type === 'voice';
                 const isImage = message.type === 'image';
@@ -2141,18 +2321,26 @@
                     tempDiv.textContent = 'Voice message';
                 }
                 const textContent = tempDiv.textContent || tempDiv.innerText || 'Media message';
-                updateLastMessage(currentChat.handle, textContent, message.timestamp);
+                // Update last message time using decrypted and synced timestamp
+                try {
+                    const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
+                    const syncedTimestamp = serverTimestamp + timeOffset;
+                    const timestampStr = new Date(syncedTimestamp).toISOString();
+                    updateLastMessage(currentChat.handle, textContent, timestampStr);
+                } catch (err) {
+                    updateLastMessage(currentChat.handle, textContent, new Date().toISOString());
+                }
                 
                 // Add to all messages for caching
                 allMessages.push(message);
             }
 
-            // Save new messages to cache (merge with existing cache)
+            // Save new messages to cache (merge with existing cache) and update polling cursor
             if (allMessages.length > 0 && currentChat) {
                 const cacheKey = `messages_${currentChat.handle}`;
                 const cachedMessagesJson = localStorage.getItem(cacheKey);
                 let existingMessages = [];
-                
+
                 if (cachedMessagesJson) {
                     try {
                         existingMessages = JSON.parse(cachedMessagesJson);
@@ -2160,16 +2348,23 @@
                         console.error('Error parsing cache:', e);
                     }
                 }
-                
+
                 // Merge: keep existing messages and add new ones, avoiding duplicates by ID
                 const messageMap = new Map();
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                 allMessages.forEach(msg => messageMap.set(msg.id, msg));
-                
+
+                // Sort by encrypted timestamp (they maintain chronological order when encrypted)
                 const mergedMessages = Array.from(messageMap.values()).sort((a, b) => {
-                    return new Date(a.timestamp) - new Date(b.timestamp);
+                    return a.encryptedTimestamp.localeCompare(b.encryptedTimestamp);
                 });
-                
+
+                // Update polling cursor to the latest message timestamp for this chat
+                if (mergedMessages.length > 0) {
+                    const latestMessage = mergedMessages[mergedMessages.length - 1];
+                    pollingCursors[currentChat.handle] = latestMessage.encryptedTimestamp;
+                }
+
                 saveCachedMessages(currentChat.handle, mergedMessages);
             }
         }
@@ -2617,7 +2812,7 @@
                         messages.forEach(msg => messageMap.set(msg.id, msg));
 
                         const mergedMessages = Array.from(messageMap.values()).sort((a, b) => {
-                            return new Date(a.timestamp) - new Date(b.timestamp);
+                            return a.encryptedTimestamp.localeCompare(b.encryptedTimestamp);
                         });
 
                         saveCachedMessages(chat.handle, mergedMessages);
@@ -2628,7 +2823,7 @@
                         // Update last message
                         const lastMessage = messages[messages.length - 1];
                         chat.lastMessage = 'New message...';
-                        chat.lastMessageTime = lastMessage.timestamp;
+                        chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();
 
                         // Play sound and update badge
                         playNotificationSound();
@@ -2683,10 +2878,28 @@
                 await sendImageChunked();
             } else {
                 // Send text message directly
+                // Ensure time is synced before sending
+                await ensureTimeSynced();
+                
+                const currentTime = getSyncedServerTime();
+                
+                let encryptedTimestamp;
+                try {
+                    encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
+                } catch (error) {
+                    showToast('Failed to encrypt timestamp', 'error');
+                    return;
+                }
+                
+                if (!encryptedTimestamp) {
+                    showToast('Server key not available', 'error');
+                    return;
+                }
+
                 const messageData = {
                     encryptedName: await encryptMessage(userName, currentChat.encryptionKey),
                     content: "None",
-                    timestamp: new Date().toISOString()
+                    encryptedTimestamp: encryptedTimestamp
                 };
 
                 try {
@@ -2775,10 +2988,14 @@
 
                 // Finalize upload
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
-                const messageId = new Date().toISOString();
+                await ensureTimeSynced();
+                const currentTime = getSyncedServerTime();
+                const encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
+
                 const result = await uploader.finalize(
                     currentChat.handle,
                     encryptedName,
+                    encryptedTimestamp,
                     'image',
                     isCompressed
                 );
@@ -2850,9 +3067,13 @@
 
                 // Finalize upload (pass compression flag in metadata)
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
+                await ensureTimeSynced();
+                const currentTime = getSyncedServerTime();
+                const encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
                 await uploader.finalize(
                     currentChat.handle,
                     encryptedName,
+                    encryptedTimestamp,
                     'voice',
                     isCompressed
                 );
@@ -2895,17 +3116,16 @@
 
         function saveCachedMessages(chatHandle, messages) {
             const cacheKey = `messages_${chatHandle}`;
-            
+
             try {
                 // Keep only latest MAX_CACHED_MESSAGES_PER_CHAT messages
                 const messagesToCache = messages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
                 localStorage.setItem(cacheKey, JSON.stringify(messagesToCache));
-                
-                // Also save last fetch timestamp
+
+                // Also save last fetch timestamp - use current time as approximation since we can't await in this context
                 const lastFetchKey = `lastFetch_${chatHandle}`;
                 if (messages.length > 0) {
-                    const lastMessage = messages[messages.length - 1];
-                    localStorage.setItem(lastFetchKey, lastMessage.timestamp);
+                    localStorage.setItem(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
                 }
             } catch (error) {
                 console.error('Error saving cached messages:', error);

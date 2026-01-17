@@ -69,6 +69,13 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	// Time sync endpoint - public, returns encrypted server time
+	if (pathname === '/time-sync') {
+		console.log('Handling GET /time-sync');
+		handleTimeSync(req, res);
+		return;
+	}
+
 	// Serve static files (.js, .css, images) without authentication
 	if (pathname.endsWith('.js') || pathname.endsWith('.css') || 
 	    pathname.endsWith('.png') || pathname.endsWith('.jpg') || 
@@ -262,6 +269,15 @@ function handleGetMessages(req, res, pathname) {
 	res.end(JSON.stringify(filteredMessages));
 }
 
+// Generate UUID v4
+function generateUUID() {
+	return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+		const r = Math.random() * 16 | 0;
+		const v = c === 'x' ? r : (r & 0x3 | 0x8);
+		return v.toString(16);
+	});
+}
+
 // Handle POST send message request
 function handleSendMessage(req, res, pathname) {
 	console.log(`POST send request for path: ${pathname}`);
@@ -293,16 +309,27 @@ function handleSendMessage(req, res, pathname) {
 
 		try {
 			const messageData = JSON.parse(body);
-			// messageData should now contain `encryptedName`, `content`, `timestamp`, and `sender`
+			// messageData should now contain `encryptedName`, `content`, `encryptedTimestamp`, and `sender`
 
-			// Create message object – keep the encrypted name
+			// Decrypt the timestamp to verify it's valid (security check)
+			try {
+				decryptTimestamp(messageData.encryptedTimestamp);
+			} catch (err) {
+				console.warn('Failed to decrypt timestamp:', err);
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid encrypted timestamp' }));
+				return;
+			}
+
+			// Create message object with encrypted timestamp as ID (secure and chronological)
+			const messageId = messageData.encryptedTimestamp;
 			const message = {
 				sender: messageData.sender,
 				encryptedName: messageData.encryptedName,
 				encryptedContent: messageData.content,
-				timestamp: messageData.timestamp,
+				encryptedTimestamp: messageData.encryptedTimestamp, // Encrypted timestamp for security + ID
 				type: messageData.type || 'text',
-				id: messageData.timestamp, // <-- new field
+				id: messageId, // Use encrypted timestamp as secure ID
 			};
 
 			// Store message
@@ -310,12 +337,12 @@ function handleSendMessage(req, res, pathname) {
 				messagesStorage.set(chatHandle, []);
 			}
 			messagesStorage.get(chatHandle).push(message);
-			console.log(`Stored message for chat handle: ${chatHandle}`);
+			console.log(`Stored message for chat handle: ${chatHandle} with ID: ${messageId}`);
 
 			// Store encrypted content for deferred downloads
-			const contentKey = `${chatHandle}:${message.id}`;
+			const contentKey = `${chatHandle}:${messageId}`;
 			messageContentStorage.set(contentKey, messageData.content);
-			console.log(`Cached content for message ${message.id}`);
+			console.log(`Cached content for message ${messageId}`);
 
 			// Keep only last 100 messages
 			const chatMessages = messagesStorage.get(chatHandle);
@@ -328,7 +355,7 @@ function handleSendMessage(req, res, pathname) {
 			}
 
 			res.writeHead(200, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ success: true }));
+			res.end(JSON.stringify({ success: true, messageId: messageId }));
 			console.log('Message sent successfully');
 		} catch (error) {
 			console.error('Error parsing message data:', error);
@@ -537,7 +564,7 @@ function handleUploadComplete(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const completeData = JSON.parse(body);
-			const { sessionId, encryptedName, timestamp, messageType } = completeData;
+			const { sessionId, encryptedName, encryptedTimestamp, messageType } = completeData;
 
 			const session = uploadSessions.get(sessionId);
 			if (!session) {
@@ -558,7 +585,7 @@ function handleUploadComplete(req, res, pathname) {
 			// Assemble chunks in order
 			const sortedChunkIndices = Array.from(session.chunks.keys()).sort((a, b) => a - b);
 			const assembledChunks = [];
-			
+
 			for (const index of sortedChunkIndices) {
 				assembledChunks.push(session.chunks.get(index));
 			}
@@ -566,19 +593,29 @@ function handleUploadComplete(req, res, pathname) {
 			// Combine all chunks into single buffer
 			const encryptedContent = Buffer.concat(assembledChunks).toString('base64');
 
-			// Store encrypted content for deferred downloads using composite key
-			const contentKey = `${chatHandle}:${timestamp}`;
+			// Store encrypted content for deferred downloads using composite key (use encryptedTimestamp as ID)
+			const contentKey = `${chatHandle}:${encryptedTimestamp}`;
 			messageContentStorage.set(contentKey, encryptedContent);
 			console.log(`Cached encrypted content for key: ${contentKey}`);
 
-			// Create message object WITHOUT the full encrypted content (it's stored separately for deferred loading)
+			// Decrypt timestamp for validation (security check)
+			try {
+				decryptTimestamp(encryptedTimestamp);
+			} catch (err) {
+				console.warn('Failed to decrypt timestamp:', err);
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid encrypted timestamp' }));
+				return;
+			}
+
+			// Create message object with encrypted timestamp as ID (consistent with text messages)
 			const message = {
 				sender: null, // Will use encryptedName for sender
 				encryptedName: encryptedName,
 				encryptedContent: null, // Content is stored separately, not in message
-				timestamp: timestamp,
+				encryptedTimestamp: encryptedTimestamp, // Encrypted timestamp for consistency
 				type: messageType || 'file',
-				id: timestamp
+				id: encryptedTimestamp // Use encrypted timestamp as ID
 			};
 
 			// Store message
@@ -586,7 +623,7 @@ function handleUploadComplete(req, res, pathname) {
 				messagesStorage.set(chatHandle, []);
 			}
 			messagesStorage.get(chatHandle).push(message);
-			console.log(`Stored message for chat handle: ${chatHandle}`);
+			console.log(`Stored message for chat handle: ${chatHandle} with encrypted ID: ${encryptedTimestamp}`);
 
 			// Keep only last 100 messages
 			const chatMessages = messagesStorage.get(chatHandle);
@@ -739,6 +776,75 @@ function serveFile(res, filePath, contentType) {
 		res.end(Buffer.from(text));
 	});
 
+}
+
+// ==================== TIME SYNCHRONIZATION ====================
+
+// Encrypt timestamp using server's private key
+function encryptTimestamp(timestamp) {
+	try {
+		const iv = crypto.randomBytes(12);
+		const cipher = crypto.createCipheriv('aes-256-gcm', encryption.padKey(SERVER_PASSWRD), iv);
+		
+		let encrypted = cipher.update(timestamp.toString(), 'utf8', 'binary');
+		encrypted += cipher.final('binary');
+		
+		const authTag = cipher.getAuthTag();
+		
+		// Combine IV + encrypted + authTag
+		const result = Buffer.concat([iv, Buffer.from(encrypted, 'binary'), authTag]);
+		
+		// Convert to base64 for transmission
+		return result.toString('base64');
+	} catch (error) {
+		console.error('Timestamp encryption error:', error);
+		throw error;
+	}
+}
+
+// Decrypt timestamp using server's private key
+function decryptTimestamp(encryptedTimestamp) {
+	try {
+		// Convert from base64
+		const data = Buffer.from(encryptedTimestamp, 'base64');
+		
+		// Extract IV (first 12 bytes), authTag (last 16 bytes), and encrypted data (middle)
+		const iv = data.slice(0, 12);
+		const authTag = data.slice(-16);
+		const encrypted = data.slice(12, -16);
+		
+		// Create decipher with authTag
+		const decipher = crypto.createDecipheriv('aes-256-gcm', encryption.padKey(SERVER_PASSWRD), iv);
+		decipher.setAuthTag(authTag);
+		
+		let decrypted = decipher.update(encrypted, 'binary', 'utf8');
+		decrypted += decipher.final('utf8');
+		
+		return parseInt(decrypted, 10);
+	} catch (error) {
+		console.error('Timestamp decryption error:', error);
+		throw error;
+	}
+}
+
+// Handle time sync request - returns encrypted server time
+function handleTimeSync(req, res) {
+	try {
+		const serverTime = Date.now();
+		const encryptedTime = encryptTimestamp(serverTime);
+		
+		console.log(`Time sync request: returning encrypted server time (${serverTime}ms)`);
+		
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			encryptedTime: encryptedTime,
+			version: 1 // For future compatibility
+		}));
+	} catch (error) {
+		console.error('Time sync error:', error);
+		res.writeHead(500, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Failed to sync time' }));
+	}
 }
 
 // Get MIME type for file
