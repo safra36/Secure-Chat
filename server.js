@@ -4,6 +4,8 @@ const path = require('path');
 const url = require('url');
 const Encryption = require('./encryption');
 const crypto = require('crypto');
+const PasswordLoader = require('./password-loader');
+const AssetLoader = require('./asset-loader');
 
 // In-memory storage for messages (in production, use a database)
 const messagesStorage = new Map();
@@ -42,13 +44,29 @@ setInterval(() => {
 	}
 }, 60000); // Check every 60 seconds
 
+// Load password from external .passwd file
+const SERVER_PASSWRD = PasswordLoader.loadPassword();
+
+if (!SERVER_PASSWRD) {
+	console.error('❌ Failed to load password from .passwd file. Please create a .passwd file in the application directory.');
+	console.error('   To create the password file, run: echo "your-password" > .passwd');
+	process.exit(1);
+}
+
+console.log('✅ Password loaded successfully from external file');
+
+// Load TLS certificates from assets directory (for binary) or cert directory (for development)
+let certDir = path.join(__dirname, 'assets', 'cert');
+if (!fs.existsSync(certDir)) {
+	certDir = path.join(__dirname, 'cert');
+}
+
 const tlsOptions = {
-	key: fs.readFileSync(path.join(__dirname, 'cert', 'key.pem')),
-	cert: fs.readFileSync(path.join(__dirname, 'cert', 'cert.pem')),
+	key: fs.readFileSync(path.join(certDir, 'key.pem')),
+	cert: fs.readFileSync(path.join(certDir, 'cert.pem')),
 };
 
 const encryption = new Encryption();
-const SERVER_PASSWRD = 'sadra1378';
 
 // Create HTTP server
 const server = https.createServer(tlsOptions, (req, res) => {
@@ -81,26 +99,32 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	}
 
 	// Serve static files (.js, .css, images) without authentication
-	if (pathname.endsWith('.js') || pathname.endsWith('.css') || 
-	    pathname.endsWith('.png') || pathname.endsWith('.jpg') || 
-	    pathname.endsWith('.jpeg') || pathname.endsWith('.gif') || 
+	if (pathname.endsWith('.js') || pathname.endsWith('.css') ||
+	    pathname.endsWith('.png') || pathname.endsWith('.jpg') ||
+	    pathname.endsWith('.jpeg') || pathname.endsWith('.gif') ||
 	    pathname.endsWith('.svg') || pathname.endsWith('.ico')) {
 		const fileName = path.basename(pathname); // Extract filename from path
-		const filePath = path.join(__dirname, fileName); // Join with just the filename
-		const contentType = getMimeType(filePath);
+		const contentType = getMimeType(fileName);
 		
-		fs.readFile(filePath, (err, data) => {
-			if (err) {
-				console.log(`Static file not found: ${filePath}`);
+		// Try to get from embedded assets first, then fall back to file system
+		let assetData = AssetLoader.getAsset(fileName);
+		
+		if (!assetData) {
+			// Fall back to file system for development
+			const filePath = path.join(__dirname, fileName);
+			try {
+				assetData = fs.readFileSync(filePath);
+			} catch (err) {
+				console.log(`Static file not found: ${fileName}`);
 				res.writeHead(404, { 'Content-Type': 'text/plain' });
 				res.end('File not found');
 				return;
 			}
-			
-			console.log(`Serving static file: ${pathname} -> ${filePath}`);
-			res.writeHead(200, { 'Content-Type': contentType });
-			res.end(data);
-		});
+		}
+		
+		console.log(`Serving static file: ${fileName}`);
+		res.writeHead(200, { 'Content-Type': contentType });
+		res.end(assetData);
 		return;
 	}
 
@@ -778,45 +802,52 @@ function handleDownloadContent(req, res, pathname) {
 	}));
 }
 
-// Serve static files
-function serveFile(res, filePath, contentType) {
-	console.log(`Attempting to serve file: ${filePath}`);
+// Serve static files using embedded assets
+function serveFile(res, fileName, contentType) {
+	console.log(`Attempting to serve file: ${fileName}`);
 
-	fs.readFile(filePath, async (err, data) => {
-		if (err) {
+	// Try to get from embedded assets first, then fall back to file system
+	let assetData = AssetLoader.getAsset(fileName);
+	
+	if (!assetData) {
+		// Fall back to file system for development
+		const filePath = path.join(__dirname, fileName);
+		try {
+			assetData = fs.readFileSync(filePath);
+		} catch (err) {
 			console.error(`Error reading file ${filePath}:`, err);
 			res.writeHead(404, { 'Content-Type': 'text/plain' });
 			res.end('File not found');
 			return;
 		}
+	}
 
-		const userId = encryption.getKeyPairs();
-		const privateKey = encryption.keys.get(userId)[1];
-		
-		// Include server timestamp in the encrypted data
-		const serverData = {
-			userId: userId,
-			privateKey: privateKey,
-			timestamp: Date.now()
-		};
-		
-		const encrypted = await encryption.encryptBlockMessage(
-			JSON.stringify(serverData),
-			SERVER_PASSWRD,
-		);
+	const userId = encryption.getKeyPairs();
+	const privateKey = encryption.keys.get(userId)[1];
+	
+	// Include server timestamp in the encrypted data
+	const serverData = {
+		userId: userId,
+		privateKey: privateKey,
+		timestamp: Date.now()
+	};
+	
+	// Encrypt server data synchronously
+	const encrypted = encryption.encryptBlockMessage(
+		JSON.stringify(serverData),
+		SERVER_PASSWRD
+	);
 
-		// create the key with index attached to it as prefix, then encrypt block cipher and put as value here
-		let text = data.toString();
-		text = text.replace(
-			'{KEY_PLACE_HOLDER}',
-			`<input type="text" name="" id="public_key" value="${encrypted}" style="display: none;">`,
-		);
+	// create the key with index attached to it as prefix, then encrypt block cipher and put as value here
+	let text = assetData.toString();
+	text = text.replace(
+		'{KEY_PLACE_HOLDER}',
+		`<input type="text" name="" id="public_key" value="${encrypted}" style="display: none;">`,
+	);
 
-		console.log(`Successfully served file: ${filePath}`);
-		res.writeHead(200, { 'Content-Type': contentType });
-		res.end(Buffer.from(text));
-	});
-
+	console.log(`Successfully served file: ${fileName}`);
+	res.writeHead(200, { 'Content-Type': contentType });
+	res.end(Buffer.from(text));
 }
 
 // ==================== TIME SYNCHRONIZATION ====================
