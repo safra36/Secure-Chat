@@ -1312,6 +1312,20 @@
             }
         }
 
+        // ==================== UTILITY FUNCTIONS ====================
+
+        // Convert Uint8Array to base64 string using chunking to avoid stack overflow
+        // This prevents "Maximum call stack size exceeded" errors for large files
+        function uint8ArrayToBase64(uint8Array) {
+            let binary = '';
+            const chunkSize = 32768; // 32KB chunks - safe for all browsers
+            for (let i = 0; i < uint8Array.length; i += chunkSize) {
+                const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+                binary += String.fromCharCode.apply(null, chunk);
+            }
+            return btoa(binary);
+        }
+
         // ==================== CHUNKED UPLOAD CLASS ====================
         
         class ChunkedUploader {
@@ -3485,9 +3499,10 @@
                                 decompressedArray = compressedBytes;
                             }
 
-                            // Convert decompressed bytes back to base64
+                            // Convert decompressed bytes back to base64 using chunked conversion
+                            // This prevents "Maximum call stack size exceeded" errors for large files
                             try {
-                                const decompressedBase64 = btoa(String.fromCharCode.apply(null, decompressedArray));
+                                const decompressedBase64 = uint8ArrayToBase64(decompressedArray);
                                 encryptedBase64 = decompressedBase64;
                                 console.log(`Decompression complete: ${compressedBytes.length} bytes -> ${decompressedArray.length} bytes`);
                             } catch (btoa_err) {
