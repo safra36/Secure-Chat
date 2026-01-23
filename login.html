@@ -1442,40 +1442,154 @@
         async function cacheContentWithQuota(messageId, encryptedBase64) {
             const dataSize = encryptedBase64.length * 2; // UTF-16 estimate
             
-            // Try to cache, evicting old content if needed
+            // Check if data is too large to ever fit
+            if (dataSize > MAX_CACHE_SIZE_BYTES * 0.8) {
+                console.warn(`Content too large to cache (${dataSize} bytes > ${MAX_CACHE_SIZE_BYTES * 0.8} bytes)`);
+                return false;
+            }
+            
+            // Try up to 10 times with progressive eviction
             let attempts = 0;
-            const maxAttempts = 3;
+            const maxAttempts = 10;
             
             while (attempts < maxAttempts) {
                 try {
-                    if (canStoreInCache(dataSize)) {
-                        localStorage.setItem(`${CONTENT_KEY_PREFIX}${messageId}`, encryptedBase64);
-                        console.log(`Cached content for message ${messageId}`);
-                        return true;
-                    } else {
-                        // Need to evict old content
-                        const evicted = evictOldestCachedContent();
-                        if (!evicted) {
-                            console.warn('No content to evict, cache full');
-                            return false;
-                        }
-                    }
+                    // Try to store directly
+                    localStorage.setItem(`${CONTENT_KEY_PREFIX}${messageId}`, encryptedBase64);
+                    console.log(`✅ Cached content for message ${messageId} (${dataSize} bytes)`);
+                    return true;
+                    
                 } catch (e) {
                     if (e.name === 'QuotaExceededError') {
-                        console.warn('localStorage quota exceeded, trying to evict');
-                        const evicted = evictOldestCachedContent();
+                        console.warn(`QuotaExceededError on attempt ${attempts + 1}/${maxAttempts}`);
+                        
+                        // Get current usage stats
+                        const usage = getLocalStorageUsage();
+                        const contentCount = getContentKeyCount();
+                        console.log(`Current usage: ${usage} bytes, ${contentCount} cached items`);
+                        
+                        // Try to evict oldest content
+                        let evicted = evictOldestCachedContent();
+                        
                         if (!evicted) {
-                            return false;
+                            // No more content to evict - try evicting message cache
+                            evicted = evictOldestMessageCache();
+                            if (!evicted) {
+                                console.error('No more items to evict, cache is full');
+                                return false;
+                            }
                         }
+                        
+                        // Wait a bit before retry to let browser process
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                        
                     } else {
-                        throw e;
+                        // Other error - don't retry
+                        console.error('Unexpected cache error:', e);
+                        return false;
                     }
                 }
+                
                 attempts++;
             }
             
-            console.warn('Failed to cache content after multiple attempts');
+            console.warn(`Failed to cache content after ${maxAttempts} attempts`);
             return false;
+        }
+        
+        // Helper to count cached content items
+        function getContentKeyCount() {
+            let count = 0;
+            for (let key in localStorage) {
+                if (key.startsWith(CONTENT_KEY_PREFIX)) {
+                    count++;
+                }
+            }
+            return count;
+        }
+        
+        // Helper to evict oldest message cache
+        function evictOldestMessageCache() {
+            const messageKeys = [];
+            for (let key in localStorage) {
+                if (key.startsWith('messages_')) {
+                    messageKeys.push(key);
+                }
+            }
+            if (messageKeys.length > 0) {
+                localStorage.removeItem(messageKeys[0]);
+                console.log(`Evicted message cache: ${messageKeys[0]}`);
+                return true;
+            }
+            return false;
+        }
+        
+        // ==================== STORAGE STATISTICS ====================
+        
+        // Calculate and display storage statistics
+        function getStorageStats() {
+            const usage = getLocalStorageUsage();
+            const contentCount = getContentKeyCount();
+            const messageCount = Object.keys(localStorage).filter(k => k.startsWith('messages_')).length;
+            const usagePercent = (usage / MAX_CACHE_SIZE_BYTES) * 100;
+            
+            return {
+                totalBytes: usage,
+                maxBytes: MAX_CACHE_SIZE_BYTES,
+                usagePercent: Math.round(usagePercent),
+                contentCount,
+                messageCount,
+                availableBytes: MAX_CACHE_SIZE_BYTES - usage
+            };
+        }
+        
+        // Show storage warning when approaching limit
+        function checkStorageHealth() {
+            const stats = getStorageStats();
+            
+            if (stats.usagePercent > 90) {
+                showToast('Storage almost full! Some content may not cache locally.', 'error');
+            } else if (stats.usagePercent > 75) {
+                showToast('Storage getting full. Consider clearing old content.', 'warning');
+            }
+        }
+        
+        // Add cache clearing function
+        function clearAllCache() {
+            if (!confirm('Clear all cached images and voice messages? Messages will still be available for download.')) {
+                return;
+            }
+            
+            let cleared = 0;
+            const keysToRemove = [];
+            
+            for (let key in localStorage) {
+                if (key.startsWith(CONTENT_KEY_PREFIX)) {
+                    keysToRemove.push(key);
+                }
+            }
+            
+            keysToRemove.forEach(key => {
+                localStorage.removeItem(key);
+                cleared++;
+            });
+            
+            showToast(`Cleared ${cleared} cached items`, 'success');
+            console.log(`Cache cleared: ${cleared} items removed`);
+        }
+        
+        // Add selective cache clearing by chat
+        function clearChatCache(chatHandle) {
+            if (!confirm(`Clear all cached content for ${chatHandle}?`)) {
+                return;
+            }
+            
+            // Remove message cache
+            localStorage.removeItem(`messages_${chatHandle}`);
+            
+            // Note: We can't easily identify which content items belong to which chat
+            // without iterating through messages, so we show a general message
+            showToast(`Message cache cleared for ${chatHandle}`, 'success');
         }
 
         // ==================== BLOB URL MANAGEMENT ====================
@@ -3281,6 +3395,12 @@
                 return;
             }
 
+            // Check storage health before attempting upload
+            const stats = getStorageStats();
+            if (stats.usagePercent > 95) {
+                showToast('Storage nearly full! Upload may not cache locally.', 'warning');
+            }
+
             // Validate file size
             const base64Data = selectedImage.split(',')[1];
             const fileSizeBytes = base64Data.length * 0.75; // base64 is ~75% efficient
@@ -3299,6 +3419,10 @@
             // Setup cancel button
             setupUploadCancel(uploader);
 
+            let uploadSucceeded = false;
+            let finalResult = null;
+            let encryptedImage = null;
+
             try {
                 showToast('Uploading image...', 'info');
                 showUploadProgress(true);
@@ -3312,7 +3436,7 @@
                 const imageData = bytes.buffer;
 
                 // 1. Encrypt the image
-                const encryptedImage = await encryptBinary(imageData, currentChat.encryptionKey);
+                encryptedImage = await encryptBinary(imageData, currentChat.encryptionKey);
 
                 // Convert encrypted data back to binary
                 const encryptedBinaryString = atob(encryptedImage);
@@ -3371,14 +3495,14 @@
                     isCompressed
                 );
 
-                // CACHE THE ENCRYPTED IMAGE LOCALLY FOR SENDER
-                const actualMessageId = result.messageId;
-                await cacheContentWithQuota(actualMessageId, encryptedImage);
-
+                // UPLOAD SUCCESSFUL - Report immediately
+                uploadSucceeded = true;
+                finalResult = result;
+                
                 showToast('Image sent successfully!', 'success');
                 showUploadProgress(false);
                 window.removeImage();
-                fetchMessages();
+                
             } catch (error) {
                 console.error('Image upload error:', error);
                 showUploadProgress(false);
@@ -3403,10 +3527,43 @@
                 currentUploadSessionId = null;
                 currentUploader = null;
             }
+            
+            // SEPARATE CACHING STEP - Non-blocking, non-fatal
+            if (uploadSucceeded && finalResult) {
+                try {
+                    const actualMessageId = finalResult.messageId;
+                    const cached = await cacheContentWithQuota(actualMessageId, encryptedImage);
+                    
+                    if (!cached) {
+                        // Cache failed but upload succeeded - inform user
+                        showToast('Image sent but not cached locally (storage full)', 'info');
+                        console.warn('Failed to cache image locally due to storage limitations');
+                    } else {
+                        console.log(`Image cached locally: ${actualMessageId}`);
+                    }
+                } catch (cacheError) {
+                    console.error('Cache error (non-fatal):', cacheError);
+                    showToast('Image sent successfully (cache unavailable)', 'info');
+                }
+                
+                // Refresh messages regardless of cache status
+                fetchMessages();
+            }
         }
 
         async function sendVoiceMessage(audioBlob) {
+            let uploadSucceeded = false;
+            let finalResult = null;
+            let encryptionFailed = false;
+            let encryptedAudio = null;
+
             try {
+                // Check storage health before attempting upload
+                const stats = getStorageStats();
+                if (stats.usagePercent > 95) {
+                    showToast('Storage nearly full! Upload may not cache locally.', 'warning');
+                }
+
                 // Validate voice message size
                 const fileSizeBytes = audioBlob.size;
                 if (fileSizeBytes > MAX_VOICE_SIZE) {
@@ -3420,12 +3577,12 @@
                 const arrayBuffer = await audioBlob.arrayBuffer();
 
                 // 1. Encrypt the audio
-                let encryptedAudio;
                 try {
                     encryptedAudio = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
                 } catch (error) {
                     showToast('Failed to encrypt voice message', 'error');
                     showUploadProgress(false);
+                    encryptionFailed = true;
                     return;
                 }
 
@@ -3482,17 +3639,43 @@
                     isCompressed
                 );
 
-                // CACHE THE ENCRYPTED AUDIO LOCALLY FOR SENDER
-                const actualMessageId = result.messageId;
-                await cacheContentWithQuota(actualMessageId, encryptedAudio);
-
+                // UPLOAD SUCCESSFUL - Report immediately
+                uploadSucceeded = true;
+                finalResult = result;
+                
                 showToast('Voice message sent successfully!', 'success');
                 showUploadProgress(false);
-                fetchMessages();
+                
             } catch (error) {
                 console.error('Voice upload error:', error);
                 showUploadProgress(false);
-                showToast('Failed to send voice message', 'error');
+                
+                // Only show upload error if upload actually failed
+                if (!uploadSucceeded && !encryptionFailed) {
+                    showToast('Failed to send voice message', 'error');
+                }
+            }
+            
+            // SEPARATE CACHING STEP - Non-blocking, non-fatal
+            if (uploadSucceeded && finalResult) {
+                try {
+                    const actualMessageId = finalResult.messageId;
+                    const cached = await cacheContentWithQuota(actualMessageId, encryptedAudio);
+                    
+                    if (!cached) {
+                        // Cache failed but upload succeeded - inform user
+                        showToast('Voice sent but not cached locally (storage full)', 'info');
+                        console.warn('Failed to cache voice message locally due to storage limitations');
+                    } else {
+                        console.log(`Voice message cached locally: ${actualMessageId}`);
+                    }
+                } catch (cacheError) {
+                    console.error('Cache error (non-fatal):', cacheError);
+                    showToast('Voice sent successfully (cache unavailable)', 'info');
+                }
+                
+                // Refresh messages regardless of cache status
+                fetchMessages();
             }
         }
 
