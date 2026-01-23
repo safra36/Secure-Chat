@@ -2771,7 +2771,7 @@
                             const audioUrl = createTrackedBlobUrl(audioBlob);
                             const audio = new Audio(audioUrl);
 
-                            await new Promise(resolve => {
+                            const duration = await new Promise(resolve => {
                                 audio.addEventListener('loadedmetadata', () => {
                                     resolve(audio.duration);
                                 });
@@ -2780,7 +2780,7 @@
                                 });
                             });
 
-                            const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                            const voicePlayer = await createVoicePlayer(audioUrl, duration);
                             contentHtml = voicePlayer;
                         } else if (message.encryptedContent === null) {
                             // Content stored separately - show download button for everyone who doesn't have cache
@@ -2795,7 +2795,7 @@
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
 
-                                await new Promise(resolve => {
+                                const duration = await new Promise(resolve => {
                                     audio.addEventListener('loadedmetadata', () => {
                                         resolve(audio.duration);
                                     });
@@ -2804,7 +2804,7 @@
                                     });
                                 });
 
-                                const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                                const voicePlayer = await createVoicePlayer(audioUrl, duration);
                                 contentHtml = voicePlayer;
                             } else {
                                 // Fallback: show download button
@@ -3105,8 +3105,16 @@
             const durationEl = document.createElement('span');
             durationEl.className = 'voice-duration';
             
-            const minutes = Math.floor(duration / 60).toString().padStart(2, '0');
-            const seconds = Math.floor(duration % 60).toString().padStart(2, '0');
+            // Validate duration to prevent Infinity:NaN display
+            let validDuration = 0;
+            if (typeof duration === 'number' && isFinite(duration) && !isNaN(duration) && duration > 0) {
+                validDuration = duration;
+            } else {
+                console.warn('Invalid audio duration:', duration, '- using default 0');
+            }
+            
+            const minutes = Math.floor(validDuration / 60).toString().padStart(2, '0');
+            const seconds = Math.floor(validDuration % 60).toString().padStart(2, '0');
             durationEl.textContent = `${minutes}:${seconds}`;
 
             waveformWrapper.appendChild(waveformCanvas);
@@ -4198,7 +4206,7 @@
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
                                 
-                                await new Promise(resolve => {
+                                const duration = await new Promise(resolve => {
                                     audio.addEventListener('loadedmetadata', () => {
                                         resolve(audio.duration);
                                     });
@@ -4207,7 +4215,7 @@
                                     });
                                 });
 
-                                const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
+                                const voicePlayer = await createVoicePlayer(audioUrl, duration);
                                 
                                 // Replace the deferred element with the voice player
                                 if (deferredElement.parentElement) {
