@@ -7,6 +7,7 @@
     <title>Secure Chat</title>
     <script src="auth.js"></script>
     <script src="pako.min.js"></script>
+    <script src="content-cache-db.js"></script>
     <style>
         * {
             box-sizing: border-box;
@@ -1396,6 +1397,85 @@
         const MAX_CACHE_SIZE_BYTES = 4 * 1024 * 1024; // 4MB limit for mobile safety
         const CONTENT_KEY_PREFIX = 'content_';
         
+        // IndexedDB cache status
+        let indexedDBReady = false;
+        let migrationDone = false;
+
+        // Initialize IndexedDB and perform migration
+        async function initializeStorage() {
+            try {
+                // Check if IndexedDB is available
+                if (typeof contentCacheDB === 'undefined') {
+                    console.warn('IndexedDB not available, using localStorage only');
+                    return;
+                }
+                
+                // Initialize the database
+                await contentCacheDB.init();
+                indexedDBReady = true;
+                console.log('✅ IndexedDB initialized successfully');
+                
+                // Check if migration is needed
+                if (!migrationDone) {
+                    await migrateFromLocalStorage();
+                }
+            } catch (error) {
+                console.warn('Failed to initialize IndexedDB, falling back to localStorage:', error);
+                indexedDBReady = false;
+            }
+        }
+
+        // Migrate existing localStorage content to IndexedDB
+        async function migrateFromLocalStorage() {
+            try {
+                // Check if migration marker exists
+                const migrationMarker = localStorage.getItem('indexedDBMigrationComplete');
+                if (migrationMarker) {
+                    console.log('Migration already completed');
+                    migrationDone = true;
+                    return;
+                }
+                
+                console.log('Starting migration from localStorage to IndexedDB...');
+                
+                // Find all content items in localStorage
+                const contentKeys = [];
+                for (let key in localStorage) {
+                    if (key.startsWith(CONTENT_KEY_PREFIX)) {
+                        contentKeys.push(key);
+                    }
+                }
+                
+                console.log(`Found ${contentKeys.length} items to migrate`);
+                
+                let migratedCount = 0;
+                for (const key of contentKeys) {
+                    try {
+                        const messageId = key.replace(CONTENT_KEY_PREFIX, '');
+                        const content = localStorage.getItem(key);
+                        
+                        if (content && content !== 'PLACEHOLDER') {
+                            // Store in IndexedDB
+                            await contentCacheDB.setContent(messageId, content, null);
+                            migratedCount++;
+                        }
+                    } catch (err) {
+                        console.warn(`Failed to migrate ${key}:`, err);
+                    }
+                }
+                
+                console.log(`✅ Migration complete: ${migratedCount}/${contentKeys.length} items migrated`);
+                
+                // Mark migration as complete
+                localStorage.setItem('indexedDBMigrationComplete', Date.now().toString());
+                migrationDone = true;
+                
+            } catch (error) {
+                console.error('Migration failed:', error);
+                // Continue without migration - localStorage will still work
+            }
+        }
+        
         // Estimate current localStorage usage
         function getLocalStorageUsage() {
             try {
@@ -1439,12 +1519,25 @@
         }
         
         // Safely cache content with quota management
-        async function cacheContentWithQuota(messageId, encryptedBase64) {
+        async function cacheContentWithQuota(messageId, encryptedBase64, chatHandle = null) {
             const dataSize = encryptedBase64.length * 2; // UTF-16 estimate
             
-            // Check if data is too large to ever fit
+            // Try IndexedDB first if available
+            if (indexedDBReady && typeof contentCacheDB !== 'undefined') {
+                try {
+                    await contentCacheDB.setContent(messageId, encryptedBase64, chatHandle);
+                    console.log(`✅ Cached content for message ${messageId} in IndexedDB (${dataSize} bytes)`);
+                    return true;
+                } catch (error) {
+                    console.warn(`IndexedDB cache failed for ${messageId}:`, error);
+                    // Continue to localStorage fallback
+                }
+            }
+            
+            // Fallback to localStorage with quota management
+            // Check if data is too large to ever fit in localStorage
             if (dataSize > MAX_CACHE_SIZE_BYTES * 0.8) {
-                console.warn(`Content too large to cache (${dataSize} bytes > ${MAX_CACHE_SIZE_BYTES * 0.8} bytes)`);
+                console.warn(`Content too large to cache in localStorage (${dataSize} bytes > ${MAX_CACHE_SIZE_BYTES * 0.8} bytes)`);
                 return false;
             }
             
@@ -1456,7 +1549,7 @@
                 try {
                     // Try to store directly
                     localStorage.setItem(`${CONTENT_KEY_PREFIX}${messageId}`, encryptedBase64);
-                    console.log(`✅ Cached content for message ${messageId} (${dataSize} bytes)`);
+                    console.log(`✅ Cached content for message ${messageId} in localStorage (${dataSize} bytes)`);
                     return true;
                     
                 } catch (e) {
@@ -1527,29 +1620,48 @@
         // ==================== STORAGE STATISTICS ====================
         
         // Calculate and display storage statistics
-        function getStorageStats() {
+        async function getStorageStats() {
             const usage = getLocalStorageUsage();
             const contentCount = getContentKeyCount();
             const messageCount = Object.keys(localStorage).filter(k => k.startsWith('messages_')).length;
             const usagePercent = (usage / MAX_CACHE_SIZE_BYTES) * 100;
             
+            let idbStats = {
+                totalBytes: 0,
+                itemCount: 0
+            };
+            
+            // Get IndexedDB stats if available
+            if (indexedDBReady && typeof contentCacheDB !== 'undefined') {
+                try {
+                    idbStats = await contentCacheDB.getStats();
+                } catch (error) {
+                    console.warn('Failed to get IndexedDB stats:', error);
+                }
+            }
+            
             return {
-                totalBytes: usage,
-                maxBytes: MAX_CACHE_SIZE_BYTES,
-                usagePercent: Math.round(usagePercent),
-                contentCount,
-                messageCount,
-                availableBytes: MAX_CACHE_SIZE_BYTES - usage
+                localStorage: {
+                    totalBytes: usage,
+                    maxBytes: MAX_CACHE_SIZE_BYTES,
+                    usagePercent: Math.round(usagePercent),
+                    contentCount,
+                    messageCount,
+                    availableBytes: MAX_CACHE_SIZE_BYTES - usage
+                },
+                indexedDB: idbStats,
+                totalBytes: usage + idbStats.totalBytes,
+                totalItems: contentCount + idbStats.itemCount
             };
         }
         
         // Show storage warning when approaching limit
-        function checkStorageHealth() {
-            const stats = getStorageStats();
+        async function checkStorageHealth() {
+            const stats = await getStorageStats();
             
-            if (stats.usagePercent > 90) {
+            if (stats.localStorage.usagePercent > 90) {
                 showToast('Storage almost full! Some content may not cache locally.', 'error');
-            } else if (stats.usagePercent > 75) {
+            } else if (stats.localStorage.usagePercent > 75) {
                 showToast('Storage getting full. Consider clearing old content.', 'warning');
             }
         }
@@ -1584,12 +1696,46 @@
                 return;
             }
             
+            // Clear from IndexedDB
+            if (indexedDBReady && typeof contentCacheDB !== 'undefined') {
+                contentCacheDB.clearChatContent(chatHandle).catch(err => {
+                    console.warn('Failed to clear IndexedDB chat content:', err);
+                });
+            }
+            
             // Remove message cache
             localStorage.removeItem(`messages_${chatHandle}`);
             
-            // Note: We can't easily identify which content items belong to which chat
+            // Note: We can't easily identify which content items belong to which chat in localStorage
             // without iterating through messages, so we show a general message
             showToast(`Message cache cleared for ${chatHandle}`, 'success');
+        }
+
+        // Retrieve cached content (IndexedDB first, then localStorage fallback)
+        async function getCachedContent(messageId) {
+            // Try IndexedDB first if available
+            if (indexedDBReady && typeof contentCacheDB !== 'undefined') {
+                try {
+                    const content = await contentCacheDB.getContent(messageId);
+                    if (content) {
+                        console.log(`✅ Retrieved content for message ${messageId} from IndexedDB`);
+                        return content;
+                    }
+                } catch (error) {
+                    console.warn(`IndexedDB get failed for ${messageId}:`, error);
+                    // Continue to localStorage fallback
+                }
+            }
+            
+            // Fallback to localStorage
+            const cachedContent = localStorage.getItem(`content_${messageId}`);
+            if (cachedContent) {
+                console.log(`✅ Retrieved content for message ${messageId} from localStorage`);
+                return cachedContent;
+            }
+            
+            console.log(`No cached content found for message ${messageId}`);
+            return null;
         }
 
         // ==================== BLOB URL MANAGEMENT ====================
@@ -2086,6 +2232,9 @@
                 window.location.href = '/';
                 return;
             }
+
+            // Initialize storage (IndexedDB with localStorage fallback)
+            await initializeStorage();
 
             // Load saved data
             userName = localStorage.getItem('userName') || '';
@@ -2614,7 +2763,7 @@
                 try {
                     if (isVoice) {
                         // Check if content is already cached (full content, not placeholder)
-                        const cachedContent = localStorage.getItem(`content_${message.id}`);
+                        const cachedContent = await getCachedContent(message.id);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
                             // Content is cached, decrypt and render immediately
                             const decryptedAudioBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
@@ -2664,7 +2813,7 @@
                         }
                     } else if (isImage) {
                         // Check if content is already cached
-                        const cachedContent = localStorage.getItem(`content_${message.id}`);
+                        const cachedContent = await getCachedContent(message.id);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
                             // Content is cached, decrypt and render immediately
                             const decryptedImageBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
@@ -3396,8 +3545,8 @@
             }
 
             // Check storage health before attempting upload
-            const stats = getStorageStats();
-            if (stats.usagePercent > 95) {
+            const stats = await getStorageStats();
+            if (stats.localStorage.usagePercent > 95) {
                 showToast('Storage nearly full! Upload may not cache locally.', 'warning');
             }
 
@@ -3559,8 +3708,8 @@
 
             try {
                 // Check storage health before attempting upload
-                const stats = getStorageStats();
-                if (stats.usagePercent > 95) {
+                const stats = await getStorageStats();
+                if (stats.localStorage.usagePercent > 95) {
                     showToast('Storage nearly full! Upload may not cache locally.', 'warning');
                 }
 
