@@ -670,6 +670,61 @@
             height: 32px;
         }
 
+        /* Upload Progress Indicator */
+        .upload-progress {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 24px;
+            margin-bottom: 8px;
+        }
+
+        .upload-progress.active {
+            display: flex;
+        }
+
+        .upload-progress-bar {
+            flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .upload-progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .upload-progress-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+            min-width: 45px;
+            text-align: right;
+        }
+
+        .upload-cancel-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--error);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .upload-cancel-btn:hover {
+            transform: scale(1.1);
+        }
+
         /* Input Area */
         .input-area {
             background: var(--bg-secondary);
@@ -1184,6 +1239,15 @@
         <div class="input-area">
             <div id="image-preview" class="image-preview"></div>
             
+            <!-- Upload Progress Indicator -->
+            <div id="upload-progress" class="upload-progress">
+                <div class="upload-progress-bar">
+                    <div id="upload-progress-fill" class="upload-progress-fill"></div>
+                </div>
+                <span id="upload-progress-text" class="upload-progress-text">0%</span>
+                <button id="upload-cancel-btn" class="upload-cancel-btn" title="Cancel">✕</button>
+            </div>
+            
             <div id="voice-recording" class="voice-recording">
                 <div class="recording-indicator">🎤</div>
                 <div class="waveform-container">
@@ -1324,6 +1388,173 @@
                 binary += String.fromCharCode.apply(null, chunk);
             }
             return btoa(binary);
+        }
+
+        // ==================== LOCALSTORAGE QUOTA MANAGEMENT ====================
+        
+        // Constants for cache management
+        const MAX_CACHE_SIZE_BYTES = 4 * 1024 * 1024; // 4MB limit for mobile safety
+        const CONTENT_KEY_PREFIX = 'content_';
+        
+        // Estimate current localStorage usage
+        function getLocalStorageUsage() {
+            try {
+                let totalBytes = 0;
+                for (let key in localStorage) {
+                    if (localStorage.hasOwnProperty(key)) {
+                        totalBytes += (localStorage[key].length + key.length) * 2; // UTF-16
+                    }
+                }
+                return totalBytes;
+            } catch (e) {
+                return 0;
+            }
+        }
+        
+        // Check if we can store data of given size
+        function canStoreInCache(dataSize) {
+            try {
+                const currentUsage = getLocalStorageUsage();
+                return (currentUsage + dataSize) < MAX_CACHE_SIZE_BYTES;
+            } catch (e) {
+                return false;
+            }
+        }
+        
+        // Evict oldest cached content to make space
+        function evictOldestCachedContent() {
+            const contentKeys = [];
+            for (let key in localStorage) {
+                if (key.startsWith(CONTENT_KEY_PREFIX)) {
+                    contentKeys.push(key);
+                }
+            }
+            if (contentKeys.length > 0) {
+                // Remove first (oldest) content - keys are in insertion order
+                localStorage.removeItem(contentKeys[0]);
+                console.log(`Evicted cached content: ${contentKeys[0]}`);
+                return true;
+            }
+            return false;
+        }
+        
+        // Safely cache content with quota management
+        async function cacheContentWithQuota(messageId, encryptedBase64) {
+            const dataSize = encryptedBase64.length * 2; // UTF-16 estimate
+            
+            // Try to cache, evicting old content if needed
+            let attempts = 0;
+            const maxAttempts = 3;
+            
+            while (attempts < maxAttempts) {
+                try {
+                    if (canStoreInCache(dataSize)) {
+                        localStorage.setItem(`${CONTENT_KEY_PREFIX}${messageId}`, encryptedBase64);
+                        console.log(`Cached content for message ${messageId}`);
+                        return true;
+                    } else {
+                        // Need to evict old content
+                        const evicted = evictOldestCachedContent();
+                        if (!evicted) {
+                            console.warn('No content to evict, cache full');
+                            return false;
+                        }
+                    }
+                } catch (e) {
+                    if (e.name === 'QuotaExceededError') {
+                        console.warn('localStorage quota exceeded, trying to evict');
+                        const evicted = evictOldestCachedContent();
+                        if (!evicted) {
+                            return false;
+                        }
+                    } else {
+                        throw e;
+                    }
+                }
+                attempts++;
+            }
+            
+            console.warn('Failed to cache content after multiple attempts');
+            return false;
+        }
+
+        // ==================== BLOB URL MANAGEMENT ====================
+        
+        // Track blob URLs to prevent memory leaks
+        const activeBlobUrls = new Set();
+        
+        // Create blob URL with tracking
+        function createTrackedBlobUrl(blob) {
+            const url = URL.createObjectURL(blob);
+            activeBlobUrls.add(url);
+            return url;
+        }
+        
+        // Revoke blob URL when done
+        function revokeTrackedBlobUrl(url) {
+            if (activeBlobUrls.has(url)) {
+                URL.revokeObjectURL(url);
+                activeBlobUrls.delete(url);
+            }
+        }
+        
+        // Cleanup all blob URLs (call when leaving chat)
+        function cleanupAllBlobUrls() {
+            for (const url of activeBlobUrls) {
+                URL.revokeObjectURL(url);
+            }
+            activeBlobUrls.clear();
+            console.log('Cleaned up all blob URLs');
+        }
+
+        // ==================== UPLOAD PROGRESS UI ====================
+        
+        // Show/hide upload progress indicator
+        function showUploadProgress(show) {
+            const progressEl = document.getElementById('upload-progress');
+            if (progressEl) {
+                if (show) {
+                    progressEl.classList.add('active');
+                } else {
+                    progressEl.classList.remove('active');
+                    updateUploadProgress(0);
+                }
+            }
+        }
+        
+        // Update progress bar and text
+        function updateUploadProgress(percent) {
+            const fillEl = document.getElementById('upload-progress-fill');
+            const textEl = document.getElementById('upload-progress-text');
+            if (fillEl) {
+                fillEl.style.width = `${Math.min(100, Math.max(0, percent))}%`;
+            }
+            if (textEl) {
+                textEl.textContent = `${Math.round(Math.min(100, Math.max(0, percent)))}%`;
+            }
+        }
+        
+        // Upload cancel functionality
+        let currentUploader = null;
+        let isUploadCancelled = false;
+        
+        function setupUploadCancel(uploader) {
+            const cancelBtn = document.getElementById('upload-cancel-btn');
+            if (cancelBtn) {
+                cancelBtn.onclick = async () => {
+                    isUploadCancelled = true;
+                    showToast('Upload cancelled', 'info');
+                    showUploadProgress(false);
+                    
+                    if (uploader && currentChat) {
+                        try {
+                            await uploader.cancel(currentChat.handle);
+                        } catch (e) {
+                            console.warn('Failed to cancel upload on server:', e);
+                        }
+                    }
+                };
+            }
         }
 
         // ==================== CHUNKED UPLOAD CLASS ====================
@@ -1960,6 +2191,14 @@
             currentChat = chats.find(chat => chat.handle === handle);
             if (!currentChat) return;
 
+            // Cleanup before opening new chat
+            cleanupAllBlobUrls();
+            for (const [player, { audio }] of activeAudioPlayers.entries()) {
+                audio.pause();
+                audio.src = '';
+            }
+            activeAudioPlayers.clear();
+
             chatListContainer.style.display = 'none';
             chatContainer.style.display = 'flex';
 
@@ -1990,6 +2229,17 @@
         function backToChatList() {
             stopPolling();
             stopHeartbeat();
+            
+            // Cleanup blob URLs to prevent memory leaks
+            cleanupAllBlobUrls();
+            
+            // Cleanup audio players
+            for (const [player, { audio }] of activeAudioPlayers.entries()) {
+                audio.pause();
+                audio.src = '';
+            }
+            activeAudioPlayers.clear();
+            
             chatContainer.style.display = 'none';
             chatListContainer.style.display = 'flex';
             renderChatList();
@@ -2255,7 +2505,7 @@
                             // Content is cached, decrypt and render immediately
                             const decryptedAudioBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
                             const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
-                            const audioUrl = URL.createObjectURL(audioBlob);
+                            const audioUrl = createTrackedBlobUrl(audioBlob);
                             const audio = new Audio(audioUrl);
 
                             await new Promise(resolve => {
@@ -2276,10 +2526,10 @@
                             // Content embedded in message (legacy support)
                             if (message.encryptedContent) {
                                 // Cache and render immediately
-                                localStorage.setItem(`content_${message.id}`, message.encryptedContent);
+                                await cacheContentWithQuota(message.id, message.encryptedContent);
                                 const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
                                 const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
-                                const audioUrl = URL.createObjectURL(audioBlob);
+                                const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
 
                                 await new Promise(resolve => {
@@ -2305,7 +2555,7 @@
                             // Content is cached, decrypt and render immediately
                             const decryptedImageBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
                             const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
-                            const imageUrl = URL.createObjectURL(imageBlob);
+                            const imageUrl = createTrackedBlobUrl(imageBlob);
 
                             contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
                         } else if (message.encryptedContent === null) {
@@ -2315,10 +2565,10 @@
                             // Content embedded in message (legacy support)
                             if (message.encryptedContent) {
                                 // Cache and render immediately
-                                localStorage.setItem(`content_${message.id}`, message.encryptedContent);
+                                await cacheContentWithQuota(message.id, message.encryptedContent);
                                 const decryptedImageBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
                                 const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
-                                const imageUrl = URL.createObjectURL(imageBlob);
+                                const imageUrl = createTrackedBlobUrl(imageBlob);
 
                                 contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
                             } else {
@@ -3016,6 +3266,10 @@
         let isUploading = false;
         let currentUploadSessionId = null;
 
+        // Constants for file size limits
+        const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB limit
+        const MAX_VOICE_SIZE = 2 * 1024 * 1024; // 2MB limit
+
         async function sendImageChunked() {
             if (!selectedImage || !currentChat) {
                 showToast('No image selected', 'error');
@@ -3027,15 +3281,29 @@
                 return;
             }
 
+            // Validate file size
+            const base64Data = selectedImage.split(',')[1];
+            const fileSizeBytes = base64Data.length * 0.75; // base64 is ~75% efficient
+            if (fileSizeBytes > MAX_IMAGE_SIZE) {
+                showToast(`Image too large. Maximum size is ${MAX_IMAGE_SIZE / 1024 / 1024}MB`, 'error');
+                window.removeImage();
+                return;
+            }
+
             isUploading = true;
+            isUploadCancelled = false;
             const uploader = new ChunkedUploader();
             currentUploadSessionId = uploader.sessionId;
+            currentUploader = uploader;
+
+            // Setup cancel button
+            setupUploadCancel(uploader);
 
             try {
                 showToast('Uploading image...', 'info');
+                showUploadProgress(true);
 
                 // Convert base64 to binary
-                const base64Data = selectedImage.split(',')[1];
                 const binaryString = atob(base64Data);
                 const bytes = new Uint8Array(binaryString.length);
                 for (let i = 0; i < binaryString.length; i++) {
@@ -3077,14 +3345,16 @@
                     finalData,
                     'image',
                     (progress) => {
+                        if (isUploadCancelled) return;
                         console.log(`Upload progress: ${progress.toFixed(0)}%`);
-                        // Could show progress in UI here
+                        updateUploadProgress(progress);
                     }
                 );
 
                 // Check if upload was cancelled
-                if (currentUploadSessionId !== uploader.sessionId) {
-                    throw new Error('Upload was cancelled');
+                if (isUploadCancelled) {
+                    showUploadProgress(false);
+                    return;
                 }
 
                 // Finalize upload
@@ -3103,16 +3373,22 @@
 
                 // CACHE THE ENCRYPTED IMAGE LOCALLY FOR SENDER
                 const actualMessageId = result.messageId;
-                localStorage.setItem(`content_${actualMessageId}`, encryptedImage);
+                await cacheContentWithQuota(actualMessageId, encryptedImage);
 
                 showToast('Image sent successfully!', 'success');
+                showUploadProgress(false);
                 window.removeImage();
                 fetchMessages();
             } catch (error) {
                 console.error('Image upload error:', error);
+                showUploadProgress(false);
+
+                if (!isUploadCancelled) {
+                    showToast('Failed to send image', 'error');
+                }
 
                 // Try to cancel the upload if it's still active
-                if (uploader && uploader.sessionId === currentUploadSessionId) {
+                if (uploader && uploader.sessionId === currentUploadSessionId && !isUploadCancelled) {
                     try {
                         await uploader.cancel(currentChat.handle);
                     } catch (cancelError) {
@@ -3120,19 +3396,26 @@
                     }
                 }
 
-                showToast('Failed to send image', 'error');
-
                 // Clean up on failure
                 cleanupFailedUpload(uploader);
             } finally {
                 isUploading = false;
                 currentUploadSessionId = null;
+                currentUploader = null;
             }
         }
 
         async function sendVoiceMessage(audioBlob) {
             try {
+                // Validate voice message size
+                const fileSizeBytes = audioBlob.size;
+                if (fileSizeBytes > MAX_VOICE_SIZE) {
+                    showToast(`Voice message too large. Maximum size is ${MAX_VOICE_SIZE / 1024 / 1024}MB`, 'error');
+                    return;
+                }
+
                 showToast('Processing voice message...', 'info');
+                showUploadProgress(true);
                 
                 const arrayBuffer = await audioBlob.arrayBuffer();
 
@@ -3142,6 +3425,7 @@
                     encryptedAudio = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
                 } catch (error) {
                     showToast('Failed to encrypt voice message', 'error');
+                    showUploadProgress(false);
                     return;
                 }
 
@@ -3170,14 +3454,18 @@
                     finalData = compressedBytes.buffer;
                 }
 
-                // 3. Chunk and upload
+                // 3. Chunk and upload with progress
                 const uploader = new ChunkedUploader();
+                setupUploadCancel(uploader);
+                
                 await uploader.uploadChunked(
                     currentChat.handle,
                     finalData,
                     'voice',
                     (progress) => {
+                        if (isUploadCancelled) return;
                         console.log(`Voice upload progress: ${progress.toFixed(0)}%`);
+                        updateUploadProgress(progress);
                     }
                 );
 
@@ -3196,12 +3484,14 @@
 
                 // CACHE THE ENCRYPTED AUDIO LOCALLY FOR SENDER
                 const actualMessageId = result.messageId;
-                localStorage.setItem(`content_${actualMessageId}`, encryptedAudio);
+                await cacheContentWithQuota(actualMessageId, encryptedAudio);
 
                 showToast('Voice message sent successfully!', 'success');
+                showUploadProgress(false);
                 fetchMessages();
             } catch (error) {
                 console.error('Voice upload error:', error);
+                showUploadProgress(false);
                 showToast('Failed to send voice message', 'error');
             }
         }
@@ -3547,8 +3837,8 @@
                     }
                 }
 
-                // Cache the encrypted content (now decompressed)
-                localStorage.setItem(`content_${messageId}`, encryptedBase64);
+                // Cache the encrypted content (now decompressed) with quota management
+                await cacheContentWithQuota(messageId, encryptedBase64);
 
                 showToast(`${contentType === 'voice' ? 'Voice' : 'Image'} cached!`, 'success');
 
@@ -3573,7 +3863,7 @@
                             if (contentType === 'voice') {
                                 const decryptedAudioBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
                                 const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
-                                const audioUrl = URL.createObjectURL(audioBlob);
+                                const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
                                 
                                 await new Promise(resolve => {
@@ -3594,7 +3884,7 @@
                             } else if (contentType === 'image') {
                                 const decryptedImageBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
                                 const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
-                                const imageUrl = URL.createObjectURL(imageBlob);
+                                const imageUrl = createTrackedBlobUrl(imageBlob);
 
                                 const imgHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
                                 
