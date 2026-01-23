@@ -2269,11 +2269,11 @@
 
                             const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
                             contentHtml = voicePlayer;
-                        } else if (message.encryptedContent === null && !isOwn) {
-                            // Only receivers see download button for deferred content
+                        } else if (message.encryptedContent === null) {
+                            // Content stored separately - show download button for everyone who doesn't have cache
                             contentHtml = createDeferredContentButton(message.id, 'voice');
                         } else {
-                            // Sender has content in message.encryptedContent OR receiver still downloading
+                            // Content embedded in message (legacy support)
                             if (message.encryptedContent) {
                                 // Cache and render immediately
                                 localStorage.setItem(`content_${message.id}`, message.encryptedContent);
@@ -2294,8 +2294,8 @@
                                 const voicePlayer = await createVoicePlayer(audioUrl, audio.duration);
                                 contentHtml = voicePlayer;
                             } else {
-                                // Fallback: no content available
-                                contentHtml = `<div class="message-error">🎤 Voice message unavailable</div>`;
+                                // Fallback: show download button
+                                contentHtml = createDeferredContentButton(message.id, 'voice');
                             }
                         }
                     } else if (isImage) {
@@ -2308,11 +2308,11 @@
                             const imageUrl = URL.createObjectURL(imageBlob);
 
                             contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
-                        } else if (message.encryptedContent === null && !isOwn) {
-                            // Only receivers see download button for deferred content
+                        } else if (message.encryptedContent === null) {
+                            // Content stored separately - show download button for everyone who doesn't have cache
                             contentHtml = createDeferredContentButton(message.id, 'image');
                         } else {
-                            // Sender has content in message.encryptedContent OR receiver still downloading
+                            // Content embedded in message (legacy support)
                             if (message.encryptedContent) {
                                 // Cache and render immediately
                                 localStorage.setItem(`content_${message.id}`, message.encryptedContent);
@@ -2322,8 +2322,8 @@
 
                                 contentHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
                             } else {
-                                // Fallback: no content available
-                                contentHtml = `<div class="message-error">🖼️ Image unavailable</div>`;
+                                // Fallback: show download button
+                                contentHtml = createDeferredContentButton(message.id, 'image');
                             }
                         }
                     } else {
@@ -3211,6 +3211,36 @@
             localStorage.setItem('chats', JSON.stringify(chats));
         }
 
+        // Logout function - clears credentials and redirects to login
+        function logout(automatic = false) {
+            // If not automatic, ask for confirmation
+            if (!automatic && !confirm('Are you sure you want to logout?')) {
+                return;
+            }
+
+            // Stop any active polling/heartbeat
+            stopPolling();
+            stopHeartbeat();
+            stopChatListPolling();
+
+            // Clear authentication credentials
+            localStorage.removeItem('userId');
+            localStorage.removeItem('privateKey');
+            localStorage.removeItem('serverPassword');
+
+            // Optionally clear other session data (but keep chats and userName for convenience)
+            // localStorage.removeItem('userName');
+            // localStorage.removeItem('chats');
+
+            // Clear the credentials from auth.js
+            if (typeof clearCredentials === 'function') {
+                clearCredentials();
+            }
+
+            // Redirect to login page
+            window.location.href = '/';
+        }
+
         // Message caching helpers
         function loadCachedMessages(chatHandle) {
             const cacheKey = `messages_${chatHandle}`;
@@ -3647,7 +3677,4 @@
         };
     </script>
 </body>
-</html>
-    </script>
-</html>
 </html>
