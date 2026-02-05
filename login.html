@@ -1209,6 +1209,118 @@
             color: #000;
         }
 
+        /* P2P Transfer Indicator */
+        @keyframes p2pSlideIn {
+            from { opacity: 0; transform: translateX(100px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        @keyframes p2pPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(0, 200, 150, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(0, 200, 150, 0); }
+        }
+
+        .p2p-transfer-indicator {
+            position: fixed;
+            bottom: 120px;
+            right: 20px;
+            background: #1a1a2e;
+            border-radius: 16px;
+            padding: 16px;
+            z-index: 1000;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            animation: p2pSlideIn 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+            min-width: 280px;
+        }
+
+        .p2p-indicator-content {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .p2p-indicator-ring-wrapper {
+            position: relative;
+            width: 60px;
+            height: 60px;
+            flex-shrink: 0;
+        }
+
+        .p2p-indicator-ring {
+            width: 60px;
+            height: 60px;
+            transform: rotate(-90deg);
+        }
+
+        .p2p-indicator-ring circle {
+            stroke-linecap: round;
+        }
+
+        .p2p-ring-bg {
+            fill: none;
+            stroke: #2d2d44;
+            stroke-width: 4;
+        }
+
+        .p2p-ring-progress {
+            fill: none;
+            stroke: url(#p2pGradient);
+            stroke-width: 4;
+            transition: stroke-dashoffset 0.3s ease-out;
+        }
+
+        .p2p-indicator-percent {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 14px;
+            font-weight: 700;
+            color: #00c896;
+        }
+
+        .p2p-indicator-info {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            flex: 1;
+            min-width: 0;
+        }
+
+        .p2p-indicator-name {
+            font-size: 14px;
+            color: #ffffff;
+            font-weight: 600;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .p2p-indicator-progress {
+            font-size: 12px;
+            color: #888;
+        }
+
+        .p2p-indicator-cancel {
+            background: transparent;
+            border: none;
+            color: #666;
+            cursor: pointer;
+            font-size: 20px;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+        }
+
+        .p2p-indicator-cancel:hover {
+            background: rgba(255, 80, 80, 0.2);
+            color: #ff5050;
+        }
+
         /* P2P Transfer Progress */
         .p2p-transfer-progress {
             display: none;
@@ -1682,8 +1794,29 @@
         </div>
     </div>
 
-    <!-- P2P Transfer Progress Container -->
-    <div id="p2p-transfer-progress-container"></div>
+    <!-- P2P Transfer Indicator -->
+    <div id="p2p-transfer-indicator" class="p2p-transfer-indicator" style="display: none;">
+        <div class="p2p-indicator-content">
+            <div class="p2p-indicator-ring-wrapper">
+                <svg class="p2p-indicator-ring" viewBox="0 0 60 60">
+                    <defs>
+                        <linearGradient id="p2pGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stop-color="#00c896"/>
+                            <stop offset="100%" stop-color="#00a0ff"/>
+                        </linearGradient>
+                    </defs>
+                    <circle class="p2p-ring-bg" cx="30" cy="30" r="26"/>
+                    <circle class="p2p-ring-progress" cx="30" cy="30" r="26" stroke-dasharray="163.36 163.36" stroke-dashoffset="163.36"/>
+                </svg>
+                <div class="p2p-indicator-percent" id="p2p-indicator-percent">0%</div>
+            </div>
+            <div class="p2p-indicator-info">
+                <div class="p2p-indicator-name" id="p2p-indicator-name">Transferring...</div>
+                <div class="p2p-indicator-progress" id="p2p-indicator-progress">Starting transfer</div>
+            </div>
+            <button id="p2p-indicator-cancel" class="p2p-indicator-cancel" title="Cancel transfer">✕</button>
+        </div>
+    </div>
 
     <script src="p2p-transfer-manager.js"></script>
     <script>
@@ -4995,6 +5128,10 @@
 
                 // Update UI to show transfer is starting
                 updateTransferProgressToSending(transferSessionId);
+                const transferInfo = activeTransfers.get(transferSessionId);
+                if (transferInfo) {
+                    showTransferIndicator(transferSessionId, transferInfo.fileName, 'sending');
+                }
 
                 // PHASE 2: Start sending chunks now that receiver has accepted
                 await p2pTransferManager.startTransfer(transferSessionId);
@@ -5011,6 +5148,7 @@
                 transfer.on('sendComplete', () => {
                     showToast('File sent successfully!', 'success');
                     completeTransferProgress(transferSessionId);
+                    hideTransferIndicator();
                     activeTransfers.delete(transferSessionId);
                     saveInProgressTransfers();
                 });
@@ -5018,6 +5156,7 @@
                 transfer.on('sendFailed', (data) => {
                     showToast(`Transfer failed: ${data.error.message}`, 'error');
                     failTransferProgress(transferSessionId, data.error.message);
+                    hideTransferIndicator();
                     activeTransfers.delete(transferSessionId);
                     saveInProgressTransfers();
                 });
@@ -5036,134 +5175,105 @@
             }
         }
 
-        // Show transfer progress with "awaiting acceptance" status
-        function showTransferProgressAwaitingAcceptance(sessionId, fileName, fileSize) {
-            const container = document.getElementById('p2p-transfer-progress-container');
-            if (!container) return;
+        // Store current active transfer session ID
+        let activeTransferSessionId = null;
 
-            const progressEl = document.createElement('div');
-            progressEl.className = 'p2p-transfer-progress active';
-            progressEl.id = `p2p-progress-${sessionId}`;
-            
-            progressEl.innerHTML = `
-                <div class="p2p-transfer-info">
-                    <div class="p2p-transfer-name">${escapeHtml(fileName)}</div>
-                    <div class="p2p-transfer-details" id="p2p-status-${sessionId}">⏳ Waiting for acceptance - ${formatFileSize(fileSize)}</div>
-                </div>
-                <div class="p2p-transfer-progress-bar">
-                    <div class="p2p-transfer-progress-fill" id="p2p-fill-${sessionId}" style="width: 0%"></div>
-                </div>
-                <div class="p2p-transfer-progress-text" id="p2p-progress-text-${sessionId}">Pending</div>
-                <button class="p2p-transfer-cancel-btn" onclick="cancelP2PTransfer('${sessionId}')" title="Cancel">✕</button>
-            `;
-
-            container.appendChild(progressEl);
-        }
-
-        // Update transfer progress UI to show "sending" status
-        function updateTransferProgressToSending(sessionId) {
-            const statusEl = document.getElementById(`p2p-status-${sessionId}`);
-            if (statusEl) {
-                statusEl.textContent = statusEl.textContent.replace('⏳ Waiting for acceptance', '📤 Sending');
-            }
-            const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
-            if (progressText) {
-                progressText.textContent = '0%';
-            }
-        }
-
-        // Show transfer progress UI
-        function showTransferProgress(sessionId, fileName, fileSize, direction) {
-            const container = document.getElementById('p2p-transfer-progress-container');
-            if (!container) return;
-
-            const progressEl = document.createElement('div');
-            progressEl.className = 'p2p-transfer-progress active';
-            progressEl.id = `p2p-progress-${sessionId}`;
-            
-            const statusText = direction === 'sending' ? 'Sending' : 'Receiving';
-            
-            progressEl.innerHTML = `
-                <div class="p2p-transfer-info">
-                    <div class="p2p-transfer-name">${escapeHtml(fileName)}</div>
-                    <div class="p2p-transfer-details">${statusText} - ${formatFileSize(fileSize)}</div>
-                </div>
-                <div class="p2p-transfer-progress-bar">
-                    <div class="p2p-transfer-progress-fill" style="width: 0%"></div>
-                </div>
-                <div class="p2p-transfer-progress-text" id="p2p-progress-text-${sessionId}">0%</div>
-                <button class="p2p-transfer-cancel-btn" onclick="cancelP2PTransfer('${sessionId}')" title="Cancel">✕</button>
-            `;
-
-            container.appendChild(progressEl);
-        }
-
-        // Debounce progress updates to batch DOM operations
-        const pendingProgressUpdates = new Map();
-        let progressUpdateScheduled = false;
-
-        function flushProgressUpdates() {
-            pendingProgressUpdates.forEach(({ progress, totalChunks }, sessionId) => {
-                const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
-                const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
-
-                if (progressEl) {
-                    const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
-                    if (fill) {
-                        fill.style.width = `${Math.round(progress)}%`;
-                    }
-                }
-
-                if (progressText) {
-                    progressText.textContent = `${Math.round(progress)}%`;
-                }
-            });
-            pendingProgressUpdates.clear();
-            progressUpdateScheduled = false;
-        }
-
-        // Update transfer progress (debounced)
+        // Update transfer progress
         function updateTransferProgress(sessionId, progress, totalChunks) {
-            pendingProgressUpdates.set(sessionId, { progress, totalChunks });
-            if (!progressUpdateScheduled) {
-                progressUpdateScheduled = true;
-                requestAnimationFrame(flushProgressUpdates);
+            updateTransferIndicator(sessionId, progress);
+        }
+
+        function updateTransferProgressToSending(sessionId) {
+            // Just a placeholder - indicator already shows direction
+        }
+
+        function showTransferProgressAwaitingAcceptance(sessionId, fileName, fileSize) {
+            // Just a placeholder - indicator will show when transfer starts
+        }
+
+        function showTransferProgress(sessionId, fileName, fileSize, direction) {
+            // Just a placeholder - indicator will show when transfer starts
+        }
+
+        // Update transfer indicator with progress
+        function updateTransferIndicator(sessionId, progress) {
+            const indicatorEl = document.getElementById('p2p-transfer-indicator');
+            if (!indicatorEl) return;
+
+            const progressCircle = indicatorEl.querySelector('.p2p-ring-progress');
+            const percentText = document.getElementById('p2p-indicator-percent');
+            const progressText = document.getElementById('p2p-indicator-progress');
+            const roundedProgress = Math.round(progress);
+
+            if (progressCircle) {
+                // Circumference = 2 * π * r = 2 * π * 26 ≈ 163.36
+                const circumference = 163.36;
+                const offset = circumference - (progress / 100) * circumference;
+                progressCircle.style.strokeDashoffset = offset;
+            }
+
+            if (percentText) {
+                percentText.textContent = `${roundedProgress}%`;
+            }
+
+            if (progressText) {
+                progressText.textContent = `${roundedProgress}% complete`;
             }
         }
+
+        // Show transfer indicator
+        function showTransferIndicator(sessionId, fileName, direction) {
+            activeTransferSessionId = sessionId;
+            const indicatorEl = document.getElementById('p2p-transfer-indicator');
+            const nameEl = document.getElementById('p2p-indicator-name');
+            const percentText = document.getElementById('p2p-indicator-percent');
+            const progressText = document.getElementById('p2p-indicator-progress');
+            const progressCircle = indicatorEl?.querySelector('.p2p-ring-progress');
+
+            if (nameEl) {
+                const directionEmoji = direction === 'sending' ? '📤' : '📥';
+                const directionText = direction === 'sending' ? 'Sending' : 'Receiving';
+                nameEl.textContent = `${directionEmoji} ${directionText}: ${fileName}`;
+            }
+
+            // Reset progress
+            if (percentText) percentText.textContent = '0%';
+            if (progressText) progressText.textContent = 'Starting...';
+            if (progressCircle) progressCircle.style.strokeDashoffset = '163.36';
+
+            if (indicatorEl) {
+                indicatorEl.style.display = 'block';
+            }
+        }
+
+        // Hide transfer indicator
+        function hideTransferIndicator() {
+            activeTransferSessionId = null;
+            const indicatorEl = document.getElementById('p2p-transfer-indicator');
+            if (indicatorEl) {
+                indicatorEl.style.display = 'none';
+            }
+        }
+
+        // Cancel transfer from indicator button
+        document.addEventListener('DOMContentLoaded', () => {
+            const cancelBtn = document.getElementById('p2p-indicator-cancel');
+            if (cancelBtn) {
+                cancelBtn.addEventListener('click', () => {
+                    if (activeTransferSessionId && currentChat) {
+                        cancelP2PTransfer(activeTransferSessionId);
+                    }
+                });
+            }
+        });
 
         // Complete transfer progress
         function completeTransferProgress(sessionId) {
-            const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
-            if (progressEl) {
-                const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
-                const details = progressEl.querySelector('.p2p-transfer-details');
-                const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
-                const cancelBtn = progressEl.querySelector('.p2p-transfer-cancel-btn');
-                
-                if (fill) fill.style.width = '100%';
-                if (details) details.textContent = '✓ Completed';
-                if (progressText) progressText.textContent = '100%';
-                if (cancelBtn) cancelBtn.style.display = 'none';
-                
-                // Auto-remove after 5 seconds
-                setTimeout(() => {
-                    progressEl.remove();
-                }, 5000);
-            }
+            // Indicator will be hidden by hideTransferIndicator()
         }
 
-        // Fail transfer progress
         function failTransferProgress(sessionId, errorMessage) {
-            const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
-            if (progressEl) {
-                const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
-                const details = progressEl.querySelector('.p2p-transfer-details');
-                const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
-                
-                if (fill) fill.style.background = 'var(--error)';
-                if (details) details.textContent = `✗ Failed: ${errorMessage}`;
-                if (progressText) progressText.textContent = 'Failed';
-            }
+            // Indicator will be hidden by hideTransferIndicator()
         }
 
         // Cancel P2P transfer
@@ -5172,15 +5282,28 @@
                 if (currentChat) {
                     await p2pTransferManager.cancelTransfer(currentChat.handle, sessionId);
                 }
-                
+
+                // Clean up UI elements
                 const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
                 if (progressEl) {
                     progressEl.remove();
                 }
-                
+
+                hideTransferIndicator();
+
+                // Close modals
+                const p2pTransferModal = document.getElementById('p2p-transfer-modal');
+                const p2pInvitationsModal = document.getElementById('p2p-invitations-modal');
+                if (p2pTransferModal) {
+                    p2pTransferModal.classList.remove('active');
+                }
+                if (p2pInvitationsModal) {
+                    p2pInvitationsModal.classList.remove('active');
+                }
+
                 activeTransfers.delete(sessionId);
                 saveInProgressTransfers();
-                
+
                 showToast('Transfer cancelled', 'info');
             } catch (error) {
                 console.error('Failed to cancel transfer:', error);
@@ -5259,6 +5382,7 @@
 
                 // Show progress UI
                 showTransferProgress(transferSessionId, fileName, fileSize, 'receiving');
+                showTransferIndicator(transferSessionId, fileName, 'receiving');
 
                 // Store transfer for progress tracking
                 activeTransfers.set(transferSessionId, {
@@ -5295,6 +5419,7 @@
                     URL.revokeObjectURL(url);
 
                     completeTransferProgress(transferSessionId);
+                    hideTransferIndicator();
                     activeTransfers.delete(transferSessionId);
                     saveInProgressTransfers();
 
@@ -5308,6 +5433,7 @@
                 transfer.on('error', (error) => {
                     showToast(`Transfer failed: ${error.message}`, 'error');
                     failTransferProgress(transferSessionId, error.message);
+                    hideTransferIndicator();
                     activeTransfers.delete(transferSessionId);
                     saveInProgressTransfers();
                 });
