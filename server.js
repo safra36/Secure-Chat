@@ -7,6 +7,47 @@ const crypto = require('crypto');
 const PasswordLoader = require('./password-loader');
 const AssetLoader = require('./asset-loader');
 
+// ==================== LOGGING CONFIGURATION ====================
+// P2P Transfer logging utility - detailed logs with status codes and flow information
+function logP2PTransfer(operation, transferSessionId, status, details = {}) {
+	const timestamp = new Date().toISOString();
+	const statusCode = details.statusCode || '-';
+	const chatHandle = details.chatHandle || '-';
+	const fileName = details.fileName ? ` | File: ${details.fileName}` : '';
+	const progress = details.progress ? ` | Progress: ${details.progress}` : '';
+	const error = details.error ? ` | Error: ${details.error}` : '';
+	const userId = details.userId ? ` | User: ${details.userId}` : '';
+	const chunkInfo = details.chunkIndex !== undefined ? ` | Chunk: ${details.chunkIndex}/${details.totalChunks}` : '';
+	
+	console.log(`[P2P-TRANSFER] ${timestamp} | OP: ${operation} | SID: ${transferSessionId} | Status: ${status} | HTTP: ${statusCode} | Chat: ${chatHandle}${fileName}${progress}${error}${userId}${chunkInfo}`);
+}
+
+// Suppress general server logs
+const originalLog = console.log;
+const originalWarn = console.warn;
+const originalError = console.error;
+
+let suppressGeneral = false;
+console.log = function(...args) {
+	const message = args[0]?.toString() || '';
+	// Always show P2P transfer logs, errors, and critical info
+	if (message.includes('[P2P-TRANSFER]') || message.includes('❌') || message.includes('✅') || message.includes('Error') || message.includes('error') || message.includes('Shutting down')) {
+		originalLog.apply(console, args);
+	}
+	// Suppress other general logs
+};
+
+console.warn = function(...args) {
+	const message = args[0]?.toString() || '';
+	if (message.includes('P2P') || message.includes('WARNING')) {
+		originalWarn.apply(console, args);
+	}
+};
+
+console.error = function(...args) {
+	originalError.apply(console, args);
+};
+
 // In-memory storage for messages (in production, use a database)
 const messagesStorage = new Map();
 
@@ -26,6 +67,23 @@ const uploadSessions = new Map();
 // Structure: messageId -> { isCompressed }
 const messageMetadata = new Map();
 
+// ==================== P2P TRANSFER STORAGE ====================
+// In-memory storage for P2P transfer sessions
+// Structure: transferSessionId -> TransferSession
+const p2pTransfers = new Map();
+
+// In-memory storage for pending transfer invitations
+// Structure: chatHandle -> [Invitation] (simplified - all transfers in a chat are accessible)
+const transferInvitations = new Map();
+
+// P2P Transfer constants
+const P2P_CHUNK_SIZE = 256 * 1024; // 256KB
+const P2P_ACK_TIMEOUT = 10000; // 10 seconds
+const P2P_MAX_RETRIES = 3;
+const P2P_MAX_CONCURRENT = 2;
+const P2P_INVITATION_EXPIRY = 24 * 60 * 60 * 1000; // 24 hours
+const P2P_TRANSFER_EXPIRY = 60 * 60 * 1000; // 1 hour for incomplete transfers
+
 // Grace period for marking users as offline (in milliseconds)
 const OFFLINE_GRACE_PERIOD = 30000; // 30 seconds
 const OFFLINE_THRESHOLD = 15000; // 15 seconds before grace period
@@ -43,6 +101,80 @@ setInterval(() => {
 		}
 	}
 }, 60000); // Check every 60 seconds
+
+// Cleanup old P2P transfers periodically (every 5 minutes)
+setInterval(() => {
+const now = Date.now();
+
+// Clean up expired invitations in each chat
+for (const [chatHandle, invitations] of transferInvitations.entries()) {
+	const activeInvitations = invitations.filter(inv => {
+		if (now - inv.createdAt > P2P_INVITATION_EXPIRY) {
+			console.log(`Cleaning up expired P2P invitation: ${inv.transferSessionId}`);
+			return false;
+		}
+		return true;
+	});
+	
+	if (activeInvitations.length === 0) {
+		transferInvitations.delete(chatHandle);
+	} else {
+		transferInvitations.set(chatHandle, activeInvitations);
+	}
+}
+
+// Clean up expired/incomplete transfers
+for (const [transferSessionId, transfer] of p2pTransfers.entries()) {
+	const age = now - transfer.createdAt;
+	
+	if (transfer.status === 'PENDING' && age > P2P_INVITATION_EXPIRY) {
+		console.log(`Cleaning up expired P2P transfer: ${transferSessionId}`);
+		cleanupP2PTransfer(transferSessionId);
+	} else if (transfer.status !== 'COMPLETED' && age > P2P_TRANSFER_EXPIRY) {
+		console.log(`Cleaning up incomplete P2P transfer: ${transferSessionId}`);
+		transfer.status = 'FAILED';
+		cleanupP2PTransfer(transferSessionId);
+	}
+}
+}, 5 * 60 * 1000);
+
+// ==================== P2P HELPER FUNCTIONS ====================
+
+function cleanupP2PTransfer(transferSessionId) {
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (transfer) {
+		// Clear chunk queue
+		if (transfer.chunks) {
+			transfer.chunks.clear();
+		}
+		
+		// Remove from storage
+		p2pTransfers.delete(transferSessionId);
+		
+		console.log(`Cleaned up P2P transfer: ${transferSessionId}`);
+	}
+}
+
+function getP2PTransferCounts(userId) {
+	let sending = 0;
+	let receiving = 0;
+	
+	for (const transfer of p2pTransfers.values()) {
+		if (transfer.status === 'COMPLETED' || transfer.status === 'FAILED') continue;
+		
+		if (transfer.senderId === userId) {
+			sending++;
+		}
+		// Count receiving transfers: any transfer the user is actively receiving
+		// (not the sender, and in TRANSFERRING state)
+		if (transfer.senderId !== userId &&
+		    ['ACCEPTED', 'TRANSFERRING'].includes(transfer.status)) {
+			receiving++;
+		}
+	}
+	
+	return { sending, receiving };
+}
 
 // Load password from external .passwd file
 const SERVER_PASSWRD = PasswordLoader.loadPassword();
@@ -191,6 +323,71 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	if (req.method === 'GET' && pathname.startsWith('/download-content/')) {
 		console.log(`Handling GET /download-content/`);
 		handleDownloadContent(req, res, pathname);
+		return;
+	}
+
+	// ==================== P2P TRANSFER ENDPOINTS ====================
+
+	// POST /transfer/initiate/{chatHandle} - Initiate a P2P file transfer
+	if (req.method === 'POST' && pathname.startsWith('/transfer/initiate/')) {
+		console.log('Handling POST /transfer/initiate/');
+		handleTransferInitiate(req, res, pathname);
+		return;
+	}
+
+	// GET /transfer/invitations/{chatHandle} - Get pending invitations for receiver
+	if (req.method === 'GET' && pathname.startsWith('/transfer/invitations/')) {
+		console.log('Handling GET /transfer/invitations/');
+		handleTransferGetInvitations(req, res, pathname);
+		return;
+	}
+
+	// POST /transfer/accept/{chatHandle}/{transferSessionId} - Accept a transfer invitation
+	if (req.method === 'POST' && pathname.startsWith('/transfer/accept/')) {
+		console.log('Handling POST /transfer/accept/');
+		handleTransferAccept(req, res, pathname);
+		return;
+	}
+
+	// POST /transfer/send-chunk/{chatHandle}/{transferSessionId} - Sender pushes a chunk
+	if (req.method === 'POST' && pathname.startsWith('/transfer/send-chunk/')) {
+		console.log('Handling POST /transfer/send-chunk/');
+		handleTransferSendChunk(req, res, pathname);
+		return;
+	}
+
+	// GET /transfer/receive-chunk/{chatHandle}/{transferSessionId} - Receiver polls for chunks with ACK
+	if (req.method === 'GET' && pathname.startsWith('/transfer/receive-chunk/')) {
+		console.log('Handling GET /transfer/receive-chunk/');
+		handleTransferReceiveChunk(req, res, pathname);
+		return;
+	}
+
+	// POST /transfer/complete/{chatHandle}/{transferSessionId} - Mark transfer as complete
+	if (req.method === 'POST' && pathname.startsWith('/transfer/complete/')) {
+		console.log('Handling POST /transfer/complete/');
+		handleTransferComplete(req, res, pathname);
+		return;
+	}
+
+	// GET /transfer/download/{chatHandle}/{transferSessionId} - Download assembled file
+	if (req.method === 'GET' && pathname.startsWith('/transfer/download/')) {
+		console.log('Handling GET /transfer/download/');
+		handleTransferDownload(req, res, pathname);
+		return;
+	}
+
+	// POST /transfer/cancel/{chatHandle}/{transferSessionId} - Cancel a transfer
+	if (req.method === 'POST' && pathname.startsWith('/transfer/cancel/')) {
+		console.log('Handling POST /transfer/cancel/');
+		handleTransferCancel(req, res, pathname);
+		return;
+	}
+
+	// GET /transfer/status/{chatHandle}/{transferSessionId} - Get transfer status
+	if (req.method === 'GET' && pathname.startsWith('/transfer/status/')) {
+		console.log('Handling GET /transfer/status/');
+		handleTransferStatus(req, res, pathname);
 		return;
 	}
 
@@ -796,9 +993,829 @@ function handleDownloadContent(req, res, pathname) {
 	const metadata = messageMetadata.get(messageId) || { isCompressed: false };
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify({ 
+	res.end(JSON.stringify({
 		encryptedContent: contentData,
 		isCompressed: metadata.isCompressed
+	}));
+}
+
+// ==================== P2P TRANSFER HANDLERS ====================
+
+// Handle POST /transfer/initiate/{chatHandle} - Initiate a P2P file transfer
+function handleTransferInitiate(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3]; // /transfer/initiate/chatHandle
+
+	if (!chatHandle) {
+		logP2PTransfer('INITIATE', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing chat handle' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	// Extract senderId from Authorization header
+	const [senderId] = req.headers.authorization.split(':');
+
+	let body = '';
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const initData = JSON.parse(body);
+			const { fileName, fileSize, totalChunks, sha256FileChecksum } = initData;
+
+			// Check concurrent transfer limits
+			const counts = getP2PTransferCounts(senderId);
+			if (counts.sending >= P2P_MAX_CONCURRENT) {
+				logP2PTransfer('INITIATE', 'N/A', 'LIMIT_EXCEEDED', {
+					statusCode: 400,
+					chatHandle,
+					userId: senderId,
+					error: `Concurrent limit exceeded (${counts.sending}/${P2P_MAX_CONCURRENT})`
+				});
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({
+					error: 'Concurrent transfer limit exceeded',
+					current: counts.sending,
+					limit: P2P_MAX_CONCURRENT
+				}));
+				return;
+			}
+
+			// Generate transfer session ID
+			const transferSessionId = `p2p-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+			// Create transfer session (simplified - no receiverId)
+			const transfer = {
+				id: transferSessionId,
+				chatHandle: chatHandle,
+				senderId: senderId,
+				fileName: fileName,
+				fileSize: fileSize,
+				totalChunks: totalChunks,
+				sha256Checksum: sha256FileChecksum,
+				status: 'PENDING',
+				createdAt: Date.now(),
+				acceptedAt: null,
+				completedAt: null,
+				chunks: new Map(),
+				lastChunkACKed: -1,
+				lastChunkSentTime: null,
+				retryCount: 0
+			};
+
+			p2pTransfers.set(transferSessionId, transfer);
+			logP2PTransfer('INITIATE', transferSessionId, 'PENDING', {
+				statusCode: 200,
+				chatHandle,
+				userId: senderId,
+				fileName: fileName,
+				progress: `0/${totalChunks}`
+			});
+
+			// Store invitation for this chat room (indexed by chatHandle, not userId)
+			if (!transferInvitations.has(chatHandle)) {
+				transferInvitations.set(chatHandle, []);
+			}
+
+			// Look up sender's encrypted username from heartbeats
+			let senderName = null;
+			const chatUsers = userHeartbeats.get(chatHandle);
+			if (chatUsers && chatUsers.has(senderId)) {
+				senderName = chatUsers.get(senderId).encryptedUserName;
+			}
+
+			const chatInvitations = transferInvitations.get(chatHandle);
+			chatInvitations.push({
+				transferSessionId: transferSessionId,
+				chatHandle: chatHandle,
+				senderId: senderId,
+				senderName: senderName,
+				fileName: fileName,
+				fileSize: fileSize,
+				totalChunks: totalChunks,
+				createdAt: Date.now()
+			});
+
+			logP2PTransfer('INITIATE', transferSessionId, 'INVITATION_CREATED', {
+				chatHandle,
+				progress: `${chatInvitations.length} pending`
+			});
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				success: true,
+				transferSessionId: transferSessionId,
+				status: 'PENDING'
+			}));
+		} catch (error) {
+			logP2PTransfer('INITIATE', 'N/A', 'ERROR', {
+				statusCode: 400,
+				chatHandle,
+				error: error.message
+			});
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid transfer initiation data' }));
+		}
+	});
+}
+
+// Handle GET /transfer/invitations/{chatHandle} - Get pending invitations for receiver in this chat
+function handleTransferGetInvitations(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3]; // /transfer/invitations/chatHandle
+
+	if (!chatHandle) {
+		logP2PTransfer('GET_INVITATIONS', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing chat handle' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	// Extract userId from Authorization header to filter out sender's own invitations
+	const [userId] = req.headers.authorization.split(':');
+
+	// Get pending transfers in this chat, excluding sender's own
+	const chatInvitations = (transferInvitations.get(chatHandle) || [])
+		.filter(inv => inv.senderId !== userId);
+
+	logP2PTransfer('GET_INVITATIONS', 'N/A', 'SUCCESS', {
+		statusCode: 200,
+		chatHandle,
+		userId,
+		progress: `${chatInvitations.length} pending invitations`
+	});
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ invitations: chatInvitations }));
+}
+
+// Handle POST /transfer/accept/{chatHandle}/{transferSessionId} - Accept a transfer invitation
+function handleTransferAccept(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('ACCEPT', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	// Extract userId from Authorization header
+	const [userId] = req.headers.authorization.split(':');
+
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (!transfer) {
+		logP2PTransfer('ACCEPT', transferSessionId, 'NOT_FOUND', { statusCode: 404, chatHandle });
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer session not found' }));
+		return;
+	}
+
+	// Verify transfer belongs to this chat (simplified authorization)
+	if (transfer.chatHandle !== chatHandle) {
+		logP2PTransfer('ACCEPT', transferSessionId, 'CHAT_MISMATCH', {
+			statusCode: 403,
+			chatHandle,
+			userId,
+			error: `Transfer belongs to ${transfer.chatHandle}`
+		});
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer does not belong to this chat' }));
+		return;
+	}
+
+	// Check concurrent transfer limits for this user
+	const counts = getP2PTransferCounts(userId);
+	if (counts.receiving >= P2P_MAX_CONCURRENT) {
+		logP2PTransfer('ACCEPT', transferSessionId, 'LIMIT_EXCEEDED', {
+			statusCode: 400,
+			chatHandle,
+			userId,
+			error: `Recv limit (${counts.receiving}/${P2P_MAX_CONCURRENT})`
+		});
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			error: 'Concurrent receive limit exceeded',
+			current: counts.receiving,
+			limit: P2P_MAX_CONCURRENT
+		}));
+		return;
+	}
+
+	// Update transfer status
+	transfer.status = 'ACCEPTED';
+	transfer.acceptedAt = Date.now();
+
+	// Remove from pending invitations in this chat
+	const chatInvitations = transferInvitations.get(chatHandle);
+	if (chatInvitations) {
+		const index = chatInvitations.findIndex(inv => inv.transferSessionId === transferSessionId);
+		if (index !== -1) {
+			chatInvitations.splice(index, 1);
+		}
+	}
+
+	logP2PTransfer('ACCEPT', transferSessionId, 'ACCEPTED', {
+		statusCode: 200,
+		chatHandle,
+		userId,
+		fileName: transfer.fileName,
+		progress: `0/${transfer.totalChunks}`
+	});
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({
+		success: true,
+		transferSessionId: transferSessionId,
+		status: 'ACCEPTED',
+		totalChunks: transfer.totalChunks
+	}));
+}
+
+// Handle POST /transfer/send-chunk/{chatHandle}/{transferSessionId} - Sender pushes a chunk
+function handleTransferSendChunk(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('SEND_CHUNK', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	// Extract senderId from Authorization header
+	const [senderId] = req.headers.authorization.split(':');
+
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (!transfer) {
+		logP2PTransfer('SEND_CHUNK', transferSessionId, 'NOT_FOUND', { statusCode: 404, chatHandle });
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer session not found' }));
+		return;
+	}
+
+	// Verify sender is authorized (only sender can send chunks)
+	if (transfer.senderId !== senderId) {
+		logP2PTransfer('SEND_CHUNK', transferSessionId, 'UNAUTHORIZED', {
+			statusCode: 403,
+			chatHandle,
+			error: `Sender mismatch: expected ${transfer.senderId}, got ${senderId}`
+		});
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Not authorized to send chunks for this transfer' }));
+		return;
+	}
+
+	// Verify transfer belongs to this chat
+	if (transfer.chatHandle !== chatHandle) {
+		logP2PTransfer('SEND_CHUNK', transferSessionId, 'CHAT_MISMATCH', { statusCode: 403, chatHandle });
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer does not belong to this chat' }));
+		return;
+	}
+
+	// Check if transfer is in valid state for sending chunks
+	if (!['ACCEPTED', 'TRANSFERRING'].includes(transfer.status)) {
+		logP2PTransfer('SEND_CHUNK', transferSessionId, 'INVALID_STATE', {
+			statusCode: 400,
+			chatHandle,
+			error: `Status: ${transfer.status}`
+		});
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer is not in valid state for sending chunks' }));
+		return;
+	}
+
+	let bodyChunks = [];
+	req.on('data', (chunk) => {
+		bodyChunks.push(chunk);
+	});
+
+	req.on('end', () => {
+		try {
+			// Parse multipart format: JSON metadata + \r\n\r\n + binary chunk data
+			const body = Buffer.concat(bodyChunks);
+			
+			// Parse multipart format: JSON metadata + \r\n\r\n + binary chunk data
+			const dataStr = body.toString('utf8');
+			const metadataEnd = dataStr.indexOf('\r\n\r\n');
+			
+			if (metadataEnd === -1) {
+				logP2PTransfer('SEND_CHUNK', transferSessionId, 'INVALID_FORMAT', { statusCode: 400, chatHandle });
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid chunk format' }));
+				return;
+			}
+
+			const metadataStr = dataStr.substring(0, metadataEnd);
+			const metadata = JSON.parse(metadataStr);
+			const { chunkIndex, chunkSize } = metadata;
+
+			// For ACK-based flow control: sender can only send the next expected chunk
+			const nextExpectedChunk = transfer.lastChunkACKed + 1;
+			if (chunkIndex !== nextExpectedChunk) {
+				logP2PTransfer('SEND_CHUNK', transferSessionId, 'SEQUENCE_ERROR', {
+					statusCode: 400,
+					chatHandle,
+					chunkIndex,
+					totalChunks: transfer.totalChunks,
+					error: `Expected ${nextExpectedChunk}, got ${chunkIndex}`
+				});
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({
+					error: `Invalid chunk sequence. Expected chunk ${nextExpectedChunk}, got ${chunkIndex}`
+				}));
+				return;
+			}
+
+			// Validate chunk size
+			if (chunkSize > P2P_CHUNK_SIZE) {
+				logP2PTransfer('SEND_CHUNK', transferSessionId, 'SIZE_EXCEEDED', {
+					statusCode: 400,
+					chatHandle,
+					chunkIndex,
+					error: `${chunkSize} > ${P2P_CHUNK_SIZE}`
+				});
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Chunk size exceeds maximum' }));
+				return;
+			}
+
+			// Extract binary chunk data
+			const chunkDataStart = metadataEnd + 4;
+			const chunkData = body.slice(chunkDataStart);
+
+			// Store chunk
+			transfer.chunks.set(chunkIndex, chunkData);
+			transfer.lastChunkSentTime = Date.now();
+			transfer.status = 'TRANSFERRING';
+
+			logP2PTransfer('SEND_CHUNK', transferSessionId, 'TRANSFERRING', {
+				statusCode: 200,
+				chatHandle,
+				chunkIndex,
+				totalChunks: transfer.totalChunks,
+				fileName: transfer.fileName,
+				progress: `${chunkIndex + 1}/${transfer.totalChunks}`
+			});
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				success: true,
+				chunkIndex: chunkIndex,
+				queued: true,
+				lastACKedChunk: transfer.lastChunkACKed
+			}));
+		} catch (error) {
+			logP2PTransfer('SEND_CHUNK', transferSessionId, 'ERROR', {
+				statusCode: 400,
+				chatHandle,
+				error: error.message
+			});
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid chunk data' }));
+		}
+	});
+}
+
+// Handle GET /transfer/receive-chunk/{chatHandle}/{transferSessionId} - Receiver polls for chunks with ACK
+function handleTransferReceiveChunk(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('RECEIVE_CHUNK', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (!transfer) {
+		logP2PTransfer('RECEIVE_CHUNK', transferSessionId, 'NOT_FOUND', { statusCode: 410, chatHandle });
+		res.writeHead(410, { 'Content-Type': 'application/json' }); // 410 Gone
+		res.end(JSON.stringify({ error: 'Transfer session not found or expired' }));
+		return;
+	}
+
+	// Verify transfer belongs to this chat (simplified authorization)
+	if (transfer.chatHandle !== chatHandle) {
+		logP2PTransfer('RECEIVE_CHUNK', transferSessionId, 'CHAT_MISMATCH', { statusCode: 403, chatHandle });
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer does not belong to this chat' }));
+		return;
+	}
+
+	// Parse query parameters
+	const query = url.parse(req.url, true).query;
+	const ackChunkIndex = query.ackChunkIndex != null ? parseInt(query.ackChunkIndex, 10) : -1;
+	const maxWaitMs = parseInt(query.maxWaitMs) || 5000;
+
+	// Update the ACK - receiver is acknowledging all chunks up to this index
+	if (ackChunkIndex > transfer.lastChunkACKed) {
+		transfer.lastChunkACKed = ackChunkIndex;
+		logP2PTransfer('RECEIVE_CHUNK', transferSessionId, 'ACK_RECEIVED', {
+			chatHandle,
+			chunkIndex: ackChunkIndex,
+			totalChunks: transfer.totalChunks,
+			progress: `${ackChunkIndex + 1}/${transfer.totalChunks}`
+		});
+	}
+
+	// Find next chunk to send
+	let nextChunkIndex = transfer.lastChunkACKed + 1;
+	
+	// If we've sent all chunks, we're done
+	if (nextChunkIndex >= transfer.totalChunks) {
+		// All chunks have been sent and ACKed
+		logP2PTransfer('RECEIVE_CHUNK', transferSessionId, 'COMPLETE', {
+			statusCode: 200,
+			chatHandle,
+			fileName: transfer.fileName,
+			progress: `${transfer.totalChunks}/${transfer.totalChunks}`
+		});
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			chunkIndex: nextChunkIndex - 1,
+			isLastChunk: true,
+			pendingChunks: 0,
+			totalChunks: transfer.totalChunks
+		}));
+		return;
+	}
+
+	// Wait for the next chunk to become available
+	const startTime = Date.now();
+	const checkInterval = 100; // Check every 100ms
+
+	const checkForChunk = () => {
+		const elapsed = Date.now() - startTime;
+		
+		if (elapsed >= maxWaitMs) {
+			// Timeout - no chunk available yet, return empty response
+			logP2PTransfer('RECEIVE_CHUNK', transferSessionId, 'POLL_TIMEOUT', {
+				statusCode: 204,
+				chatHandle,
+				chunkIndex: nextChunkIndex,
+				totalChunks: transfer.totalChunks
+			});
+			res.writeHead(204, { 'Content-Type': 'application/json' });
+			res.end();
+			return;
+		}
+
+		if (transfer.chunks.has(nextChunkIndex)) {
+			// Chunk is available, return it
+			const chunkData = transfer.chunks.get(nextChunkIndex);
+			const isLastChunk = nextChunkIndex === transfer.totalChunks - 1;
+			const pendingChunks = transfer.totalChunks - nextChunkIndex - 1;
+
+			// Don't delete chunks here - keep them until transfer is complete
+			// This allows the download endpoint to work
+
+			logP2PTransfer('RECEIVE_CHUNK', transferSessionId, 'CHUNK_SENT', {
+				statusCode: 200,
+				chatHandle,
+				chunkIndex: nextChunkIndex,
+				totalChunks: transfer.totalChunks,
+				fileName: transfer.fileName,
+				progress: `${nextChunkIndex + 1}/${transfer.totalChunks}`
+			});
+
+			res.writeHead(200, {
+				'Content-Type': 'application/json',
+				'X-Chunk-Index': nextChunkIndex,
+				'X-Is-Last': isLastChunk
+			});
+			res.end(JSON.stringify({
+				chunkIndex: nextChunkIndex,
+				chunkData: chunkData.toString('base64'),
+				isLastChunk: isLastChunk,
+				pendingChunks: pendingChunks,
+				totalChunks: transfer.totalChunks
+			}));
+			return;
+		}
+
+		// Chunk not ready yet, check again soon
+		setTimeout(checkForChunk, checkInterval);
+	};
+
+	checkForChunk();
+}
+
+// Handle POST /transfer/complete/{chatHandle}/{transferSessionId} - Mark transfer as complete
+function handleTransferComplete(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('COMPLETE', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	// Extract senderId from Authorization header
+	const [senderId] = req.headers.authorization.split(':');
+
+	let body = '';
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const completeData = JSON.parse(body);
+			const { totalChunks, sha256Checksum, fileName } = completeData;
+
+			const transfer = p2pTransfers.get(transferSessionId);
+			if (!transfer) {
+				logP2PTransfer('COMPLETE', transferSessionId, 'NOT_FOUND', { statusCode: 404, chatHandle });
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Transfer session not found' }));
+				return;
+			}
+
+			// Verify sender is authorized
+			if (transfer.senderId !== senderId) {
+				logP2PTransfer('COMPLETE', transferSessionId, 'UNAUTHORIZED', {
+					statusCode: 403,
+					chatHandle,
+					userId: senderId,
+					error: `Sender mismatch: expected ${transfer.senderId}`
+				});
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Not authorized to complete this transfer' }));
+				return;
+			}
+
+			// Update transfer status
+			transfer.status = 'COMPLETED';
+			transfer.completedAt = Date.now();
+			transfer.totalChunks = totalChunks; // Update if different
+			transfer.sha256Checksum = sha256Checksum;
+			transfer.fileName = fileName || transfer.fileName;
+
+			logP2PTransfer('COMPLETE', transferSessionId, 'COMPLETED', {
+				statusCode: 200,
+				chatHandle,
+				userId: senderId,
+				fileName: transfer.fileName,
+				progress: `${transfer.totalChunks}/${transfer.totalChunks}`
+			});
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				success: true,
+				status: 'COMPLETED',
+				completedAt: transfer.completedAt
+			}));
+		} catch (error) {
+			logP2PTransfer('COMPLETE', transferSessionId, 'ERROR', {
+				statusCode: 400,
+				chatHandle,
+				error: error.message
+			});
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid completion data' }));
+		}
+	});
+}
+
+// Handle GET /transfer/download/{chatHandle}/{transferSessionId} - Download assembled file
+function handleTransferDownload(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('DOWNLOAD', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	// Extract userId from Authorization header
+	const [userId] = req.headers.authorization.split(':');
+
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (!transfer) {
+		logP2PTransfer('DOWNLOAD', transferSessionId, 'NOT_FOUND', { statusCode: 404, chatHandle });
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer session not found' }));
+		return;
+	}
+
+	// Verify transfer belongs to this chat
+	if (transfer.chatHandle !== chatHandle) {
+		logP2PTransfer('DOWNLOAD', transferSessionId, 'CHAT_MISMATCH', {
+			statusCode: 403,
+			chatHandle,
+			userId,
+			error: `Transfer belongs to ${transfer.chatHandle}`
+		});
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer does not belong to this chat' }));
+		return;
+	}
+
+	// Verify transfer is complete
+	if (transfer.status !== 'COMPLETED') {
+		logP2PTransfer('DOWNLOAD', transferSessionId, 'NOT_COMPLETE', {
+			statusCode: 400,
+			chatHandle,
+			userId,
+			error: `Status: ${transfer.status}`
+		});
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer is not complete yet' }));
+		return;
+	}
+
+	// Verify all chunks have been received and ACKed
+	const expectedChunks = transfer.totalChunks;
+	if (transfer.lastChunkACKed < expectedChunks - 1) {
+		logP2PTransfer('DOWNLOAD', transferSessionId, 'INCOMPLETE_CHUNKS', {
+			statusCode: 400,
+			chatHandle,
+			userId,
+			progress: `${transfer.lastChunkACKed + 1}/${expectedChunks}`
+		});
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			error: 'Not all chunks have been received',
+			received: transfer.lastChunkACKed + 1,
+			expected: expectedChunks
+		}));
+		return;
+	}
+
+	// All chunks should be in the chunks map - assemble them
+	const sortedIndices = Array.from(transfer.chunks.keys()).sort((a, b) => a - b);
+	const chunkBuffers = sortedIndices.map(index => transfer.chunks.get(index));
+
+	if (chunkBuffers.length !== expectedChunks) {
+		logP2PTransfer('DOWNLOAD', transferSessionId, 'MISSING_CHUNKS', {
+			statusCode: 500,
+			chatHandle,
+			userId,
+			error: `Have ${chunkBuffers.length}, expected ${expectedChunks}`
+		});
+		res.writeHead(500, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			error: 'Missing chunks',
+			have: chunkBuffers.length,
+			expected: expectedChunks
+		}));
+		return;
+	}
+
+	// Assemble file
+	const fileBuffer = Buffer.concat(chunkBuffers);
+
+	logP2PTransfer('DOWNLOAD', transferSessionId, 'SUCCESS', {
+		statusCode: 200,
+		chatHandle,
+		userId,
+		fileName: transfer.fileName,
+		progress: `${fileBuffer.length / 1024 / 1024}MB`
+	});
+
+	// Set download headers
+	res.writeHead(200, {
+		'Content-Type': 'application/octet-stream',
+		'Content-Disposition': `attachment; filename="${transfer.fileName}"`,
+		'Content-Length': fileBuffer.length,
+		'X-Transfer-Session': transferSessionId,
+		'X-SHA256-Checksum': transfer.sha256Checksum
+	});
+
+	res.end(fileBuffer);
+}
+
+// Handle POST /transfer/cancel/{chatHandle}/{transferSessionId} - Cancel a transfer
+function handleTransferCancel(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('CANCEL', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	// Extract userId from Authorization header
+	const [userId] = req.headers.authorization.split(':');
+
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (!transfer) {
+		logP2PTransfer('CANCEL', transferSessionId, 'NOT_FOUND', { statusCode: 404, chatHandle });
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer session not found' }));
+		return;
+	}
+
+	// Verify user is authorized (only sender can cancel)
+	if (transfer.senderId !== userId) {
+		logP2PTransfer('CANCEL', transferSessionId, 'UNAUTHORIZED', {
+			statusCode: 403,
+			chatHandle,
+			userId,
+			error: `Sender mismatch: expected ${transfer.senderId}`
+		});
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Not authorized to cancel this transfer' }));
+		return;
+	}
+
+	// Mark as failed and cleanup
+	transfer.status = 'FAILED';
+	cleanupP2PTransfer(transferSessionId);
+
+	logP2PTransfer('CANCEL', transferSessionId, 'CANCELLED', {
+		statusCode: 200,
+		chatHandle,
+		userId,
+		fileName: transfer.fileName,
+		progress: `${transfer.lastChunkACKed + 1}/${transfer.totalChunks}`
+	});
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({
+		success: true,
+		status: 'FAILED'
+	}));
+}
+
+// Handle GET /transfer/status/{chatHandle}/{transferSessionId} - Get transfer status
+function handleTransferStatus(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const transferSessionId = parts[4];
+
+	if (!chatHandle || !transferSessionId) {
+		logP2PTransfer('STATUS', 'N/A', 'ERROR', { statusCode: 400, error: 'Missing parameters' });
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and transfer session ID are required' }));
+		return;
+	}
+
+	// Extract userId from Authorization header
+	const [userId] = req.headers.authorization.split(':');
+
+	const transfer = p2pTransfers.get(transferSessionId);
+	if (!transfer) {
+		logP2PTransfer('STATUS', transferSessionId, 'NOT_FOUND', { statusCode: 404, chatHandle });
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer session not found' }));
+		return;
+	}
+
+	// Verify transfer belongs to this chat
+	if (transfer.chatHandle !== chatHandle) {
+		logP2PTransfer('STATUS', transferSessionId, 'CHAT_MISMATCH', {
+			statusCode: 403,
+			chatHandle,
+			userId,
+			error: `Transfer belongs to ${transfer.chatHandle}`
+		});
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Transfer does not belong to this chat' }));
+		return;
+	}
+
+	logP2PTransfer('STATUS', transferSessionId, transfer.status, {
+		statusCode: 200,
+		chatHandle,
+		userId,
+		fileName: transfer.fileName,
+		progress: `${transfer.lastChunkACKed + 1}/${transfer.totalChunks}`
+	});
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({
+		transferSessionId: transfer.id,
+		status: transfer.status,
+		fileName: transfer.fileName,
+		fileSize: transfer.fileSize,
+		totalChunks: transfer.totalChunks,
+		lastChunkACKed: transfer.lastChunkACKed,
+		createdAt: transfer.createdAt,
+		acceptedAt: transfer.acceptedAt,
+		completedAt: transfer.completedAt,
+		isSender: transfer.senderId === userId
 	}));
 }
 

@@ -1181,6 +1181,329 @@
                 width: 180px;
             }
         }
+
+        /* P2P File Transfer UI */
+        .p2p-transfer-btn {
+            width: 48px;
+            height: 48px;
+            border: none;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            flex-shrink: 0;
+        }
+
+        .p2p-transfer-btn:hover {
+            background: #3d3d3d;
+            transform: scale(1.05);
+        }
+
+        .p2p-transfer-btn.active {
+            background: var(--accent);
+            color: #000;
+        }
+
+        /* P2P Transfer Progress */
+        .p2p-transfer-progress {
+            display: none;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 16px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+
+        .p2p-transfer-progress.active {
+            display: flex;
+        }
+
+        .p2p-transfer-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .p2p-transfer-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+
+        .p2p-transfer-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .p2p-transfer-progress-bar {
+            flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .p2p-transfer-progress-fill {
+            height: 100%;
+            background: var(--accent);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .p2p-transfer-progress-text {
+            font-size: 14px;
+            color: var(--text-secondary);
+            min-width: 60px;
+            text-align: right;
+        }
+
+        .p2p-transfer-cancel-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: var(--error);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .p2p-transfer-cancel-btn:hover {
+            transform: scale(1.1);
+        }
+
+        /* Pending Invitations Badge */
+        .pending-invitations-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            min-width: 20px;
+            height: 20px;
+            background: var(--accent);
+            color: #000;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 6px;
+            z-index: 10;
+        }
+
+        /* P2P File Transfer Modal */
+        .p2p-file-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            margin-bottom: 16px;
+        }
+
+        .p2p-file-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 8px;
+            background: var(--accent);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .p2p-file-details {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .p2p-file-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .p2p-file-size {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Pending Invitations List */
+        .pending-invitations-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .pending-invitation-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+
+        .pending-invitation-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .pending-invitation-file-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .pending-invitation-sender {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .pending-invitation-size {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .pending-invitation-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .pending-invitation-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .pending-invitation-btn.accept {
+            background: var(--success);
+            color: white;
+        }
+
+        .pending-invitation-btn.decline {
+            background: var(--error);
+            color: white;
+        }
+
+        .pending-invitation-btn:hover {
+            transform: scale(1.05);
+        }
+
+        /* Completed Transfer */
+        .completed-transfer-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 12px;
+            margin-bottom: 8px;
+        }
+
+        .completed-transfer-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .completed-transfer-name {
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .completed-transfer-size {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .completed-transfer-download {
+            padding: 8px 16px;
+            background: var(--accent);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .completed-transfer-download:hover {
+            transform: scale(1.05);
+        }
+
+        /* Transfer Status Badge */
+        .transfer-status-badge {
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .transfer-status-badge.sending {
+            background: rgba(79, 195, 247, 0.2);
+            color: var(--accent);
+        }
+
+        .transfer-status-badge.receiving {
+            background: rgba(46, 204, 113, 0.2);
+            color: var(--success);
+        }
+
+        .transfer-status-badge.completed {
+            background: rgba(46, 204, 113, 0.2);
+            color: var(--success);
+        }
+
+        .transfer-status-badge.failed {
+            background: rgba(231, 76, 60, 0.2);
+            color: var(--error);
+        }
+
+        /* Empty State for Transfers */
+        .p2p-empty-state {
+            text-align: center;
+            padding: 24px;
+            color: var(--text-secondary);
+        }
+
+        .p2p-empty-state-icon {
+            font-size: 48px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+
+        .p2p-empty-state-text {
+            font-size: 14px;
+        }
     </style>
 </head>
 <body>
@@ -1264,13 +1587,15 @@
             <div id="input-container" class="input-container">
                 <button id="attachment-btn" class="attachment-btn" title="Attach image">📎</button>
                 <div class="input-wrapper">
-                    <textarea 
-                        id="message-input" 
-                        class="message-input" 
-                        placeholder="Message..." 
+                    <textarea
+                        id="message-input"
+                        class="message-input"
+                        placeholder="Message..."
                         rows="1"
                     ></textarea>
                 </div>
+                <button id="p2p-file-btn" class="p2p-transfer-btn" title="Send file">📄</button>
+                <button id="p2p-invitations-btn" class="p2p-transfer-btn" title="Pending transfers">📥</button>
                 <button id="voice-btn" class="attachment-btn" title="Record voice">🎤</button>
                 <button id="send-btn" class="send-btn" title="Send" disabled>➤</button>
             </div>
@@ -1311,9 +1636,56 @@
     <!-- Toast -->
     <div id="toast" class="toast"></div>
 
-    <!-- Hidden file input -->
+    <!-- Hidden file inputs -->
     <input type="file" accept="image/*" id="image-input" style="display: none;">
+    <input type="file" id="p2p-file-input" style="display: none;">
 
+    <!-- P2P File Transfer Modal -->
+    <div id="p2p-transfer-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">📤 Send File</h3>
+                <button id="close-p2p-modal" class="modal-close">✕</button>
+            </div>
+
+            <div id="p2p-file-info" class="p2p-file-info" style="display: none;">
+                <div class="p2p-file-icon">📄</div>
+                <div class="p2p-file-details">
+                    <div class="p2p-file-name" id="p2p-file-name"></div>
+                    <div class="p2p-file-size" id="p2p-file-size"></div>
+                </div>
+            </div>
+
+            <div class="modal-actions">
+                <button id="cancel-p2p-transfer" class="btn btn-secondary">Cancel</button>
+                <button id="initiate-p2p-transfer" class="btn btn-primary" disabled>Send File</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- P2P Pending Invitations Modal -->
+    <div id="p2p-invitations-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title">📥 Pending File Transfers</h3>
+                <button id="close-invitations-modal" class="modal-close">✕</button>
+            </div>
+
+            <div id="pending-invitations-list" class="pending-invitations-list">
+                <!-- Invitations will be dynamically inserted here -->
+            </div>
+
+            <div id="no-invitations" class="p2p-empty-state">
+                <div class="p2p-empty-state-icon">📭</div>
+                <div class="p2p-empty-state-text">No pending file transfers</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- P2P Transfer Progress Container -->
+    <div id="p2p-transfer-progress-container"></div>
+
+    <script src="p2p-transfer-manager.js"></script>
     <script>
         // ==================== COMPRESSION UTILITIES ====================
 
@@ -4305,6 +4677,659 @@
                 window.isVoiceUploading = false;
             }
         };
+
+        // ==================== P2P FILE TRANSFER ====================
+
+        // P2P Transfer Manager instance
+        let p2pTransferManager = null;
+        let p2pSelectedFile = null;
+        let p2pPendingInvitationsCount = 0;
+        let p2pInvitationsPollingInterval = null;
+        let activeTransfers = new Map(); // Track active transfers for progress updates
+
+        // Initialize P2P Transfer Manager
+        async function initializeP2PTransferManager() {
+            try {
+                p2pTransferManager = new P2PTransferManager();
+                // Manager is ready to use after construction - no init() needed
+                console.log('✅ P2P Transfer Manager initialized');
+                
+                // Start polling for pending invitations
+                startP2PInvitationsPolling();
+                
+                // Restore any in-progress transfers from localStorage
+                await restoreInProgressTransfers();
+            } catch (error) {
+                console.error('Failed to initialize P2P Transfer Manager:', error);
+            }
+        }
+
+        // Start polling for pending invitations
+        function startP2PInvitationsPolling() {
+            if (p2pInvitationsPollingInterval) return;
+            
+            // Poll immediately
+            pollPendingInvitations();
+            
+            // Poll every 10 seconds
+            p2pInvitationsPollingInterval = setInterval(pollPendingInvitations, 10000);
+        }
+
+        // Stop polling for pending invitations
+        function stopP2PInvitationsPolling() {
+            if (p2pInvitationsPollingInterval) {
+                clearInterval(p2pInvitationsPollingInterval);
+                p2pInvitationsPollingInterval = null;
+            }
+        }
+
+        // Poll for pending invitations and update badge
+        async function pollPendingInvitations() {
+            if (!currentChat) return;
+            
+            try {
+                const invitations = await p2pTransferManager.getPendingInvitations(currentChat.handle);
+                const count = invitations.length;
+                
+                // Update badge
+                updatePendingInvitationsBadge(count);
+                
+                // Update invitations list if modal is open
+                const invitationsModal = document.getElementById('p2p-invitations-modal');
+                if (invitationsModal && invitationsModal.classList.contains('active')) {
+                    renderPendingInvitations(invitations);
+                }
+            } catch (error) {
+                console.warn('Failed to poll pending invitations:', error);
+            }
+        }
+
+        // Update pending invitations badge
+        function updatePendingInvitationsBadge(count) {
+            let badge = document.querySelector('.pending-invitations-badge');
+            
+            if (count > 0) {
+                if (!badge) {
+                    const invitationsBtn = document.getElementById('p2p-invitations-btn');
+                    badge = document.createElement('div');
+                    badge.className = 'pending-invitations-badge';
+                    invitationsBtn.appendChild(badge);
+                }
+                badge.textContent = count;
+                badge.style.display = 'flex';
+            } else if (badge) {
+                badge.style.display = 'none';
+            }
+            
+            p2pPendingInvitationsCount = count;
+        }
+
+        // Restore in-progress transfers from localStorage
+        async function restoreInProgressTransfers() {
+            try {
+                const savedTransfers = localStorage.getItem('p2p_in_progress_transfers');
+                if (!savedTransfers) return;
+                
+                const transfers = JSON.parse(savedTransfers);
+                for (const transfer of transfers) {
+                    if (transfer.direction === 'sending' && transfer.status === 'in_progress') {
+                        // Re-show progress for sending transfers
+                        showTransferProgress(transfer.sessionId, transfer.fileName, transfer.fileSize, 'sending');
+                    } else if (transfer.direction === 'receiving' && transfer.status === 'in_progress') {
+                        // Re-show progress for receiving transfers
+                        showTransferProgress(transfer.sessionId, transfer.fileName, transfer.fileSize, 'receiving');
+                    }
+                }
+            } catch (error) {
+                console.warn('Failed to restore in-progress transfers:', error);
+            }
+        }
+
+        // Save in-progress transfers to localStorage
+        function saveInProgressTransfers() {
+            const transfers = [];
+            for (const [sessionId, transfer] of activeTransfers) {
+                transfers.push({
+                    sessionId,
+                    fileName: transfer.fileName,
+                    fileSize: transfer.fileSize,
+                    direction: transfer.direction,
+                    status: transfer.status
+                });
+            }
+            try {
+                localStorage.setItem('p2p_in_progress_transfers', JSON.stringify(transfers));
+            } catch (error) {
+                console.warn('Failed to save in-progress transfers:', error);
+            }
+        }
+
+        // P2P Event listeners
+        document.addEventListener('DOMContentLoaded', async () => {
+            // Initialize P2P Transfer Manager after main initialization
+            setTimeout(initializeP2PTransferManager, 1000);
+        });
+
+        // P2P button event listeners
+        const p2pFileBtn = document.getElementById('p2p-file-btn');
+        const p2pInvitationsBtn = document.getElementById('p2p-invitations-btn');
+        const p2pFileInput = document.getElementById('p2p-file-input');
+        const p2pTransferModal = document.getElementById('p2p-transfer-modal');
+        const closeP2pModal = document.getElementById('close-p2p-modal');
+        const cancelP2pTransfer = document.getElementById('cancel-p2p-transfer');
+        const initiateP2pTransfer = document.getElementById('initiate-p2p-transfer');
+        const p2pInvitationsModal = document.getElementById('p2p-invitations-modal');
+        const closeInvitationsModal = document.getElementById('close-invitations-modal');
+
+        if (p2pFileBtn) {
+            p2pFileBtn.addEventListener('click', () => {
+                if (!currentChat) {
+                    showToast('Please open a chat first', 'error');
+                    return;
+                }
+                p2pFileInput.click();
+            });
+        }
+
+        if (p2pInvitationsBtn) {
+            p2pInvitationsBtn.addEventListener('click', async () => {
+                if (!currentChat) {
+                    showToast('Please open a chat first', 'error');
+                    return;
+                }
+                await openP2PInvitationsModal();
+            });
+        }
+
+        if (p2pFileInput) {
+            p2pFileInput.addEventListener('change', handleP2PFileSelect);
+        }
+
+        if (closeP2pModal) {
+            closeP2pModal.addEventListener('click', closeP2PTransferModal);
+        }
+
+        if (cancelP2pTransfer) {
+            cancelP2pTransfer.addEventListener('click', closeP2PTransferModal);
+        }
+
+        if (initiateP2pTransfer) {
+            initiateP2pTransfer.addEventListener('click', initiateP2PTransferHandler);
+        }
+
+        if (closeInvitationsModal) {
+            closeInvitationsModal.addEventListener('click', () => {
+                p2pInvitationsModal.classList.remove('active');
+            });
+        }
+
+        // Close modals on overlay click
+        if (p2pTransferModal) {
+            p2pTransferModal.addEventListener('click', (e) => {
+                if (e.target === p2pTransferModal) {
+                    closeP2PTransferModal();
+                }
+            });
+        }
+
+        if (p2pInvitationsModal) {
+            p2pInvitationsModal.addEventListener('click', (e) => {
+                if (e.target === p2pInvitationsModal) {
+                    p2pInvitationsModal.classList.remove('active');
+                }
+            });
+        }
+
+        // Handle file selection
+        function handleP2PFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            // Check if file is image or audio (should use existing upload)
+            const isImage = file.type.startsWith('image/');
+            const isAudio = file.type.startsWith('audio/');
+
+            if (isImage || isAudio) {
+                showToast(`Please use the attachment button for ${isImage ? 'images' : 'audio'} files`, 'info');
+                p2pFileInput.value = '';
+                return;
+            }
+
+            p2pSelectedFile = file;
+            
+            // Update UI
+            const fileInfo = document.getElementById('p2p-file-info');
+            const fileName = document.getElementById('p2p-file-name');
+            const fileSize = document.getElementById('p2p-file-size');
+            const initiateBtn = document.getElementById('initiate-p2p-transfer');
+            
+            if (fileInfo) fileInfo.style.display = 'flex';
+            if (fileName) fileName.textContent = file.name;
+            if (fileSize) fileSize.textContent = formatFileSize(file.size);
+            if (initiateBtn) initiateBtn.disabled = false;
+
+            // Show modal
+            if (p2pTransferModal) {
+                p2pTransferModal.classList.add('active');
+            }
+        }
+
+        // Close P2P transfer modal
+        function closeP2PTransferModal() {
+            if (p2pTransferModal) {
+                p2pTransferModal.classList.remove('active');
+            }
+            
+            // Reset state
+            p2pSelectedFile = null;
+            const fileInfo = document.getElementById('p2p-file-info');
+            const fileName = document.getElementById('p2p-file-name');
+            const fileSize = document.getElementById('p2p-file-size');
+            const initiateBtn = document.getElementById('initiate-p2p-transfer');
+            
+            if (fileInfo) fileInfo.style.display = 'none';
+            if (fileName) fileName.textContent = '';
+            if (fileSize) fileSize.textContent = '';
+            if (initiateBtn) initiateBtn.disabled = true;
+            
+            if (p2pFileInput) p2pFileInput.value = '';
+        }
+
+        // Initiate P2P transfer handler
+        async function initiateP2PTransferHandler() {
+            if (!p2pSelectedFile || !currentChat) {
+                showToast('No file selected', 'error');
+                return;
+            }
+
+            const initiateBtn = document.getElementById('initiate-p2p-transfer');
+            let transferSessionId = null;
+
+            try {
+                initiateBtn.disabled = true;
+                showToast('Initiating transfer...', 'info');
+
+                // Calculate chunks
+                const chunkSize = 256 * 1024; // 256KB
+                const totalChunks = Math.ceil(p2pSelectedFile.size / chunkSize);
+
+                // Initiate transfer on server (creates session but doesn't start sending yet)
+                const result = await p2pTransferManager.initiateTransfer(
+                    currentChat.handle,
+                    p2pSelectedFile
+                );
+
+                transferSessionId = result.sessionId;
+
+                // Show progress UI with "awaiting acceptance" status
+                showTransferProgressAwaitingAcceptance(transferSessionId, p2pSelectedFile.name, p2pSelectedFile.size);
+
+                // Store transfer for progress tracking
+                activeTransfers.set(transferSessionId, {
+                    fileName: p2pSelectedFile.name,
+                    fileSize: p2pSelectedFile.size,
+                    direction: 'sending',
+                    status: 'awaiting_acceptance'
+                });
+                saveInProgressTransfers();
+
+                showToast('Transfer invitation sent to chat. Waiting for acceptance...', 'success');
+                closeP2PTransferModal();
+
+                // PHASE 1: Wait for receiver to accept
+                console.log(`[P2P] Waiting for team member to accept transfer ${transferSessionId}...`);
+                const accepted = await p2pTransferManager.waitForAcceptance(transferSessionId);
+                
+                if (!accepted) {
+                    throw new Error('Transfer was not accepted');
+                }
+
+                console.log(`[P2P] Transfer ${transferSessionId} accepted by receiver. Starting transfer...`);
+                
+                // Update transfer status
+                const transferData = activeTransfers.get(transferSessionId);
+                if (transferData) {
+                    transferData.status = 'transferring';
+                    saveInProgressTransfers();
+                }
+
+                // Update UI to show transfer is starting
+                updateTransferProgressToSending(transferSessionId);
+
+                // PHASE 2: Start sending chunks now that receiver has accepted
+                await p2pTransferManager.startTransfer(transferSessionId);
+
+                // Get the transfer object to listen for events
+                const transfer = result.transfer;
+
+                // Listen for completion
+                transfer.on('chunkSent', (data) => {
+                    const progress = ((data.chunkIndex + 1) / transfer.totalChunks) * 100;
+                    updateTransferProgress(transferSessionId, progress, totalChunks);
+                });
+
+                transfer.on('sendComplete', () => {
+                    showToast('File sent successfully!', 'success');
+                    completeTransferProgress(transferSessionId);
+                    activeTransfers.delete(transferSessionId);
+                    saveInProgressTransfers();
+                });
+
+                transfer.on('sendFailed', (data) => {
+                    showToast(`Transfer failed: ${data.error.message}`, 'error');
+                    failTransferProgress(transferSessionId, data.error.message);
+                    activeTransfers.delete(transferSessionId);
+                    saveInProgressTransfers();
+                });
+
+            } catch (error) {
+                console.error('Failed to initiate transfer:', error);
+                showToast(`Transfer failed: ${error.message}`, 'error');
+                
+                if (transferSessionId) {
+                    failTransferProgress(transferSessionId, error.message);
+                    activeTransfers.delete(transferSessionId);
+                    saveInProgressTransfers();
+                }
+                
+                if (initiateBtn) initiateBtn.disabled = false;
+            }
+        }
+
+        // Show transfer progress with "awaiting acceptance" status
+        function showTransferProgressAwaitingAcceptance(sessionId, fileName, fileSize) {
+            const container = document.getElementById('p2p-transfer-progress-container');
+            if (!container) return;
+
+            const progressEl = document.createElement('div');
+            progressEl.className = 'p2p-transfer-progress active';
+            progressEl.id = `p2p-progress-${sessionId}`;
+            
+            progressEl.innerHTML = `
+                <div class="p2p-transfer-info">
+                    <div class="p2p-transfer-name">${escapeHtml(fileName)}</div>
+                    <div class="p2p-transfer-details" id="p2p-status-${sessionId}">⏳ Waiting for acceptance - ${formatFileSize(fileSize)}</div>
+                </div>
+                <div class="p2p-transfer-progress-bar">
+                    <div class="p2p-transfer-progress-fill" id="p2p-fill-${sessionId}" style="width: 0%"></div>
+                </div>
+                <div class="p2p-transfer-progress-text" id="p2p-progress-text-${sessionId}">Pending</div>
+                <button class="p2p-transfer-cancel-btn" onclick="cancelP2PTransfer('${sessionId}')" title="Cancel">✕</button>
+            `;
+
+            container.appendChild(progressEl);
+        }
+
+        // Update transfer progress UI to show "sending" status
+        function updateTransferProgressToSending(sessionId) {
+            const statusEl = document.getElementById(`p2p-status-${sessionId}`);
+            if (statusEl) {
+                statusEl.textContent = statusEl.textContent.replace('⏳ Waiting for acceptance', '📤 Sending');
+            }
+            const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
+            if (progressText) {
+                progressText.textContent = '0%';
+            }
+        }
+
+        // Show transfer progress UI
+        function showTransferProgress(sessionId, fileName, fileSize, direction) {
+            const container = document.getElementById('p2p-transfer-progress-container');
+            if (!container) return;
+
+            const progressEl = document.createElement('div');
+            progressEl.className = 'p2p-transfer-progress active';
+            progressEl.id = `p2p-progress-${sessionId}`;
+            
+            const statusText = direction === 'sending' ? 'Sending' : 'Receiving';
+            
+            progressEl.innerHTML = `
+                <div class="p2p-transfer-info">
+                    <div class="p2p-transfer-name">${escapeHtml(fileName)}</div>
+                    <div class="p2p-transfer-details">${statusText} - ${formatFileSize(fileSize)}</div>
+                </div>
+                <div class="p2p-transfer-progress-bar">
+                    <div class="p2p-transfer-progress-fill" style="width: 0%"></div>
+                </div>
+                <div class="p2p-transfer-progress-text" id="p2p-progress-text-${sessionId}">0%</div>
+                <button class="p2p-transfer-cancel-btn" onclick="cancelP2PTransfer('${sessionId}')" title="Cancel">✕</button>
+            `;
+
+            container.appendChild(progressEl);
+        }
+
+        // Update transfer progress
+        function updateTransferProgress(sessionId, progress, totalChunks) {
+            const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
+            const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
+            
+            if (progressEl) {
+                const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
+                if (fill) {
+                    fill.style.width = `${Math.round(progress)}%`;
+                }
+            }
+            
+            if (progressText) {
+                const currentChunk = Math.round((progress / 100) * totalChunks);
+                progressText.textContent = `${Math.round(progress)}%`;
+            }
+        }
+
+        // Complete transfer progress
+        function completeTransferProgress(sessionId) {
+            const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
+            if (progressEl) {
+                const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
+                const details = progressEl.querySelector('.p2p-transfer-details');
+                const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
+                const cancelBtn = progressEl.querySelector('.p2p-transfer-cancel-btn');
+                
+                if (fill) fill.style.width = '100%';
+                if (details) details.textContent = '✓ Completed';
+                if (progressText) progressText.textContent = '100%';
+                if (cancelBtn) cancelBtn.style.display = 'none';
+                
+                // Auto-remove after 5 seconds
+                setTimeout(() => {
+                    progressEl.remove();
+                }, 5000);
+            }
+        }
+
+        // Fail transfer progress
+        function failTransferProgress(sessionId, errorMessage) {
+            const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
+            if (progressEl) {
+                const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
+                const details = progressEl.querySelector('.p2p-transfer-details');
+                const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
+                
+                if (fill) fill.style.background = 'var(--error)';
+                if (details) details.textContent = `✗ Failed: ${errorMessage}`;
+                if (progressText) progressText.textContent = 'Failed';
+            }
+        }
+
+        // Cancel P2P transfer
+        window.cancelP2PTransfer = async function(sessionId) {
+            try {
+                if (currentChat) {
+                    await p2pTransferManager.cancelTransfer(currentChat.handle, sessionId);
+                }
+                
+                const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
+                if (progressEl) {
+                    progressEl.remove();
+                }
+                
+                activeTransfers.delete(sessionId);
+                saveInProgressTransfers();
+                
+                showToast('Transfer cancelled', 'info');
+            } catch (error) {
+                console.error('Failed to cancel transfer:', error);
+            }
+        };
+
+        // Open P2P invitations modal
+        async function openP2PInvitationsModal() {
+            if (!p2pInvitationsModal || !currentChat) return;
+
+            await renderPendingInvitations();
+            p2pInvitationsModal.classList.add('active');
+        }
+
+        // Render pending invitations
+        async function renderPendingInvitations(invitations) {
+            const listEl = document.getElementById('pending-invitations-list');
+            const noInvitationsEl = document.getElementById('no-invitations');
+            
+            if (!listEl || !noInvitationsEl) return;
+
+            if (!invitations) {
+                try {
+                    invitations = await p2pTransferManager.getPendingInvitations(currentChat.handle);
+                } catch (error) {
+                    console.error('Failed to get invitations:', error);
+                    invitations = [];
+                }
+            }
+
+            if (invitations.length === 0) {
+                listEl.innerHTML = '';
+                noInvitationsEl.style.display = 'block';
+                return;
+            }
+
+            noInvitationsEl.style.display = 'none';
+            listEl.innerHTML = '';
+
+            for (const invitation of invitations) {
+                // Decrypt sender name if available
+                let displaySenderName = 'Unknown';
+                if (invitation.senderName && currentChat && currentChat.encryptionKey) {
+                    try {
+                        displaySenderName = await decryptMessage(invitation.senderName, currentChat.encryptionKey);
+                    } catch (e) {
+                        console.warn('Failed to decrypt sender name:', e);
+                        displaySenderName = 'Unknown';
+                    }
+                }
+
+                const item = document.createElement('div');
+                item.className = 'pending-invitation-item';
+                item.innerHTML = `
+                    <div class="pending-invitation-info">
+                        <div class="pending-invitation-file-name">${escapeHtml(invitation.fileName)}</div>
+                        <div class="pending-invitation-sender">From: ${escapeHtml(displaySenderName)}</div>
+                        <div class="pending-invitation-size">${formatFileSize(invitation.fileSize)}</div>
+                    </div>
+                    <div class="pending-invitation-actions">
+                        <button class="pending-invitation-btn accept" onclick="acceptP2PInvitation('${invitation.transferSessionId}', ${invitation.totalChunks}, '${escapeHtml(invitation.fileName)}', ${invitation.fileSize})">Accept</button>
+                        <button class="pending-invitation-btn decline" onclick="declineP2PInvitation('${invitation.transferSessionId}')">Decline</button>
+                    </div>
+                `;
+                listEl.appendChild(item);
+            }
+        }
+
+        // Accept P2P invitation
+        window.acceptP2PInvitation = async function(transferSessionId, totalChunks, fileName, fileSize) {
+            try {
+                showToast('Accepting transfer...', 'info');
+
+                // Accept the transfer (pass fileName for tracking)
+                await p2pTransferManager.acceptTransfer(currentChat.handle, transferSessionId, totalChunks, fileName);
+
+                // Show progress UI
+                showTransferProgress(transferSessionId, fileName, fileSize, 'receiving');
+
+                // Store transfer for progress tracking
+                activeTransfers.set(transferSessionId, {
+                    fileName: fileName,
+                    fileSize: fileSize,
+                    direction: 'receiving',
+                    status: 'in_progress'
+                });
+                saveInProgressTransfers();
+
+                // Start receiving chunks
+                const transfer = await p2pTransferManager.startReceiving(
+                    currentChat.handle,
+                    transferSessionId,
+                    totalChunks,
+                    (progress) => {
+                        updateTransferProgress(transferSessionId, progress, totalChunks);
+                    }
+                );
+
+                // Listen for completion
+                transfer.on('completed', async (assembledData) => {
+                    showToast('File received!', 'success');
+
+                    // Save assembled file locally (server chunks are cleared after transfer)
+                    const blob = new Blob([assembledData]);
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = fileName;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+
+                    completeTransferProgress(transferSessionId);
+                    activeTransfers.delete(transferSessionId);
+                    saveInProgressTransfers();
+
+                    // Close modal and refresh invitations
+                    const invitationsModal = document.getElementById('p2p-invitations-modal');
+                    if (invitationsModal) invitationsModal.classList.remove('active');
+
+                    showToast('File downloaded successfully!', 'success');
+                });
+
+                transfer.on('error', (error) => {
+                    showToast(`Transfer failed: ${error.message}`, 'error');
+                    failTransferProgress(transferSessionId, error.message);
+                    activeTransfers.delete(transferSessionId);
+                    saveInProgressTransfers();
+                });
+
+                showToast('Transfer accepted! Receiving...', 'success');
+                
+                // Refresh invitations list
+                await renderPendingInvitations();
+
+            } catch (error) {
+                console.error('Failed to accept invitation:', error);
+                showToast(`Failed to accept transfer: ${error.message}`, 'error');
+            }
+        };
+
+        // Decline P2P invitation
+        window.declineP2PInvitation = async function(transferSessionId) {
+            try {
+                // For now, just close the modal
+                // In the future, we could send a decline notification
+                const invitationsModal = document.getElementById('p2p-invitations-modal');
+                if (invitationsModal) invitationsModal.classList.remove('active');
+                
+                showToast('Transfer declined', 'info');
+            } catch (error) {
+                console.error('Failed to decline invitation:', error);
+            }
+        };
+
+        // Format file size for display
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
     </script>
 </body>
 </html>
