@@ -509,23 +509,25 @@ class SendTransfer {
 				if (!statusResponse.ok) {
 					throw new Error('Failed to check transfer status');
 				}
-				
+
 				const status = await statusResponse.json();
-				
+
 				// If receiver has ACKed this chunk, we can proceed
 				if (status.lastChunkACKed >= chunkIndex) {
 					this.lastACKedChunk = chunkIndex;
 					this.retryCount = 0;
 					this.currentChunkIndex++;
-					
+
 					// Emit progress event
 					this.emit('chunkSent', { chunkIndex, totalChunks: this.totalChunks });
 					console.log(`Chunk ${chunkIndex} ACKed by receiver (server reports lastACK: ${status.lastChunkACKed})`);
 					return;
 				}
-				
-				// Not ACKed yet, wait a bit and check again
-				await new Promise(resolve => setTimeout(resolve, 100));
+
+				// Yield to browser to allow user input processing
+				await new Promise(resolve => setTimeout(resolve, 0));
+				// Not ACKed yet, wait before checking again
+				await new Promise(resolve => setTimeout(resolve, 200));
 			}
 			
 			// Timeout waiting for ACK
@@ -640,20 +642,22 @@ class ReceiveTransfer {
 
 	async start() {
 		this.status = 'TRANSFERRING';
-		
+
 		// Receive chunks one by one until all are received
 		while (this.lastReceivedChunk < this.totalChunks - 1) {
 			const beforeChunkCount = this.receivedChunks.size;
 			await this.pollForChunk();
+			// Yield to browser after each poll to allow UI updates
+			await new Promise(resolve => setTimeout(resolve, 0));
 			const afterChunkCount = this.receivedChunks.size;
-			
+
 			// Only delay if no new chunks were received (prevents busy-waiting)
 			// If we got data, immediately poll again to grab the next chunk
 			if (beforeChunkCount === afterChunkCount) {
 				await new Promise(resolve => setTimeout(resolve, 100));
 			}
 		}
-		
+
 		// Send final ACK so sender knows the last chunk was received.
 		// Server will respond with the "all done" notification (no chunkData).
 		await this.pollForChunk();

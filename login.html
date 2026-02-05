@@ -5098,21 +5098,36 @@
             container.appendChild(progressEl);
         }
 
-        // Update transfer progress
-        function updateTransferProgress(sessionId, progress, totalChunks) {
-            const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
-            const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
-            
-            if (progressEl) {
-                const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
-                if (fill) {
-                    fill.style.width = `${Math.round(progress)}%`;
+        // Debounce progress updates to batch DOM operations
+        const pendingProgressUpdates = new Map();
+        let progressUpdateScheduled = false;
+
+        function flushProgressUpdates() {
+            pendingProgressUpdates.forEach(({ progress, totalChunks }, sessionId) => {
+                const progressEl = document.getElementById(`p2p-progress-${sessionId}`);
+                const progressText = document.getElementById(`p2p-progress-text-${sessionId}`);
+
+                if (progressEl) {
+                    const fill = progressEl.querySelector('.p2p-transfer-progress-fill');
+                    if (fill) {
+                        fill.style.width = `${Math.round(progress)}%`;
+                    }
                 }
-            }
-            
-            if (progressText) {
-                const currentChunk = Math.round((progress / 100) * totalChunks);
-                progressText.textContent = `${Math.round(progress)}%`;
+
+                if (progressText) {
+                    progressText.textContent = `${Math.round(progress)}%`;
+                }
+            });
+            pendingProgressUpdates.clear();
+            progressUpdateScheduled = false;
+        }
+
+        // Update transfer progress (debounced)
+        function updateTransferProgress(sessionId, progress, totalChunks) {
+            pendingProgressUpdates.set(sessionId, { progress, totalChunks });
+            if (!progressUpdateScheduled) {
+                progressUpdateScheduled = true;
+                requestAnimationFrame(flushProgressUpdates);
             }
         }
 
