@@ -5,20 +5,144 @@
  */
 
 // Constants matching server-side configuration
-const P2P_CHUNK_SIZE = 256 * 1024; // 256KB
+// With encryption + base64, actual transferred size is ~33% larger
+// 192KB plaintext → ~12 bytes IV → ~256KB encrypted+base64
+const P2P_CHUNK_SIZE = 192 * 1024; // 192KB (becomes ~256KB after encryption+base64)
 const P2P_ACK_TIMEOUT = 10000; // 10 seconds
 const P2P_MAX_RETRIES = 3;
 const P2P_MAX_CONCURRENT = 2;
 const P2P_POLL_INTERVAL = 5000; // 5 seconds for long-polling
 
 class P2PTransferManager {
-	constructor() {
+	constructor(encryptionKey = null) {
 		// Active transfers
 		this.activeSends = new Map(); // transferSessionId -> SendTransfer
 		this.activeReceives = new Map(); // transferSessionId -> ReceiveTransfer
-		
+
+		// Encryption key for E2E encryption
+		this.encryptionKey = encryptionKey;
+
 		// Transfer event listeners
 		this.listeners = new Map();
+	}
+
+	// ==================== ENCRYPTION HELPERS ====================
+
+	padKey(keyStr) {
+		const encoder = new TextEncoder();
+		const data = encoder.encode(keyStr);
+		const padded = new Uint8Array(32);
+		padded.set(data.slice(0, 32));
+		return padded;
+	}
+
+	async encryptMessage(message, key) {
+		try {
+			const encoder = new TextEncoder();
+			const data = encoder.encode(message);
+			const iv = crypto.getRandomValues(new Uint8Array(12));
+
+			const cryptoKey = await crypto.subtle.importKey(
+				'raw',
+				this.padKey(key),
+				{ name: 'AES-GCM' },
+				false,
+				['encrypt']
+			);
+
+			const encrypted = await crypto.subtle.encrypt(
+				{ name: 'AES-GCM', iv: iv },
+				cryptoKey,
+				data
+			);
+
+			const result = new Uint8Array(iv.length + encrypted.byteLength);
+			result.set(iv, 0);
+			result.set(new Uint8Array(encrypted), iv.length);
+
+			return btoa(String.fromCharCode(...result));
+		} catch (error) {
+			throw error;
+		}
+	}
+
+	async decryptMessage(encryptedMessage, key) {
+		try {
+			const data = Uint8Array.from(atob(encryptedMessage), c => c.charCodeAt(0));
+			const iv = data.slice(0, 12);
+			const encrypted = data.slice(12);
+
+			const cryptoKey = await crypto.subtle.importKey(
+				'raw',
+				this.padKey(key),
+				{ name: 'AES-GCM' },
+				false,
+				['decrypt']
+			);
+
+			const decrypted = await crypto.subtle.decrypt(
+				{ name: 'AES-GCM', iv: iv },
+				cryptoKey,
+				encrypted
+			);
+
+			const decoder = new TextDecoder();
+			return decoder.decode(decrypted);
+		} catch (error) {
+			throw error;
+		}
+	}
+
+	async encryptBinary(data, key) {
+		try {
+			const iv = crypto.getRandomValues(new Uint8Array(12));
+
+			const cryptoKey = await crypto.subtle.importKey(
+				'raw',
+				this.padKey(key),
+				{ name: 'AES-GCM' },
+				false,
+				['encrypt']
+			);
+
+			const encrypted = await crypto.subtle.encrypt(
+				{ name: 'AES-GCM', iv: iv },
+				cryptoKey,
+				data
+			);
+
+			const result = new Uint8Array(iv.length + encrypted.byteLength);
+			result.set(iv, 0);
+			result.set(new Uint8Array(encrypted), iv.length);
+
+			return btoa(String.fromCharCode(...result));
+		} catch (error) {
+			throw error;
+		}
+	}
+
+	async decryptBinary(encryptedData, key) {
+		try {
+			const data = Uint8Array.from(atob(encryptedData), c => c.charCodeAt(0));
+			const iv = data.slice(0, 12);
+			const encrypted = data.slice(12);
+
+			const cryptoKey = await crypto.subtle.importKey(
+				'raw',
+				this.padKey(key),
+				{ name: 'AES-GCM' },
+				false,
+				['decrypt']
+			);
+
+			return await crypto.subtle.decrypt(
+				{ name: 'AES-GCM', iv: iv },
+				cryptoKey,
+				encrypted
+			);
+		} catch (error) {
+			throw error;
+		}
 	}
 
 	// ==================== PUBLIC API ====================
@@ -29,29 +153,41 @@ class P2PTransferManager {
 	 * @param {File} file - File object to transfer
 	 * @returns {Promise<{sessionId: string, transfer: SendTransfer}>}
 	 */
-	async initiateTransfer(chatHandle, file) {
+	async initiateTransfer(chatHandle, file, encryptionKey = null) {
 		// Check concurrent transfer limits
 		const sendingCount = Array.from(this.activeSends.values())
 			.filter(t => t.status !== 'COMPLETED' && t.status !== 'FAILED').length;
-		
+
 		if (sendingCount >= P2P_MAX_CONCURRENT) {
 			throw new Error(`Concurrent transfer limit exceeded (${P2P_MAX_CONCURRENT})`);
 		}
 
+		// Use provided key or fallback to instance key
+		const key = encryptionKey || this.encryptionKey;
+
 		// Calculate chunks
 		const fileSize = file.size;
 		const totalChunks = Math.ceil(fileSize / P2P_CHUNK_SIZE);
-		
-		// Pre-compute SHA256 checksum
+
+		// Pre-compute SHA256 checksum on plaintext
 		const sha256Checksum = await this.computeSHA256(file);
 
-		// Create transfer session on server (simplified - no receiverId)
+		// Encrypt metadata if key available
+		let encryptedFileName = file.name;
+		let encryptedFileSize = fileSize.toString();
+
+		if (key) {
+			encryptedFileName = await this.encryptMessage(file.name, key);
+			encryptedFileSize = await this.encryptMessage(fileSize.toString(), key);
+		}
+
+		// Create transfer session on server
 		const response = await authenticatedFetch(`/transfer/initiate/${chatHandle}`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
-				fileName: file.name,
-				fileSize,
+				fileName: encryptedFileName,
+				fileSize: encryptedFileSize,
 				totalChunks,
 				sha256FileChecksum: sha256Checksum
 			})
@@ -73,7 +209,8 @@ class P2PTransferManager {
 			fileSize,
 			totalChunks,
 			sha256Checksum,
-			chunks
+			chunks,
+			encryptionKey: key
 		});
 
 		this.activeSends.set(transferSessionId, sendTransfer);
@@ -191,7 +328,7 @@ class P2PTransferManager {
 	 * @param {string} fileName - File name for the transfer
 	 * @returns {Promise<ReceiveTransfer>}
 	 */
-	async acceptTransfer(chatHandle, transferSessionId, totalChunks, fileName = null) {
+	async acceptTransfer(chatHandle, transferSessionId, totalChunks, fileName = null, encryptionKey = null) {
 		const response = await authenticatedFetch(`/transfer/accept/${chatHandle}/${transferSessionId}`, {
 			method: 'POST'
 		});
@@ -201,12 +338,16 @@ class P2PTransferManager {
 			throw new Error(error.error || 'Failed to accept transfer');
 		}
 
+		// Use provided key or fallback to instance key
+		const key = encryptionKey || this.encryptionKey;
+
 		// Create receive transfer
 		const receiveTransfer = new ReceiveTransfer({
 			transferSessionId,
 			chatHandle,
 			totalChunks,
-			fileName
+			fileName,
+			encryptionKey: key
 		});
 
 		this.activeReceives.set(transferSessionId, receiveTransfer);
@@ -442,14 +583,15 @@ class SendTransfer {
 		this.totalChunks = options.totalChunks;
 		this.sha256Checksum = options.sha256Checksum;
 		this.chunks = options.chunks;
-		
+		this.encryptionKey = options.encryptionKey;
+
 		// State
 		this.status = 'PENDING';
 		this.currentChunkIndex = 0;
 		this.lastACKedChunk = -1;
 		this.retryCount = 0;
 		this.ackTimeout = null;
-		
+
 		// Event listeners
 		this.listeners = new Map();
 	}
@@ -551,23 +693,30 @@ class SendTransfer {
 	}
 
 	async sendChunkToServer(chunkIndex, chunkData) {
+		// Encrypt chunk data if key available
+		let dataToSend = chunkData;
+		if (this.encryptionKey) {
+			const encrypted = await this.encryptChunk(chunkData);
+			dataToSend = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
+		}
+
 		// Create multipart data: JSON metadata + \r\n\r\n + binary data
 		// Browser-compatible: use Uint8Array instead of Buffer
 		const metadata = JSON.stringify({
 			chunkIndex,
-			chunkSize: chunkData.length,
+			chunkSize: dataToSend.length,
 			totalChunks: this.totalChunks
 		});
-		
+
 		const encoder = new TextEncoder();
 		const metadataBytes = encoder.encode(metadata);
 		const delimiter = encoder.encode('\r\n\r\n');
-		
+
 		// Combine all parts using Uint8Array
-		const body = new Uint8Array(metadataBytes.length + delimiter.length + chunkData.length);
+		const body = new Uint8Array(metadataBytes.length + delimiter.length + dataToSend.length);
 		body.set(metadataBytes, 0);
 		body.set(delimiter, metadataBytes.length);
-		body.set(chunkData, metadataBytes.length + delimiter.length);
+		body.set(dataToSend, metadataBytes.length + delimiter.length);
 
 		const response = await authenticatedFetch(`/transfer/send-chunk/${this.chatHandle}/${this.transferSessionId}`, {
 			method: 'POST',
@@ -583,6 +732,45 @@ class SendTransfer {
 		}
 
 		return await response.json();
+	}
+
+	async encryptChunk(chunkData) {
+		const iv = crypto.getRandomValues(new Uint8Array(12));
+
+		const cryptoKey = await crypto.subtle.importKey(
+			'raw',
+			this.padKey(this.encryptionKey),
+			{ name: 'AES-GCM' },
+			false,
+			['encrypt']
+		);
+
+		const encrypted = await crypto.subtle.encrypt(
+			{ name: 'AES-GCM', iv: iv },
+			cryptoKey,
+			chunkData
+		);
+
+		const result = new Uint8Array(iv.length + encrypted.byteLength);
+		result.set(iv, 0);
+		result.set(new Uint8Array(encrypted), iv.length);
+
+		// Use chunked approach to avoid stack overflow with large arrays
+		let binaryString = '';
+		const chunkSize = 8192;
+		for (let i = 0; i < result.length; i += chunkSize) {
+			const chunk = result.subarray(i, Math.min(i + chunkSize, result.length));
+			binaryString += String.fromCharCode(...chunk);
+		}
+		return btoa(binaryString);
+	}
+
+	padKey(keyStr) {
+		const encoder = new TextEncoder();
+		const data = encoder.encode(keyStr);
+		const padded = new Uint8Array(32);
+		padded.set(data.slice(0, 32));
+		return padded;
 	}
 
 	async complete() {
@@ -614,6 +802,7 @@ class ReceiveTransfer {
 		this.chatHandle = options.chatHandle;
 		this.totalChunks = options.totalChunks;
 		this.fileName = options.fileName || null;
+		this.encryptionKey = options.encryptionKey;
 
 		// State
 		this.status = 'ACCEPTED';
@@ -694,14 +883,47 @@ class ReceiveTransfer {
 			return;
 		}
 
-		// Store received chunk
-		const chunkData = Uint8Array.from(atob(data.chunkData), c => c.charCodeAt(0));
+		// Decode received chunk
+		let chunkData = Uint8Array.from(atob(data.chunkData), c => c.charCodeAt(0));
+
+		// Decrypt if key available
+		if (this.encryptionKey) {
+			chunkData = new Uint8Array(await this.decryptChunk(chunkData));
+		}
+
 		this.receivedChunks.set(data.chunkIndex, chunkData);
 		this.lastReceivedChunk = data.chunkIndex;
 
 		// Emit progress event
 		this.emit('chunkReceived', { chunkIndex: data.chunkIndex, totalChunks: this.totalChunks });
 		console.log(`Received chunk ${data.chunkIndex}/${this.totalChunks}`);
+	}
+
+	async decryptChunk(encryptedData) {
+		const iv = encryptedData.slice(0, 12);
+		const encrypted = encryptedData.slice(12);
+
+		const cryptoKey = await crypto.subtle.importKey(
+			'raw',
+			this.padKey(this.encryptionKey),
+			{ name: 'AES-GCM' },
+			false,
+			['decrypt']
+		);
+
+		return await crypto.subtle.decrypt(
+			{ name: 'AES-GCM', iv: iv },
+			cryptoKey,
+			encrypted
+		);
+	}
+
+	padKey(keyStr) {
+		const encoder = new TextEncoder();
+		const data = encoder.encode(keyStr);
+		const padded = new Uint8Array(32);
+		padded.set(data.slice(0, 32));
+		return padded;
 	}
 
 	async validateAndAssemble() {

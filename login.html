@@ -5087,9 +5087,11 @@
                 const totalChunks = Math.ceil(p2pSelectedFile.size / chunkSize);
 
                 // Initiate transfer on server (creates session but doesn't start sending yet)
+                const encryptionKey = currentChat && currentChat.encryptionKey ? currentChat.encryptionKey : null;
                 const result = await p2pTransferManager.initiateTransfer(
                     currentChat.handle,
-                    p2pSelectedFile
+                    p2pSelectedFile,
+                    encryptionKey
                 );
 
                 transferSessionId = result.sessionId;
@@ -5355,16 +5357,33 @@
                     }
                 }
 
+                // Decrypt fileName and fileSize if available
+                let displayFileName = invitation.fileName;
+                let displayFileSize = invitation.fileSize;
+                if (currentChat && currentChat.encryptionKey) {
+                    try {
+                        if (invitation.fileName) {
+                            displayFileName = await decryptMessage(invitation.fileName, currentChat.encryptionKey);
+                        }
+                        if (invitation.fileSize) {
+                            const decryptedSize = await decryptMessage(invitation.fileSize, currentChat.encryptionKey);
+                            displayFileSize = parseInt(decryptedSize, 10);
+                        }
+                    } catch (e) {
+                        console.warn('Failed to decrypt file metadata:', e);
+                    }
+                }
+
                 const item = document.createElement('div');
                 item.className = 'pending-invitation-item';
                 item.innerHTML = `
                     <div class="pending-invitation-info">
-                        <div class="pending-invitation-file-name">${escapeHtml(invitation.fileName)}</div>
+                        <div class="pending-invitation-file-name">${escapeHtml(displayFileName)}</div>
                         <div class="pending-invitation-sender">From: ${escapeHtml(displaySenderName)}</div>
-                        <div class="pending-invitation-size">${formatFileSize(invitation.fileSize)}</div>
+                        <div class="pending-invitation-size">${formatFileSize(displayFileSize)}</div>
                     </div>
                     <div class="pending-invitation-actions">
-                        <button class="pending-invitation-btn accept" onclick="acceptP2PInvitation('${invitation.transferSessionId}', ${invitation.totalChunks}, '${escapeHtml(invitation.fileName)}', ${invitation.fileSize})">Accept</button>
+                        <button class="pending-invitation-btn accept" onclick="acceptP2PInvitation('${invitation.transferSessionId}', ${invitation.totalChunks}, '${escapeHtml(displayFileName)}', ${displayFileSize})">Accept</button>
                         <button class="pending-invitation-btn decline" onclick="declineP2PInvitation('${invitation.transferSessionId}')">Decline</button>
                     </div>
                 `;
@@ -5378,7 +5397,8 @@
                 showToast('Accepting transfer...', 'info');
 
                 // Accept the transfer (pass fileName for tracking)
-                await p2pTransferManager.acceptTransfer(currentChat.handle, transferSessionId, totalChunks, fileName);
+                const encryptionKey = currentChat && currentChat.encryptionKey ? currentChat.encryptionKey : null;
+                await p2pTransferManager.acceptTransfer(currentChat.handle, transferSessionId, totalChunks, fileName, encryptionKey);
 
                 // Show progress UI
                 showTransferProgress(transferSessionId, fileName, fileSize, 'receiving');
