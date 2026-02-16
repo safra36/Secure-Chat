@@ -76,6 +76,16 @@ const p2pTransfers = new Map();
 // Structure: chatHandle -> [Invitation] (simplified - all transfers in a chat are accessible)
 const transferInvitations = new Map();
 
+// ==================== VOICE CALL STORAGE ====================
+const activeCalls = new Map();       // callSessionId -> CallSession
+const callAudioBuffers = new Map();  // callSessionId -> { callerChunks: [], calleeChunks: [], callerSeq: 0, calleeSeq: 0 }
+const pendingCalls = new Map();      // chatHandle -> callSessionId
+
+// Voice call constants
+const CALL_RING_TIMEOUT = 30000;     // 30s to answer
+const CALL_MAX_DURATION = 7200000;   // 2h max
+const CALL_AUDIO_BUFFER_SIZE = 20;    // Keep last 20 chunks per side (circular)
+
 // P2P Transfer constants
 const P2P_CHUNK_SIZE = 256 * 1024; // 256KB
 const P2P_ACK_TIMEOUT = 10000; // 10 seconds
@@ -137,6 +147,26 @@ for (const [transferSessionId, transfer] of p2pTransfers.entries()) {
 	}
 }
 }, 5 * 60 * 1000);
+
+// Cleanup voice calls periodically (every 10 seconds)
+setInterval(() => {
+	const now = Date.now();
+	for (const [callId, call] of activeCalls.entries()) {
+		if (call.status === 'RINGING' && now - call.createdAt > CALL_RING_TIMEOUT) {
+			call.status = 'ENDED';
+			call.endedAt = now;
+			pendingCalls.delete(call.chatHandle);
+		} else if (call.status === 'ACTIVE' && now - call.acceptedAt > CALL_MAX_DURATION) {
+			call.status = 'ENDED';
+			call.endedAt = now;
+			pendingCalls.delete(call.chatHandle);
+		} else if (call.status === 'ENDED' && now - call.endedAt > 30000) {
+			activeCalls.delete(callId);
+			callAudioBuffers.delete(callId);
+			pendingCalls.delete(call.chatHandle);
+		}
+	}
+}, 10000);
 
 // ==================== P2P HELPER FUNCTIONS ====================
 
@@ -388,6 +418,50 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	if (req.method === 'GET' && pathname.startsWith('/transfer/status/')) {
 		console.log('Handling GET /transfer/status/');
 		handleTransferStatus(req, res, pathname);
+		return;
+	}
+
+	// ==================== VOICE CALL ENDPOINTS ====================
+
+	// POST /call/initiate/{chatHandle}
+	if (req.method === 'POST' && pathname.startsWith('/call/initiate/')) {
+		handleCallInitiate(req, res, pathname);
+		return;
+	}
+
+	// GET /call/poll/{chatHandle}
+	if (req.method === 'GET' && pathname.startsWith('/call/poll/')) {
+		handleCallPoll(req, res, pathname);
+		return;
+	}
+
+	// POST /call/accept/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/accept/')) {
+		handleCallAccept(req, res, pathname);
+		return;
+	}
+
+	// POST /call/reject/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/reject/')) {
+		handleCallReject(req, res, pathname);
+		return;
+	}
+
+	// POST /call/end/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/end/')) {
+		handleCallEnd(req, res, pathname);
+		return;
+	}
+
+	// POST /call/audio/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/audio/')) {
+		handleCallSendAudio(req, res, pathname);
+		return;
+	}
+
+	// GET /call/audio/{chatHandle}/{callId}
+	if (req.method === 'GET' && pathname.startsWith('/call/audio/')) {
+		handleCallReceiveAudio(req, res, pathname);
 		return;
 	}
 
@@ -1934,6 +2008,349 @@ function handleTimeSync(req, res) {
 		res.writeHead(500, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Failed to sync time' }));
 	}
+}
+
+// ==================== VOICE CALL HANDLERS ====================
+
+function handleCallInitiate(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+
+	if (!chatHandle) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	const [callerId] = req.headers.authorization.split(':');
+
+	// Check if there's already an active/ringing call in this chat
+	const existingCallId = pendingCalls.get(chatHandle);
+	if (existingCallId) {
+		const existingCall = activeCalls.get(existingCallId);
+		if (existingCall && (existingCall.status === 'RINGING' || existingCall.status === 'ACTIVE')) {
+			res.writeHead(409, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'A call is already active in this chat' }));
+			return;
+		}
+	}
+
+	const callSessionId = `call-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+	const callSession = {
+		id: callSessionId,
+		chatHandle,
+		callerId,
+		calleeId: null,
+		status: 'RINGING',
+		createdAt: Date.now(),
+		acceptedAt: null,
+		endedAt: null
+	};
+
+	activeCalls.set(callSessionId, callSession);
+	pendingCalls.set(chatHandle, callSessionId);
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ callSessionId, status: 'RINGING' }));
+}
+
+function handleCallPoll(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+
+	if (!chatHandle) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+
+	const callId = pendingCalls.get(chatHandle);
+	if (!callId) {
+		res.writeHead(204);
+		res.end();
+		return;
+	}
+
+	const call = activeCalls.get(callId);
+	if (!call) {
+		res.writeHead(204);
+		res.end();
+		return;
+	}
+
+	const isCaller = call.callerId === userId;
+
+	// Caller can check status of their own call
+	if (isCaller) {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			callSessionId: call.id,
+			status: call.status,
+			calleeId: call.calleeId || null,
+			isCaller: true
+		}));
+		return;
+	}
+
+	// Callee gets notified of incoming calls
+	if (call.status === 'RINGING') {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			callSessionId: call.id,
+			callerId: call.callerId,
+			status: call.status
+		}));
+		return;
+	}
+
+	// Callee doesn't have access to this call yet
+	res.writeHead(204);
+	res.end();
+}
+
+function handleCallAccept(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+
+	const call = activeCalls.get(callId);
+	if (!call) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call not found' }));
+		return;
+	}
+
+	if (call.status !== 'RINGING') {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call is not ringing' }));
+		return;
+	}
+
+	if (call.callerId === userId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Cannot accept your own call' }));
+		return;
+	}
+
+	call.status = 'ACTIVE';
+	call.calleeId = userId;
+	call.acceptedAt = Date.now();
+
+	// Initialize audio buffers
+	callAudioBuffers.set(callId, {
+		callerChunks: [],
+		calleeChunks: [],
+		callerSeq: 0,
+		calleeSeq: 0
+	});
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ callSessionId: callId, status: 'ACTIVE' }));
+}
+
+function handleCallReject(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const call = activeCalls.get(callId);
+	if (!call) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call not found' }));
+		return;
+	}
+
+	call.status = 'ENDED';
+	call.endedAt = Date.now();
+	pendingCalls.delete(chatHandle);
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ callSessionId: callId, status: 'ENDED' }));
+}
+
+function handleCallEnd(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const call = activeCalls.get(callId);
+	if (!call) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call not found' }));
+		return;
+	}
+
+	call.status = 'ENDED';
+	call.endedAt = Date.now();
+	pendingCalls.delete(chatHandle);
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ callSessionId: callId, status: 'ENDED' }));
+}
+
+function handleCallSendAudio(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+
+	const call = activeCalls.get(callId);
+	if (!call || call.status !== 'ACTIVE') {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call is not active' }));
+		return;
+	}
+
+	const buffer = callAudioBuffers.get(callId);
+	if (!buffer) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Audio buffer not initialized' }));
+		return;
+	}
+
+	let body = '';
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const { audioData } = JSON.parse(body);
+
+			const isCaller = userId === call.callerId;
+			const chunks = isCaller ? buffer.callerChunks : buffer.calleeChunks;
+			const seq = isCaller ? buffer.callerSeq++ : buffer.calleeSeq++;
+
+			console.log(`[AUDIO SEND] ${isCaller ? 'Caller' : 'Callee'} ${userId} sent chunk seq=${seq}, size=${audioData.length}, buffer=${chunks.length} chunks`);
+
+			chunks.push({ seq, audioData, timestamp: Date.now() });
+
+			// Circular buffer - keep last N chunks
+			while (chunks.length > CALL_AUDIO_BUFFER_SIZE) {
+				chunks.shift();
+			}
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ seq }));
+		} catch (err) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid request body' }));
+		}
+	});
+}
+
+function handleCallReceiveAudio(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+	const parsedUrl = url.parse(req.url, true);
+	const afterSeq = parseInt(parsedUrl.query.afterSeq || '-1', 10);
+	const maxWaitMs = parseInt(parsedUrl.query.maxWaitMs || '500', 10);
+
+	const call = activeCalls.get(callId);
+	if (!call) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call not found' }));
+		return;
+	}
+
+	const buffer = callAudioBuffers.get(callId);
+	if (!buffer) {
+		res.writeHead(204);
+		res.end();
+		return;
+	}
+
+	// Receiver gets the other side's chunks
+	const isCaller = userId === call.callerId;
+	const chunks = isCaller ? buffer.calleeChunks : buffer.callerChunks;
+
+	console.log(`[AUDIO RECV] ${isCaller ? 'Caller' : 'Callee'} ${userId} polling afterSeq=${afterSeq}, available chunks=${chunks.length}, seqs=[${chunks.map(c => c.seq).join(',')}]`);
+
+	// Check immediately for available chunk
+	const chunk = chunks.find(c => c.seq > afterSeq);
+	if (chunk) {
+		console.log(`[AUDIO RECV] Returning chunk seq=${chunk.seq} to ${isCaller ? 'Caller' : 'Callee'}`);
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			seq: chunk.seq,
+			audioData: chunk.audioData,
+			callStatus: call.status
+		}));
+		return;
+	}
+
+	// Long-poll: wait for chunk
+	const startTime = Date.now();
+	const checkInterval = setInterval(() => {
+		const elapsed = Date.now() - startTime;
+
+		// Check if call ended
+		const currentCall = activeCalls.get(callId);
+		if (!currentCall || currentCall.status === 'ENDED') {
+			clearInterval(checkInterval);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ callStatus: 'ENDED' }));
+			return;
+		}
+
+		const newChunk = chunks.find(c => c.seq > afterSeq);
+		if (newChunk) {
+			clearInterval(checkInterval);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				seq: newChunk.seq,
+				audioData: newChunk.audioData,
+				callStatus: currentCall.status
+			}));
+			return;
+		}
+
+		if (elapsed >= maxWaitMs) {
+			clearInterval(checkInterval);
+			console.log(`[AUDIO RECV] Long-poll timeout for ${isCaller ? 'Caller' : 'Callee'} ${userId}`);
+			res.writeHead(204);
+			res.end();
+		}
+	}, 50);
 }
 
 // Get MIME type for file

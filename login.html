@@ -1209,6 +1209,196 @@
             color: #000;
         }
 
+        /* Voice Call Styles */
+        .call-btn {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 50%;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            margin-left: auto;
+        }
+
+        .call-btn:hover {
+            background: var(--success);
+            color: #000;
+            transform: scale(1.05);
+        }
+
+        .call-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        /* Incoming call modal */
+        .incoming-call-content {
+            text-align: center;
+            padding: 20px 0;
+        }
+
+        .incoming-call-icon {
+            font-size: 48px;
+            animation: callRing 1s ease-in-out infinite;
+            margin-bottom: 16px;
+        }
+
+        @keyframes callRing {
+            0%, 100% { transform: rotate(0deg); }
+            10% { transform: rotate(15deg); }
+            20% { transform: rotate(-15deg); }
+            30% { transform: rotate(10deg); }
+            40% { transform: rotate(-10deg); }
+            50% { transform: rotate(0deg); }
+        }
+
+        .incoming-call-name {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .incoming-call-label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 24px;
+        }
+
+        .call-modal-actions {
+            display: flex;
+            gap: 24px;
+            justify-content: center;
+        }
+
+        .call-action-btn {
+            width: 56px;
+            height: 56px;
+            border: none;
+            border-radius: 50%;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .call-action-btn.accept {
+            background: var(--success);
+            color: #fff;
+        }
+
+        .call-action-btn.reject {
+            background: var(--error);
+            color: #fff;
+        }
+
+        .call-action-btn:hover {
+            transform: scale(1.1);
+        }
+
+        /* Active call overlay */
+        .call-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 48px;
+            background: linear-gradient(135deg, var(--success), #00a854);
+            z-index: 150;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            padding: 0 16px;
+            animation: callSlideDown 0.3s ease;
+        }
+
+        .call-overlay.active {
+            display: flex;
+        }
+
+        @keyframes callSlideDown {
+            from { transform: translateY(-100%); }
+            to { transform: translateY(0); }
+        }
+
+        .call-overlay-pulse {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #fff;
+            animation: callPulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes callPulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        .call-overlay-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+        }
+
+        .call-timer {
+            font-variant-numeric: tabular-nums;
+        }
+
+        .call-overlay-actions {
+            display: flex;
+            gap: 8px;
+            margin-left: auto;
+        }
+
+        .call-overlay-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 50%;
+            font-size: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .call-mute-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+
+        .call-mute-btn.muted {
+            background: var(--error);
+        }
+
+        .call-end-btn {
+            background: var(--error);
+            color: #fff;
+        }
+
+        .call-end-btn:hover {
+            transform: scale(1.1);
+        }
+
+        /* Push chat content down when call active */
+        .call-overlay.active ~ .chat-container,
+        body.call-active .chat-container {
+            margin-top: 48px;
+        }
+
         /* P2P Transfer Indicator */
         @keyframes p2pSlideIn {
             from { opacity: 0; transform: translateX(100px); }
@@ -1668,6 +1858,7 @@
                     </div>
                 </div>
             </div>
+            <button id="call-btn" class="call-btn" title="Voice Call">📞</button>
         </div>
 
         <div id="messages" class="messages"></div>
@@ -1791,6 +1982,34 @@
                 <div class="p2p-empty-state-icon">📭</div>
                 <div class="p2p-empty-state-text">No pending file transfers</div>
             </div>
+        </div>
+    </div>
+
+    <!-- Incoming Call Modal -->
+    <div id="incoming-call-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="incoming-call-content">
+                <div class="incoming-call-icon">📞</div>
+                <div class="incoming-call-name" id="incoming-call-name">Unknown</div>
+                <div class="incoming-call-label">Incoming voice call...</div>
+                <div class="call-modal-actions">
+                    <button class="call-action-btn reject" id="reject-call-btn" title="Reject">✕</button>
+                    <button class="call-action-btn accept" id="accept-call-btn" title="Accept">📞</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active Call Overlay -->
+    <div id="call-overlay" class="call-overlay">
+        <div class="call-overlay-pulse"></div>
+        <div class="call-overlay-info">
+            <span id="call-peer-name">Call</span>
+            <span class="call-timer" id="call-timer">00:00</span>
+        </div>
+        <div class="call-overlay-actions">
+            <button class="call-overlay-btn call-mute-btn" id="call-mute-btn" title="Mute">🎤</button>
+            <button class="call-overlay-btn call-end-btn" id="call-end-btn" title="End Call">✕</button>
         </div>
     </div>
 
@@ -2491,6 +2710,26 @@
         let isRecording = false;
         let recordingStartTime = null;
         let recordingTimer = null;
+
+        // Voice call state
+        let callState = 'IDLE';
+        let activeCallSession = null;   // { callSessionId, chatHandle, role, startTime }
+        let callMediaRecorder = null;
+        let callMediaStream = null;
+        let callAudioPollInterval = null;
+        let callTimerInterval = null;
+        let callPollInterval = null;
+        let lastReceivedAudioSeq = -1;
+        let callAudioSeq = 0;
+        let isMuted = false;
+        let callRingInterval = null;
+
+        // Call audio playback (MSE-based)
+        let callMediaSource = null;
+        let callSourceBuffer = null;
+        let callAudioElement = null;
+        let callAudioQueue = [];     // Pending buffers to append
+        let callSourceBufferReady = true;
 
         // Time synchronization
         let timeOffset = 0; // Offset between client and server time (client_time - server_time)
@@ -5491,6 +5730,628 @@
             const i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
         }
+
+        // ==================== VOICE CALL FUNCTIONS ====================
+
+        // Call button click
+        document.getElementById('call-btn').addEventListener('click', () => {
+            if (!currentChat || callState !== 'IDLE') return;
+            initiateCall();
+        });
+
+        // Accept/Reject buttons
+        document.getElementById('accept-call-btn').addEventListener('click', () => {
+            if (activeCallSession) acceptCall(activeCallSession.callSessionId);
+        });
+
+        document.getElementById('reject-call-btn').addEventListener('click', () => {
+            if (activeCallSession) rejectCall(activeCallSession.callSessionId);
+        });
+
+        // Mute button
+        document.getElementById('call-mute-btn').addEventListener('click', () => {
+            isMuted = !isMuted;
+            const muteBtn = document.getElementById('call-mute-btn');
+            muteBtn.classList.toggle('muted', isMuted);
+            muteBtn.title = isMuted ? 'Unmute' : 'Mute';
+            // Mute/unmute mic track
+            if (callMediaStream) {
+                callMediaStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+            }
+        });
+
+        // End call button
+        document.getElementById('call-end-btn').addEventListener('click', () => {
+            endCall();
+        });
+
+        async function initiateCall() {
+            if (!currentChat) return;
+            try {
+                callState = 'RINGING_OUT';
+                updateCallUI();
+
+                const response = await authenticatedFetch(`/call/initiate/${currentChat.handle}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+
+                if (!response.ok) {
+                    const err = await response.json();
+                    showToast(err.error || 'Failed to initiate call', 'error');
+                    callState = 'IDLE';
+                    updateCallUI();
+                    return;
+                }
+
+                const { callSessionId } = await response.json();
+                activeCallSession = {
+                    callSessionId,
+                    chatHandle: currentChat.handle,
+                    role: 'caller',
+                    startTime: null
+                };
+
+                // Poll for call acceptance
+                startCallSignalingPoll();
+                showToast('Calling...', 'info');
+
+                // Auto-timeout after 30s
+                setTimeout(() => {
+                    if (callState === 'RINGING_OUT') {
+                        showToast('No answer', 'error');
+                        endCall();
+                    }
+                }, 30000);
+            } catch (err) {
+                console.error('Call initiation error:', err);
+                callState = 'IDLE';
+                updateCallUI();
+                showToast('Failed to start call', 'error');
+            }
+        }
+
+        function startCallSignalingPoll() {
+            // Caller polls for acceptance; callee polls for incoming
+            if (callPollInterval) clearInterval(callPollInterval);
+
+            callPollInterval = setInterval(async () => {
+                if (!currentChat) return;
+
+                if (callState === 'RINGING_OUT' && activeCallSession) {
+                    // Caller: check if call was accepted/rejected
+                    try {
+                        const resp = await authenticatedFetch(`/call/poll/${currentChat.handle}`, {
+                            method: 'GET'
+                        });
+
+                        console.log('[CALLER POLL] Status:', resp.status);
+
+                        if (resp.status === 200) {
+                            const data = await resp.json();
+                            console.log('[CALLER POLL] Data:', data);
+
+                            if (data.status === 'ACTIVE') {
+                                console.log('[CALLER POLL] Call accepted! Starting audio...');
+                                callState = 'ACTIVE';
+                                activeCallSession.startTime = Date.now();
+                                updateCallUI();
+                                startCallAudio();
+                                showToast('Call connected', 'success');
+                            } else if (data.status === 'ENDED' || data.status === 'REJECTED') {
+                                showToast('Call ended', 'info');
+                                endCall();
+                            }
+                        }
+                    } catch (e) {
+                        console.error('[CALLER POLL] Error:', e);
+                    }
+                }
+            }, 2000);
+        }
+
+        function startIncomingCallPoll() {
+            if (callRingInterval) clearInterval(callRingInterval);
+
+            callRingInterval = setInterval(async () => {
+                if (!currentChat || callState !== 'IDLE') return;
+
+                try {
+                    const resp = await authenticatedFetch(`/call/poll/${currentChat.handle}`, {
+                        method: 'GET'
+                    });
+
+                    if (resp.status === 200) {
+                        const data = await resp.json();
+                        if (data.status === 'RINGING') {
+                            callState = 'RINGING_IN';
+                            activeCallSession = {
+                                callSessionId: data.callSessionId,
+                                chatHandle: currentChat.handle,
+                                role: 'callee',
+                                startTime: null
+                            };
+                            showIncomingCallModal(data.callerId);
+                            playCallRingSound();
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            }, 2000);
+        }
+
+        function showIncomingCallModal(callerId) {
+            document.getElementById('incoming-call-name').textContent = callerId;
+            document.getElementById('incoming-call-modal').classList.add('active');
+        }
+
+        function hideIncomingCallModal() {
+            document.getElementById('incoming-call-modal').classList.remove('active');
+        }
+
+        function playCallRingSound() {
+            try {
+                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const now = audioCtx.currentTime;
+
+                // Two-tone ring
+                for (let i = 0; i < 2; i++) {
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+                    osc.frequency.value = i === 0 ? 440 : 480;
+                    gain.gain.setValueAtTime(0.2, now);
+                    gain.gain.exponentialRampToValueAtTime(0.01, now + 0.8);
+                    osc.start(now);
+                    osc.stop(now + 0.8);
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        async function acceptCall(callSessionId) {
+            if (!currentChat || !activeCallSession) return;
+            hideIncomingCallModal();
+
+            try {
+                const resp = await authenticatedFetch(
+                    `/call/accept/${currentChat.handle}/${callSessionId}`,
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+                );
+
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    showToast(err.error || 'Failed to accept call', 'error');
+                    callState = 'IDLE';
+                    activeCallSession = null;
+                    updateCallUI();
+                    return;
+                }
+
+                callState = 'ACTIVE';
+                activeCallSession.startTime = Date.now();
+                updateCallUI();
+                startCallAudio();
+                showToast('Call connected', 'success');
+            } catch (err) {
+                console.error('Accept call error:', err);
+                callState = 'IDLE';
+                activeCallSession = null;
+                updateCallUI();
+            }
+        }
+
+        async function rejectCall(callSessionId) {
+            if (!currentChat || !activeCallSession) return;
+            hideIncomingCallModal();
+
+            try {
+                await authenticatedFetch(
+                    `/call/reject/${currentChat.handle}/${callSessionId}`,
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+                );
+            } catch (e) { /* ignore */ }
+
+            callState = 'IDLE';
+            activeCallSession = null;
+            updateCallUI();
+            showToast('Call rejected', 'info');
+        }
+
+        async function endCall() {
+            if (activeCallSession) {
+                try {
+                    await authenticatedFetch(
+                        `/call/end/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
+                        { method: 'POST', headers: { 'Content-Type': 'application/json' } }
+                    );
+                } catch (e) { /* ignore */ }
+            }
+
+            stopCallAudio();
+            hideIncomingCallModal();
+            cleanupCallPlayback();
+            callState = 'IDLE';
+            activeCallSession = null;
+            lastReceivedAudioSeq = -1;
+            callAudioSeq = 0;
+            isMuted = false;
+            updateCallUI();
+
+            // Restart incoming call poll so we can receive new calls
+            if (currentChat) startIncomingCallPoll();
+        }
+
+        async function startCallAudio() {
+            console.log('[CALL AUDIO] Starting audio for role:', activeCallSession?.role);
+            try {
+                // Get mic
+                callMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                console.log('[CALL AUDIO] Microphone access granted');
+
+                // Determine supported mimeType
+                let mimeType = 'audio/webm;codecs=opus';
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = 'audio/webm';
+                    if (!MediaRecorder.isTypeSupported(mimeType)) {
+                        mimeType = 'audio/ogg;codecs=opus';
+                        if (!MediaRecorder.isTypeSupported(mimeType)) {
+                            mimeType = '';
+                        }
+                    }
+                }
+
+                const recorderOptions = { audioBitsPerSecond: 32000 };
+                if (mimeType) recorderOptions.mimeType = mimeType;
+
+                callMediaRecorder = new MediaRecorder(callMediaStream, recorderOptions);
+
+                callMediaRecorder.ondataavailable = async (event) => {
+                    console.log('[DATA AVAILABLE] Size:', event.data.size, 'callState:', callState, 'isMuted:', isMuted);
+                    if (event.data.size > 0 && callState === 'ACTIVE' && !isMuted) {
+                        try {
+                            const arrayBuffer = await event.data.arrayBuffer();
+                            const encrypted = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
+                            await sendCallAudioChunk(encrypted);
+                        } catch (e) {
+                            console.error('[DATA AVAILABLE] Error:', e);
+                        }
+                    }
+                };
+
+                callMediaRecorder.start(1000); // 1s timeslice
+                console.log('[CALL AUDIO] MediaRecorder started');
+
+                // Init MSE playback for receiving audio
+                initCallPlayback();
+
+                // Start polling for incoming audio
+                startCallAudioPoll();
+
+                // Start call timer
+                startCallTimer();
+
+                // Slow down message polling during call
+                if (pollingInterval) {
+                    clearInterval(pollingInterval);
+                    pollingInterval = setInterval(fetchMessages, 5000);
+                }
+            } catch (err) {
+                console.error('Failed to start call audio:', err);
+                showToast('Failed to access microphone', 'error');
+                endCall();
+            }
+        }
+
+        function stopCallAudio() {
+            if (callMediaRecorder && callMediaRecorder.state !== 'inactive') {
+                callMediaRecorder.stop();
+            }
+            callMediaRecorder = null;
+
+            if (callMediaStream) {
+                callMediaStream.getTracks().forEach(t => t.stop());
+                callMediaStream = null;
+            }
+
+            if (callAudioPollInterval) {
+                clearInterval(callAudioPollInterval);
+                callAudioPollInterval = null;
+            }
+
+            if (callTimerInterval) {
+                clearInterval(callTimerInterval);
+                callTimerInterval = null;
+            }
+
+            if (callPollInterval) {
+                clearInterval(callPollInterval);
+                callPollInterval = null;
+            }
+
+            if (callRingInterval) {
+                clearInterval(callRingInterval);
+                callRingInterval = null;
+            }
+
+            // Restore normal message polling
+            if (isPolling && currentChat) {
+                clearInterval(pollingInterval);
+                pollingInterval = setInterval(fetchMessages, 2000);
+            }
+
+            document.body.classList.remove('call-active');
+        }
+
+        async function sendCallAudioChunk(encryptedAudioData) {
+            if (!activeCallSession || callState !== 'ACTIVE') {
+                console.log('[SEND AUDIO] Skipping - callState:', callState, 'activeCallSession:', !!activeCallSession);
+                return;
+            }
+
+            console.log('[SEND AUDIO] Sending chunk, size:', encryptedAudioData.length);
+            try {
+                const resp = await authenticatedFetch(
+                    `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
+                    {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ audioData: encryptedAudioData })
+                    }
+                );
+                console.log('[SEND AUDIO] Response status:', resp.status);
+            } catch (e) {
+                console.error('[SEND AUDIO] Error:', e);
+            }
+        }
+
+        function startCallAudioPoll() {
+            if (callAudioPollInterval) clearInterval(callAudioPollInterval);
+
+            const pollAudio = async () => {
+                if (!activeCallSession || callState !== 'ACTIVE') return;
+
+                try {
+                    const resp = await authenticatedFetch(
+                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?afterSeq=${lastReceivedAudioSeq}&maxWaitMs=500`,
+                        { method: 'GET' }
+                    );
+
+                    console.log('[RECEIVE AUDIO] Poll response status:', resp.status, 'afterSeq:', lastReceivedAudioSeq);
+
+                    if (resp.status === 200) {
+                        const data = await resp.json();
+                        console.log('[RECEIVE AUDIO] Got data, seq:', data.seq, 'audioData size:', data.audioData?.length);
+
+                        if (data.callStatus === 'ENDED') {
+                            showToast('Call ended', 'info');
+                            endCall();
+                            return;
+                        }
+
+                        if (data.seq !== undefined && data.audioData) {
+                            lastReceivedAudioSeq = data.seq;
+                            try {
+                                const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
+                                console.log('[RECEIVE AUDIO] Decrypted, enqueueing audio');
+                                enqueueCallAudio(decrypted);
+                            } catch (e) {
+                                console.error('[RECEIVE AUDIO] Error decrypting:', e);
+                            }
+                        }
+                    } else if (resp.status === 204) {
+                        console.log('[RECEIVE AUDIO] No new audio (204)');
+                    }
+                } catch (e) {
+                    console.error('[RECEIVE AUDIO] Poll error:', e);
+                }
+            };
+
+            // Initial poll immediately
+            pollAudio();
+            callAudioPollInterval = setInterval(pollAudio, 500);
+        }
+
+        function initCallPlayback() {
+            // MSE-based streaming playback
+            const mimeType = 'audio/webm;codecs=opus';
+            if (!MediaSource.isTypeSupported(mimeType)) {
+                console.error('MSE does not support', mimeType);
+                return;
+            }
+
+            callMediaSource = new MediaSource();
+            callAudioElement = new Audio();
+            callAudioElement.src = URL.createObjectURL(callMediaSource);
+            callAudioQueue = [];
+            callSourceBufferReady = true;
+
+            callMediaSource.addEventListener('sourceopen', () => {
+                try {
+                    callSourceBuffer = callMediaSource.addSourceBuffer(mimeType);
+                    callSourceBuffer.mode = 'sequence';
+                    callSourceBuffer.addEventListener('updateend', () => {
+                        callSourceBufferReady = true;
+                        flushCallAudioQueue();
+                    });
+                } catch (e) {
+                    console.error('Failed to create SourceBuffer:', e);
+                }
+            });
+
+            callAudioElement.play().catch(() => {});
+        }
+
+        function enqueueCallAudio(decryptedArrayBuffer) {
+            if (!callMediaSource || !callSourceBuffer) return;
+
+            const data = new Uint8Array(decryptedArrayBuffer);
+            callAudioQueue.push(data);
+
+            // Drop old queued chunks only if memory pressure (keep last 10)
+            if (callAudioQueue.length > 15) {
+                callAudioQueue = callAudioQueue.slice(-10);
+            }
+
+            flushCallAudioQueue();
+        }
+
+        function flushCallAudioQueue() {
+            if (!callSourceBuffer || !callSourceBufferReady || callAudioQueue.length === 0) return;
+            if (callMediaSource.readyState !== 'open') return;
+
+            callSourceBufferReady = false;
+            const chunk = callAudioQueue.shift();
+            try {
+                callSourceBuffer.appendBuffer(chunk);
+            } catch (e) {
+                console.error('appendBuffer error:', e);
+                callSourceBufferReady = true;
+            }
+
+            // Keep playback near live edge — if buffered ahead > 5s, gently catch up
+            if (callAudioElement && callSourceBuffer.buffered.length > 0) {
+                const end = callSourceBuffer.buffered.end(callSourceBuffer.buffered.length - 1);
+                const lag = end - callAudioElement.currentTime;
+                if (lag > 5) {
+                    callAudioElement.currentTime = end - 1.5;
+                }
+            }
+        }
+
+        function cleanupCallPlayback() {
+            if (callAudioElement) {
+                callAudioElement.pause();
+                if (callAudioElement.src) URL.revokeObjectURL(callAudioElement.src);
+                callAudioElement = null;
+            }
+            if (callMediaSource && callMediaSource.readyState === 'open') {
+                try { callMediaSource.endOfStream(); } catch (e) {}
+            }
+            callMediaSource = null;
+            callSourceBuffer = null;
+            callAudioQueue = [];
+            callSourceBufferReady = true;
+        }
+
+        function startCallTimer() {
+            if (callTimerInterval) clearInterval(callTimerInterval);
+            const timerEl = document.getElementById('call-timer');
+
+            callTimerInterval = setInterval(() => {
+                if (!activeCallSession || !activeCallSession.startTime) return;
+                const elapsed = Math.floor((Date.now() - activeCallSession.startTime) / 1000);
+                const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+                const secs = (elapsed % 60).toString().padStart(2, '0');
+                timerEl.textContent = `${mins}:${secs}`;
+            }, 1000);
+        }
+
+        function updateCallUI() {
+            const callBtn = document.getElementById('call-btn');
+            const overlay = document.getElementById('call-overlay');
+            const muteBtn = document.getElementById('call-mute-btn');
+
+            if (callState === 'IDLE') {
+                callBtn.disabled = false;
+                overlay.classList.remove('active');
+                document.body.classList.remove('call-active');
+                muteBtn.classList.remove('muted');
+            } else if (callState === 'RINGING_OUT') {
+                callBtn.disabled = true;
+                overlay.classList.add('active');
+                document.body.classList.add('call-active');
+                document.getElementById('call-peer-name').textContent = currentChat?.handle || 'Calling...';
+                document.getElementById('call-timer').textContent = 'Ringing...';
+            } else if (callState === 'RINGING_IN') {
+                callBtn.disabled = true;
+            } else if (callState === 'ACTIVE') {
+                callBtn.disabled = true;
+                overlay.classList.add('active');
+                document.body.classList.add('call-active');
+                document.getElementById('call-peer-name').textContent = currentChat?.handle || 'Call';
+                document.getElementById('call-timer').textContent = '00:00';
+            }
+        }
+
+        // Caller needs to detect when call is accepted
+        // Override the signaling poll to also check call status for the caller
+        function startCallerStatusPoll() {
+            if (callPollInterval) clearInterval(callPollInterval);
+
+            callPollInterval = setInterval(async () => {
+                if (callState !== 'RINGING_OUT' || !activeCallSession) return;
+
+                try {
+                    // Try to receive audio - if the call is ACTIVE, server will respond
+                    const resp = await authenticatedFetch(
+                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?afterSeq=-1&maxWaitMs=100`,
+                        { method: 'GET' }
+                    );
+
+                    if (resp.status === 200) {
+                        const data = await resp.json();
+                        if (data.callStatus === 'ENDED') {
+                            showToast('Call rejected', 'info');
+                            endCall();
+                            return;
+                        }
+                        // Call is active (we got a response from audio endpoint)
+                        callState = 'ACTIVE';
+                        activeCallSession.startTime = Date.now();
+                        updateCallUI();
+                        startCallAudio();
+                        showToast('Call connected', 'success');
+                        clearInterval(callPollInterval);
+                        callPollInterval = null;
+                    } else if (resp.status === 400) {
+                        // Call might have been rejected/ended
+                        const data = await resp.json().catch(() => ({}));
+                        if (data.error === 'Call is not active') {
+                            // Check if it was ended
+                            showToast('Call ended', 'info');
+                            endCall();
+                        }
+                    }
+                } catch (e) { /* ignore */ }
+            }, 1500);
+        }
+
+        // Patch initiateCall to use caller status poll
+        const _origInitiateCall = initiateCall;
+
+        // Integration: start incoming call poll when opening chat
+        const _origOpenChat = openChat;
+        openChat = function(handle) {
+            _origOpenChat(handle);
+            startIncomingCallPoll();
+        };
+
+        // Integration: stop call polling when leaving chat
+        const _origBackToChatList = backToChatList;
+        backToChatList = function() {
+            if (callState === 'ACTIVE') {
+                if (!confirm('You have an active call. End call and leave?')) return;
+                endCall();
+            }
+            if (callRingInterval) {
+                clearInterval(callRingInterval);
+                callRingInterval = null;
+            }
+            if (callState !== 'IDLE') endCall();
+            _origBackToChatList();
+        };
+
+        // Patch initiateCall to start caller status poll
+        const _origInitiateCallRef = document.getElementById('call-btn').onclick;
+        document.getElementById('call-btn').addEventListener('click', () => {
+            // After the main click handler runs, start caller poll
+            setTimeout(() => {
+                if (callState === 'RINGING_OUT') {
+                    startCallerStatusPoll();
+                }
+            }, 500);
+        });
+
     </script>
 </body>
 </html>
