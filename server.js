@@ -2302,13 +2302,17 @@ function handleCallReceiveAudio(req, res, pathname) {
 	// Receiver gets the other side's chunks
 	const isCaller = userId === call.callerId;
 	const chunks = isCaller ? buffer.calleeChunks : buffer.callerChunks;
+	const nextExpectedSeq = afterSeq + 1; // We want the chunk WITH this sequence number
 
-	console.log(`[AUDIO RECV] ${isCaller ? 'Caller' : 'Callee'} ${userId} polling afterSeq=${afterSeq}, available chunks=${chunks.length}, seqs=[${chunks.map(c => c.seq).join(',')}]`);
+	console.log(`[AUDIO RECV] ${isCaller ? 'Caller' : 'Callee'} ${userId} polling for seq=${nextExpectedSeq}, available chunks=${chunks.length}, seqs=[${chunks.map(c => c.seq).join(',')}]`);
 
-	// Check immediately for available chunk
-	const chunk = chunks.find(c => c.seq > afterSeq);
-	if (chunk) {
-		console.log(`[AUDIO RECV] Returning chunk seq=${chunk.seq} to ${isCaller ? 'Caller' : 'Callee'}`);
+	// Find the EXACT chunk with the next expected sequence (in order!)
+	const chunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
+	
+	if (chunkIndex !== -1) {
+		// Found the exact next chunk - remove it from buffer after sending
+		const chunk = chunks.splice(chunkIndex, 1)[0];
+		console.log(`[AUDIO RECV] Returning chunk seq=${chunk.seq} to ${isCaller ? 'Caller' : 'Callee'}, remaining=${chunks.length}`);
 		res.writeHead(200, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({
 			seq: chunk.seq,
@@ -2318,7 +2322,7 @@ function handleCallReceiveAudio(req, res, pathname) {
 		return;
 	}
 
-	// Long-poll: wait for chunk
+	// Long-poll: wait for the exact next chunk in sequence
 	const startTime = Date.now();
 	const checkInterval = setInterval(() => {
 		const elapsed = Date.now() - startTime;
@@ -2332,9 +2336,12 @@ function handleCallReceiveAudio(req, res, pathname) {
 			return;
 		}
 
-		const newChunk = chunks.find(c => c.seq > afterSeq);
-		if (newChunk) {
+		// Look for the exact next sequence number
+		const newChunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
+		if (newChunkIndex !== -1) {
 			clearInterval(checkInterval);
+			const newChunk = chunks.splice(newChunkIndex, 1)[0];
+			console.log(`[AUDIO RECV] Returning chunk seq=${newChunk.seq} (delayed) to ${isCaller ? 'Caller' : 'Callee'}, remaining=${chunks.length}`);
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({
 				seq: newChunk.seq,
@@ -2346,7 +2353,7 @@ function handleCallReceiveAudio(req, res, pathname) {
 
 		if (elapsed >= maxWaitMs) {
 			clearInterval(checkInterval);
-			console.log(`[AUDIO RECV] Long-poll timeout for ${isCaller ? 'Caller' : 'Callee'} ${userId}`);
+			console.log(`[AUDIO RECV] Long-poll timeout for ${isCaller ? 'Caller' : 'Callee'} ${userId}, waiting for seq=${nextExpectedSeq}`);
 			res.writeHead(204);
 			res.end();
 		}

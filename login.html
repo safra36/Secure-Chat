@@ -7256,19 +7256,26 @@
             }
         }
 
+        let callAudioPollInFlight = false; // Prevent concurrent polls
+
         function startCallAudioPoll() {
             if (callAudioPollInterval) clearInterval(callAudioPollInterval);
+            callAudioPollInFlight = false;
 
             const pollAudio = async () => {
-                if (!activeCallSession || callState !== 'ACTIVE') return;
+                // Prevent concurrent requests - wait for previous to complete
+                if (callAudioPollInFlight || !activeCallSession || callState !== 'ACTIVE') return;
+                
+                callAudioPollInFlight = true;
+                const currentSeq = lastReceivedAudioSeq; // Capture current seq for this request
 
                 try {
                     const resp = await authenticatedFetch(
-                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?afterSeq=${lastReceivedAudioSeq}&maxWaitMs=500`,
+                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?afterSeq=${currentSeq}&maxWaitMs=500`,
                         { method: 'GET' }
                     );
 
-                    console.log('[RECEIVE AUDIO] Poll response status:', resp.status, 'afterSeq:', lastReceivedAudioSeq);
+                    console.log('[RECEIVE AUDIO] Poll response status:', resp.status, 'afterSeq:', currentSeq);
 
                     if (resp.status === 200) {
                         const data = await resp.json();
@@ -7281,13 +7288,18 @@
                         }
 
                         if (data.seq !== undefined && data.audioData) {
-                            lastReceivedAudioSeq = data.seq;
-                            try {
-                                const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
-                                console.log('[RECEIVE AUDIO] Decrypted, enqueueing audio');
-                                enqueueCallAudio(decrypted);
-                            } catch (e) {
-                                console.error('[RECEIVE AUDIO] Error decrypting:', e);
+                            // Only accept if this is the expected next sequence
+                            if (data.seq === currentSeq + 1) {
+                                lastReceivedAudioSeq = data.seq;
+                                try {
+                                    const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
+                                    console.log('[RECEIVE AUDIO] Decrypted, enqueueing audio');
+                                    enqueueCallAudio(decrypted);
+                                } catch (e) {
+                                    console.error('[RECEIVE AUDIO] Error decrypting:', e);
+                                }
+                            } else {
+                                console.log('[RECEIVE AUDIO] Got unexpected seq:', data.seq, 'expected:', currentSeq + 1, '- ignoring');
                             }
                         }
                     } else if (resp.status === 204) {
@@ -7295,6 +7307,8 @@
                     }
                 } catch (e) {
                     console.error('[RECEIVE AUDIO] Poll error:', e);
+                } finally {
+                    callAudioPollInFlight = false;
                 }
             };
 
