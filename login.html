@@ -3,7 +3,10 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="theme-color" content="#17212b">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <title>Secure Chat</title>
     <script src="auth.js"></script>
     <script src="pako.min.js"></script>
@@ -29,6 +32,18 @@
             --error: #e74c3c;
             --success: #2ecc71;
             --message-radius: 16px;
+            
+            /* Telegram-inspired colors */
+            --tg-bg: #17212b;
+            --tg-bg-secondary: #242f3d;
+            --tg-bg-tertiary: #1a2026;
+            --tg-bubble-own: #2b5278;
+            --tg-bubble-received: #182533;
+            --tg-text: #ffffff;
+            --tg-text-secondary: #7a8b99;
+            --tg-accent: #5fa2d9;
+            --tg-green: #5db75b;
+            --tg-border: #0e1621;
         }
 
         body {
@@ -221,6 +236,20 @@
         .chat-list {
             flex: 1;
             overflow-y: auto;
+            scroll-behavior: smooth;
+        }
+
+        .chat-list::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        .chat-list::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .chat-list::-webkit-scrollbar-thumb {
+            background: rgba(122, 139, 153, 0.3);
+            border-radius: 2px;
         }
 
         .chat-item {
@@ -230,8 +259,9 @@
             background: var(--bg-primary);
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             cursor: pointer;
-            transition: background 0.2s ease;
+            transition: all 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94);
             position: relative;
+            animation: slideUp 0.3s ease forwards;
         }
 
         .chat-item:hover {
@@ -240,7 +270,14 @@
 
         .chat-item:active {
             background: var(--bg-tertiary);
+            transform: scale(0.995);
         }
+
+        .chat-item:nth-child(1) { animation-delay: 0ms; }
+        .chat-item:nth-child(2) { animation-delay: 30ms; }
+        .chat-item:nth-child(3) { animation-delay: 60ms; }
+        .chat-item:nth-child(4) { animation-delay: 90ms; }
+        .chat-item:nth-child(5) { animation-delay: 120ms; }
 
         .chat-avatar {
             width: 50px;
@@ -579,17 +616,44 @@
             border-radius: var(--message-radius);
             position: relative;
             word-wrap: break-word;
-            animation: messageIn 0.3s ease;
+            animation: messageIn 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
         }
 
         @keyframes messageIn {
             from {
                 opacity: 0;
-                transform: translateY(10px);
+                transform: translateY(12px) scale(0.98);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
             }
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        @keyframes scaleIn {
+            from {
+                opacity: 0;
+                transform: scale(0.95);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
             }
         }
 
@@ -1092,93 +1156,916 @@
             color: white;
         }
 
-        /* Responsive Design */
+        /* ============================================
+           TELEGRAM-INSPIRED MOBILE REDESIGN
+           ============================================ */
+        
+        /* Mobile-first base styles */
         @media (max-width: 768px) {
-            .chat-item {
-                padding: 10px 12px;
+            body {
+                background: var(--tg-bg);
             }
-
-            .chat-avatar {
-                width: 44px;
-                height: 44px;
-                font-size: 18px;
+            
+            /* Chat List - Telegram Style */
+            .chat-list-container {
+                background: var(--tg-bg);
             }
-
-            .chat-name {
+            
+            .header {
+                background: var(--tg-bg-secondary);
+                border-bottom: 1px solid var(--tg-border);
+                padding: 8px 16px;
+                height: 56px;
+            }
+            
+            .header-title {
+                font-size: 20px;
+                font-weight: 600;
+                color: var(--tg-text);
+            }
+            
+            .search-bar {
+                background: var(--tg-bg);
+                padding: 8px 12px;
+                border-bottom: 1px solid var(--tg-border);
+            }
+            
+            .search-input {
+                background: var(--tg-bg-tertiary);
+                border-radius: 22px;
+                padding: 10px 16px 10px 40px;
                 font-size: 15px;
+                color: var(--tg-text);
+                background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%237a8b99' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'%3E%3C/circle%3E%3Cpath d='m21 21-4.35-4.35'%3E%3C/path%3E%3C/svg%3E");
+                background-repeat: no-repeat;
+                background-position: 14px center;
+                background-size: 18px;
             }
-
+            
+            .search-input::placeholder {
+                color: var(--tg-text-secondary);
+            }
+            
+            .chat-list {
+                background: var(--tg-bg);
+            }
+            
+            .chat-item {
+                padding: 10px 16px;
+                background: var(--tg-bg);
+                border-bottom: none;
+                position: relative;
+            }
+            
+            .chat-item:hover {
+                background: var(--tg-bg-tertiary);
+            }
+            
+            .chat-item:active {
+                background: var(--tg-bg-secondary);
+            }
+            
+            .chat-avatar {
+                width: 54px;
+                height: 54px;
+                border-radius: 50%;
+                background: linear-gradient(135deg, var(--tg-accent), #4a90d9);
+                font-size: 22px;
+                margin-right: 12px;
+                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            }
+            
+            .chat-info {
+                flex: 1;
+                min-width: 0;
+            }
+            
+            .chat-name-row {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                margin-bottom: 4px;
+            }
+            
+            .chat-name {
+                font-size: 16px;
+                font-weight: 500;
+                color: var(--tg-text);
+            }
+            
+            .chat-time {
+                font-size: 12px;
+                color: var(--tg-text-secondary);
+                font-weight: 400;
+            }
+            
+            .chat-preview {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 8px;
+            }
+            
             .last-message {
-                font-size: 13px;
+                font-size: 14px;
+                color: var(--tg-text-secondary);
+                white-space: nowrap;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                flex: 1;
             }
-
+            
+            .unread-badge {
+                min-width: 22px;
+                height: 22px;
+                background: var(--tg-accent);
+                color: #fff;
+                border-radius: 11px;
+                font-size: 12px;
+                font-weight: 600;
+                padding: 0 7px;
+                animation: none;
+            }
+            
+            /* Floating Action Button */
             .fab {
                 bottom: 20px;
                 right: 20px;
-                width: 52px;
-                height: 52px;
-                font-size: 24px;
+                width: 56px;
+                height: 56px;
+                border-radius: 50%;
+                background: var(--tg-accent);
+                color: #fff;
+                font-size: 28px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.4);
             }
-
-            .attachment-btn,
-            .send-btn {
-                width: 44px;
-                height: 44px;
+            
+            .fab:hover {
+                transform: scale(1.05);
+                box-shadow: 0 6px 16px rgba(0,0,0,0.5);
             }
-
-            .input-wrapper {
-                padding: 6px 14px;
+            
+            .fab:active {
+                transform: scale(0.95);
             }
-
-            .message-input {
-                font-size: 16px;
+            
+            /* Chat Screen - Telegram Style */
+            .chat-container {
+                background: var(--tg-bg);
             }
-
-            .chat-avatar {
-                width: 36px;
-                height: 36px;
-                font-size: 16px;
-            }
-
-            .chat-name {
-                font-size: 15px;
-            }
-
-            .setup-card {
-                padding: 30px 20px;
-                border-radius: 16px;
-            }
-
+            
             .chat-header {
-                padding: 10px 12px;
+                background: var(--tg-bg-secondary);
+                border-bottom: 1px solid var(--tg-border);
+                padding: 8px 12px;
+                height: 56px;
+                backdrop-filter: blur(10px);
             }
-
+            
+            .chat-header-left {
+                gap: 10px;
+            }
+            
+            .back-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                color: var(--tg-text);
+                font-size: 24px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .back-btn:hover {
+                background: rgba(255,255,255,0.1);
+            }
+            
+            .chat-header .chat-avatar {
+                width: 42px;
+                height: 42px;
+                font-size: 18px;
+            }
+            
+            .chat-header .chat-info {
+                flex: 1;
+            }
+            
+            .chat-header .chat-name {
+                font-size: 16px;
+                font-weight: 600;
+                color: var(--tg-text);
+                margin-bottom: 2px;
+            }
+            
+            .chat-status {
+                font-size: 13px;
+                color: var(--tg-text-secondary);
+                gap: 4px;
+            }
+            
+            .status-dot {
+                width: 8px;
+                height: 8px;
+                border-radius: 50%;
+                background: var(--tg-text-secondary);
+            }
+            
+            .status-dot.connected {
+                background: var(--tg-green);
+                box-shadow: 0 0 6px rgba(93, 183, 91, 0.6);
+            }
+            
+            .call-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: transparent;
+                color: var(--tg-text);
+                font-size: 22px;
+            }
+            
+            .call-btn:hover {
+                background: rgba(255,255,255,0.1);
+                color: var(--tg-green);
+            }
+            
+            /* Messages Area - Telegram Style */
             .messages {
-                padding: 12px;
+                padding: 12px 10px;
+                background: var(--tg-bg);
+                background-image:
+                    radial-gradient(circle at 20% 50%, rgba(45, 82, 120, 0.03) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 80%, rgba(45, 82, 120, 0.02) 0%, transparent 50%);
             }
-
+            
+            .messages::-webkit-scrollbar {
+                width: 4px;
+            }
+            
+            .messages::-webkit-scrollbar-thumb {
+                background: rgba(122, 139, 153, 0.3);
+                border-radius: 2px;
+            }
+            
+            .message-group {
+                margin-bottom: 2px;
+            }
+            
+            /* Telegram-style Message Bubbles */
             .message {
                 max-width: 85%;
-                padding: 10px 14px;
+                margin-bottom: 2px;
+                padding: 8px 12px;
+                border-radius: 16px;
+                font-size: 15px;
+                line-height: 1.4;
+                position: relative;
+                box-shadow: 0 1px 2px rgba(0,0,0,0.1);
             }
-
+            
+            .message.own {
+                align-self: flex-end;
+                background: var(--tg-bubble-own);
+                color: var(--tg-text);
+                border-bottom-right-radius: 4px;
+                margin-left: 20%;
+            }
+            
+            .message.received {
+                align-self: flex-start;
+                background: var(--tg-bubble-received);
+                color: var(--tg-text);
+                border-bottom-left-radius: 4px;
+                margin-right: 20%;
+            }
+            
+            /* Consecutive messages styling */
+            .message.own + .message.own {
+                border-top-right-radius: 8px;
+                border-bottom-right-radius: 4px;
+                margin-top: 1px;
+            }
+            
+            .message.received + .message.received {
+                border-top-left-radius: 8px;
+                border-bottom-left-radius: 4px;
+                margin-top: 1px;
+            }
+            
+            .message.own:has(+ .message.own) {
+                border-bottom-right-radius: 8px;
+            }
+            
+            .message.received:has(+ .message.received) {
+                border-bottom-left-radius: 8px;
+            }
+            
+            .message-header {
+                display: none;
+            }
+            
+            .message.own .message-header,
+            .message.received .message-header {
+                display: flex;
+                justify-content: flex-end;
+                gap: 6px;
+                margin-top: 4px;
+                font-size: 11px;
+                opacity: 0.7;
+            }
+            
+            .message-time {
+                color: rgba(255,255,255,0.6);
+                font-size: 11px;
+                font-weight: 400;
+            }
+            
+            .message-status-icon {
+                font-size: 12px;
+                margin-left: 4px;
+                opacity: 0.9;
+            }
+            
+            .message-content {
+                font-size: 15px;
+                line-height: 1.4;
+                word-wrap: break-word;
+            }
+            
+            /* Images in messages */
+            .message-image {
+                max-width: 260px;
+                max-height: 260px;
+                border-radius: 12px;
+                margin: 4px 0;
+                cursor: pointer;
+                transition: opacity 0.2s;
+            }
+            
+            .message-image:hover {
+                opacity: 0.9;
+                transform: none;
+            }
+            
+            /* Input Area - Telegram Style */
             .input-area {
-                padding: 10px 12px;
+                background: var(--tg-bg-secondary);
+                border-top: 1px solid var(--tg-border);
+                padding: 8px 12px;
+                padding-bottom: max(8px, env(safe-area-inset-bottom));
+            }
+            
+            /* Expandable Attachment Menu */
+            .attachment-menu {
+                position: absolute;
+                bottom: 70px;
+                left: 12px;
+                background: var(--tg-bg-secondary);
+                border-radius: 16px;
+                padding: 8px;
+                box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px var(--tg-border);
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                opacity: 0;
+                transform: translateY(10px) scale(0.95);
+                pointer-events: none;
+                transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                z-index: 50;
+                min-width: 140px;
+            }
+            
+            .attachment-menu.active {
+                opacity: 1;
+                transform: translateY(0) scale(1);
+                pointer-events: auto;
+            }
+            
+            .attachment-menu-item {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 12px 14px;
+                border: none;
+                background: transparent;
+                border-radius: 12px;
+                cursor: pointer;
+                transition: all 0.15s ease;
+                color: var(--tg-text);
+                font-size: 15px;
+                position: relative;
+            }
+            
+            .attachment-menu-item:hover {
+                background: var(--tg-bg-tertiary);
+            }
+            
+            .attachment-menu-item:active {
+                transform: scale(0.98);
+            }
+            
+            .menu-icon {
+                font-size: 22px;
+                width: 32px;
+                height: 32px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--tg-bg-tertiary);
+                border-radius: 10px;
+            }
+            
+            .menu-label {
+                font-weight: 500;
+                color: var(--tg-text);
+            }
+            
+            .menu-badge {
+                position: absolute;
+                top: 8px;
+                right: 8px;
+                width: 18px;
+                height: 18px;
+                background: var(--tg-accent);
+                border-radius: 50%;
+                font-size: 10px;
+                font-weight: 600;
+                color: #fff;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            /* Menu overlay to close when clicking outside */
+            .menu-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                bottom: 0;
+                background: transparent;
+                z-index: 40;
+                display: none;
+            }
+            
+            .menu-overlay.active {
+                display: block;
+            }
+            
+            .input-container {
+                display: flex;
+                align-items: flex-end;
+                gap: 8px;
+                background: var(--tg-bg-tertiary);
+                border-radius: 24px;
+                padding: 6px 8px;
+                position: relative;
+            }
+            
+            .attachment-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: transparent;
+                color: var(--tg-text-secondary);
+                font-size: 24px;
+                flex-shrink: 0;
+            }
+            
+            .attachment-btn:hover {
+                background: rgba(255,255,255,0.1);
+                color: var(--tg-text);
+                transform: none;
+            }
+            
+            .attachment-btn.active {
+                background: var(--tg-accent);
+                color: #fff;
+            }
+            
+            .input-wrapper {
+                flex: 1;
+                background: transparent;
+                border-radius: 0;
+                padding: 8px 4px;
+                min-height: 40px;
+                display: flex;
+                align-items: center;
+            }
+            
+            .message-input {
+                font-size: 16px;
+                color: var(--tg-text);
+                line-height: 1.4;
+                max-height: 120px;
+                background: transparent;
+            }
+            
+            .message-input::placeholder {
+                color: var(--tg-text-secondary);
+            }
+            
+            .send-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: var(--tg-accent);
+                color: #fff;
+                font-size: 20px;
+                flex-shrink: 0;
+            }
+            
+            .send-btn:hover {
+                transform: scale(1.05);
+            }
+            
+            .send-btn:disabled {
+                background: transparent;
+                color: var(--tg-text-secondary);
+            }
+            
+            .attachment-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: transparent;
+                border: none;
+                color: var(--tg-text-secondary);
+                font-size: 24px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+                flex-shrink: 0;
+            }
+            
+            .attachment-btn:hover {
+                background: rgba(255,255,255,0.1);
+                color: var(--tg-text);
+            }
+            
+            .attachment-btn.active {
+                background: var(--tg-accent);
+                color: #fff;
+                transform: rotate(45deg);
+            }
+            
+            .voice-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: transparent;
+                border: none;
+                color: var(--tg-text-secondary);
+                font-size: 22px;
+                cursor: pointer;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                transition: all 0.2s ease;
+                flex-shrink: 0;
+            }
+            
+            .voice-btn:hover {
+                background: rgba(255,255,255,0.1);
+                color: var(--tg-text);
+            }
+            
+            /* Voice Recording - Telegram Style */
+            .voice-recording {
+                background: var(--tg-bg-tertiary);
+                border-radius: 24px;
+                padding: 8px 16px;
+                animation: none;
+            }
+            
+            @keyframes voicePulse {
+                0%, 100% { box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4); }
+                50% { box-shadow: 0 0 0 6px rgba(231, 76, 60, 0); }
+            }
+            
+            .voice-recording.active {
+                animation: voicePulse 1.5s ease-in-out infinite;
+            }
+            
+            .recording-indicator {
+                width: 36px;
+                height: 36px;
+                background: var(--error);
+                font-size: 18px;
+            }
+            
+            .recording-time {
+                font-size: 15px;
+                color: var(--tg-text);
+                font-weight: 500;
+            }
+            
+            .recording-action {
+                width: 36px;
+                height: 36px;
+            }
+            
+            /* P2P File Transfer Button */
+            .p2p-transfer-btn {
+                width: 40px;
+                height: 40px;
+                border-radius: 50%;
+                background: transparent;
+                color: var(--tg-text-secondary);
+                font-size: 22px;
+            }
+            
+            .p2p-transfer-btn:hover {
+                background: rgba(255,255,255,0.1);
+                color: var(--tg-text);
+            }
+            
+            .p2p-transfer-btn.active {
+                background: var(--tg-accent);
+                color: #fff;
+            }
+            
+            /* Voice Message Player */
+            .voice-message-player {
+                background: rgba(0,0,0,0.15);
+                border-radius: 20px;
+                padding: 8px 12px;
+                min-width: 180px;
+            }
+            
+            .play-btn {
+                width: 36px;
+                height: 36px;
+                background: rgba(255,255,255,0.2);
+            }
+            
+            .play-btn:hover {
+                background: rgba(255,255,255,0.3);
+            }
+            
+            .voice-duration {
+                color: rgba(255,255,255,0.8);
+                font-size: 12px;
+            }
+            
+            /* Upload Progress */
+            .upload-progress {
+                background: var(--tg-bg-tertiary);
+                border-radius: 20px;
+                padding: 10px 14px;
+                margin-bottom: 8px;
+            }
+            
+            .upload-progress-fill {
+                background: var(--tg-accent);
+            }
+            
+            /* Modals - Telegram Style */
+            .modal-overlay {
+                background: rgba(0,0,0,0.7);
+                backdrop-filter: blur(4px);
+            }
+            
+            .modal {
+                background: var(--tg-bg-secondary);
+                border-radius: 16px;
+                margin: 16px;
+                max-width: calc(100% - 32px);
+                box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+            }
+            
+            .modal-header {
+                padding-bottom: 16px;
+                border-bottom: 1px solid var(--tg-border);
+            }
+            
+            .modal-title {
+                font-size: 18px;
+                font-weight: 600;
+                color: var(--tg-text);
+            }
+            
+            .modal-close {
+                color: var(--tg-text-secondary);
+                width: 36px;
+                height: 36px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            
+            .modal-close:hover {
+                background: rgba(255,255,255,0.1);
+                color: var(--tg-text);
+            }
+            
+            .form-label {
+                color: var(--tg-text-secondary);
+                font-size: 13px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+            }
+            
+            .form-input {
+                background: var(--tg-bg-tertiary);
+                border: 1px solid var(--tg-border);
+                border-radius: 10px;
+                color: var(--tg-text);
+                font-size: 16px;
+            }
+            
+            .form-input:focus {
+                background: var(--tg-bg-tertiary);
+                border-color: var(--tg-accent);
+                box-shadow: none;
+            }
+            
+            .btn-primary {
+                background: var(--tg-accent);
+                color: #fff;
+                border-radius: 10px;
+                font-weight: 500;
+            }
+            
+            .btn-secondary {
+                background: var(--tg-bg-tertiary);
+                color: var(--tg-text);
+                border-radius: 10px;
+            }
+            
+            .btn-secondary:hover {
+                background: var(--tg-bg);
+            }
+            
+            /* Call Overlay */
+            .call-overlay {
+                background: linear-gradient(135deg, var(--tg-green), #4a9c48);
+                height: 52px;
+            }
+            
+            /* Toast Notifications */
+            .toast {
+                background: var(--tg-bg-secondary);
+                color: var(--tg-text);
+                border-radius: 12px;
+                font-size: 14px;
+                box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+                bottom: 100px;
+            }
+            
+            .toast.error {
+                background: var(--error);
+            }
+            
+            .toast.success {
+                background: var(--tg-green);
+            }
+            
+            /* Lightbox */
+            .lightbox {
+                background: rgba(0,0,0,0.95);
+            }
+            
+            .lightbox-close {
+                background: rgba(255,255,255,0.1);
+                backdrop-filter: blur(10px);
+            }
+            
+            /* Setup Screen */
+            .setup-container {
+                background: var(--tg-bg);
+                padding: 20px;
+            }
+            
+            .setup-card {
+                background: var(--tg-bg-secondary);
+                border-radius: 20px;
+                padding: 40px 24px;
+                box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+            }
+            
+            .setup-title {
+                font-size: 28px;
+                color: var(--tg-text);
+            }
+            
+            .setup-subtitle {
+                color: var(--tg-text-secondary);
+                font-size: 15px;
+            }
+            
+            /* P2P Transfer UI */
+            .p2p-file-info {
+                background: var(--tg-bg-tertiary);
+                border-radius: 12px;
+            }
+            
+            .p2p-file-icon {
+                background: var(--tg-accent);
+                border-radius: 10px;
+            }
+            
+            .p2p-transfer-progress {
+                background: var(--tg-bg-tertiary);
+            }
+            
+            .p2p-transfer-progress-fill {
+                background: var(--tg-accent);
+            }
+            
+            /* Pending Invitations */
+            .pending-invitation-item {
+                background: var(--tg-bg-tertiary);
+                border-radius: 12px;
+            }
+            
+            .p2p-empty-state {
+                color: var(--tg-text-secondary);
+            }
+            
+            /* Image Preview */
+            .image-preview {
+                padding: 8px 0;
+            }
+            
+            .preview-item {
+                border-radius: 10px;
+                border: 2px solid var(--tg-accent);
             }
         }
-
+        
+        /* Extra small devices */
         @media (max-width: 480px) {
+            .chat-item {
+                padding: 10px 12px;
+            }
+            
+            .chat-avatar {
+                width: 50px;
+                height: 50px;
+                font-size: 20px;
+            }
+            
+            .message {
+                max-width: 88%;
+                padding: 8px 10px;
+                font-size: 15px;
+            }
+            
+            .message-image {
+                max-width: 200px;
+                max-height: 200px;
+            }
+            
+            .chat-header .chat-avatar {
+                width: 38px;
+                height: 38px;
+            }
+            
+            .input-container {
+                padding: 4px 6px;
+            }
+            
+            .attachment-btn,
+            .voice-btn,
+            .p2p-transfer-btn,
+            .send-btn {
+                width: 38px;
+                height: 38px;
+                font-size: 20px;
+            }
+            
             .setup-title {
                 font-size: 24px;
             }
-
-            .message-image {
-                max-width: 150px;
-                max-height: 150px;
+            
+            .setup-card {
+                padding: 32px 20px;
             }
-
-            .message-audio {
-                width: 180px;
+        }
+        
+        /* iPhone-specific optimizations */
+        @supports (-webkit-touch-callout: none) {
+            @media (max-width: 768px) {
+                .input-area {
+                    padding-bottom: max(12px, env(safe-area-inset-bottom));
+                }
+                
+                .chat-list-container,
+                .chat-container {
+                    padding-top: env(safe-area-inset-top);
+                }
+                
+                .header,
+                .chat-header {
+                    padding-top: max(8px, env(safe-area-inset-top));
+                    height: auto;
+                    min-height: 56px;
+                }
             }
         }
 
@@ -1806,6 +2693,170 @@
         .p2p-empty-state-text {
             font-size: 14px;
         }
+
+        /* ============================================
+           MOBILE TOUCH FEEDBACK & ACCESSIBILITY
+           ============================================ */
+        
+        /* Touch feedback for mobile buttons */
+        @media (max-width: 768px) {
+            .chat-item,
+            .btn,
+            .header-btn,
+            .back-btn,
+            .attachment-btn,
+            .send-btn,
+            .voice-btn,
+            .p2p-transfer-btn,
+            .call-btn,
+            .fab,
+            .modal-close,
+            .recording-action,
+            .play-btn,
+            .call-action-btn {
+                -webkit-tap-highlight-color: rgba(95, 162, 217, 0.3);
+            }
+            
+            /* Ripple effect simulation */
+            .chat-item,
+            .btn,
+            .header-btn,
+            .back-btn,
+            .attachment-btn,
+            .send-btn {
+                position: relative;
+                overflow: hidden;
+            }
+            
+            .chat-item::after,
+            .btn::after,
+            .header-btn::after,
+            .back-btn::after,
+            .attachment-btn::after,
+            .send-btn::after {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 100%;
+                height: 100%;
+                background: radial-gradient(circle, rgba(255,255,255,0.2) 0%, transparent 70%);
+                transform: translate(-50%, -50%) scale(0);
+                opacity: 0;
+                transition: transform 0.3s ease, opacity 0.3s ease;
+                pointer-events: none;
+                border-radius: 50%;
+            }
+            
+            .chat-item:active::after,
+            .btn:active::after,
+            .header-btn:active::after,
+            .back-btn:active::after,
+            .attachment-btn:active::after,
+            .send-btn:active::after {
+                transform: translate(-50%, -50%) scale(2);
+                opacity: 1;
+                transition: transform 0s, opacity 0s;
+            }
+            
+            /* Smooth transitions for mobile screens */
+            .chat-container,
+            .chat-list-container {
+                transition: opacity 0.2s ease, transform 0.2s ease;
+            }
+            
+            /* Hide scrollbar but keep functionality */
+            .messages {
+                scrollbar-width: thin;
+                scrollbar-color: rgba(122, 139, 153, 0.3) transparent;
+            }
+            
+            /* Improved text selection */
+            .message-content {
+                user-select: text;
+                -webkit-user-select: text;
+            }
+            
+            /* Prevent callout on long press for buttons */
+            button, .btn, .fab, .header-btn, .back-btn {
+                -webkit-touch-callout: none;
+                user-select: none;
+                -webkit-user-select: none;
+            }
+            
+            /* Swipe gesture hint animation */
+            @keyframes swipeHint {
+                0%, 100% { transform: translateX(0); }
+                50% { transform: translateX(-5px); }
+            }
+            
+            .chat-item:first-child {
+                animation: slideUp 0.3s ease forwards, swipeHint 2s ease-in-out 1s;
+            }
+            
+            /* Message grouping visual cues */
+            .message.own:first-of-type,
+            .message.received:first-of-type {
+                margin-top: 8px;
+            }
+            
+            /* Date separator styling */
+            .date-separator {
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                margin: 16px 0;
+                position: relative;
+            }
+            
+            .date-separator::before {
+                content: '';
+                position: absolute;
+                left: 0;
+                right: 0;
+                height: 1px;
+                background: linear-gradient(90deg, transparent, var(--tg-border), transparent);
+            }
+            
+            .date-separator-text {
+                background: var(--tg-bg-secondary);
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-size: 12px;
+                color: var(--tg-text-secondary);
+                z-index: 1;
+            }
+        }
+        
+        /* Dark mode preference support */
+        @media (prefers-color-scheme: dark) {
+            :root {
+                color-scheme: dark;
+            }
+        }
+        
+        /* Reduced motion preference */
+        @media (prefers-reduced-motion: reduce) {
+            *,
+            *::before,
+            *::after {
+                animation-duration: 0.01ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.01ms !important;
+                scroll-behavior: auto !important;
+            }
+        }
+        
+        /* High contrast mode support */
+        @media (prefers-contrast: high) {
+            .message.own {
+                border: 1px solid rgba(255,255,255,0.3);
+            }
+            
+            .message.received {
+                border: 1px solid rgba(255,255,255,0.2);
+            }
+        }
     </style>
 </head>
 <body>
@@ -1887,8 +2938,25 @@
                 </div>
             </div>
 
+            <!-- Attachment Menu (Expandable) -->
+            <div id="attachment-menu" class="attachment-menu">
+                <button class="attachment-menu-item" id="menu-image-btn" title="Send Image">
+                    <span class="menu-icon">🖼️</span>
+                    <span class="menu-label">Image</span>
+                </button>
+                <button class="attachment-menu-item" id="menu-file-btn" title="Send File">
+                    <span class="menu-icon">📄</span>
+                    <span class="menu-label">File</span>
+                </button>
+                <button class="attachment-menu-item" id="menu-pending-btn" title="Pending Transfers">
+                    <span class="menu-icon">📥</span>
+                    <span class="menu-label">Pending</span>
+                    <span id="menu-pending-badge" class="menu-badge" style="display: none;"></span>
+                </button>
+            </div>
+
             <div id="input-container" class="input-container">
-                <button id="attachment-btn" class="attachment-btn" title="Attach image">📎</button>
+                <button id="attachment-btn" class="attachment-btn" title="Attachments">➕</button>
                 <div class="input-wrapper">
                     <textarea
                         id="message-input"
@@ -1897,9 +2965,7 @@
                         rows="1"
                     ></textarea>
                 </div>
-                <button id="p2p-file-btn" class="p2p-transfer-btn" title="Send file">📄</button>
-                <button id="p2p-invitations-btn" class="p2p-transfer-btn" title="Pending transfers">📥</button>
-                <button id="voice-btn" class="attachment-btn" title="Record voice">🎤</button>
+                <button id="voice-btn" class="voice-btn" title="Record voice">🎤</button>
                 <button id="send-btn" class="send-btn" title="Send" disabled>➤</button>
             </div>
         </div>
@@ -2989,7 +4055,45 @@
             newChatBtn.addEventListener('click', openNewChatModal);
             logoutBtn.addEventListener('click', logout);
             backBtn.addEventListener('click', backToChatList);
-            attachmentBtn.addEventListener('click', () => imageInput.click());
+            
+            // Attachment menu toggle
+            attachmentBtn.addEventListener('click', toggleAttachmentMenu);
+            
+            // Menu item handlers
+            const menuImageBtn = document.getElementById('menu-image-btn');
+            const menuFileBtn = document.getElementById('menu-file-btn');
+            const menuPendingBtn = document.getElementById('menu-pending-btn');
+            
+            if (menuImageBtn) {
+                menuImageBtn.addEventListener('click', () => {
+                    closeAttachmentMenu();
+                    imageInput.click();
+                });
+            }
+            
+            if (menuFileBtn) {
+                menuFileBtn.addEventListener('click', () => {
+                    closeAttachmentMenu();
+                    if (!currentChat) {
+                        showToast('Please open a chat first', 'error');
+                        return;
+                    }
+                    const fileInput = document.getElementById('p2p-file-input');
+                    if (fileInput) fileInput.click();
+                });
+            }
+            
+            if (menuPendingBtn) {
+                menuPendingBtn.addEventListener('click', async () => {
+                    closeAttachmentMenu();
+                    if (!currentChat) {
+                        showToast('Please open a chat first', 'error');
+                        return;
+                    }
+                    await openP2PInvitationsModal();
+                });
+            }
+            
             voiceBtn.addEventListener('click', toggleVoiceRecording);
             sendBtn.addEventListener('click', sendMessage);
             stopRecording.addEventListener('click', stopVoiceRecording);
@@ -3032,6 +4136,52 @@
                 setupContainer.style.display = 'flex';
             }
         });
+
+        // Attachment Menu Functions
+        let menuOverlay = null;
+        
+        function toggleAttachmentMenu() {
+            const menu = document.getElementById('attachment-menu');
+            const btn = document.getElementById('attachment-btn');
+            
+            if (menu.classList.contains('active')) {
+                closeAttachmentMenu();
+            } else {
+                openAttachmentMenu();
+            }
+        }
+        
+        function openAttachmentMenu() {
+            const menu = document.getElementById('attachment-menu');
+            const btn = document.getElementById('attachment-btn');
+            
+            // Create overlay if not exists
+            if (!menuOverlay) {
+                menuOverlay = document.createElement('div');
+                menuOverlay.className = 'menu-overlay';
+                menuOverlay.addEventListener('click', closeAttachmentMenu);
+                document.body.appendChild(menuOverlay);
+            }
+            
+            menu.classList.add('active');
+            menuOverlay.classList.add('active');
+            btn.classList.add('active');
+            btn.textContent = '✕';
+            btn.style.transform = 'rotate(45deg)';
+        }
+        
+        function closeAttachmentMenu() {
+            const menu = document.getElementById('attachment-menu');
+            const btn = document.getElementById('attachment-btn');
+            
+            if (menu) menu.classList.remove('active');
+            if (menuOverlay) menuOverlay.classList.remove('active');
+            if (btn) {
+                btn.classList.remove('active');
+                btn.textContent = '➕';
+                btn.style.transform = 'rotate(0deg)';
+            }
+        }
 
         function showToast(message, type = 'info') {
             toast.textContent = message;
@@ -5118,19 +6268,21 @@
 
         // Update pending invitations badge
         function updatePendingInvitationsBadge(count) {
-            let badge = document.querySelector('.pending-invitations-badge');
+            // Update old button badge (for backward compatibility)
+            let oldBadge = document.querySelector('.pending-invitations-badge');
+            if (oldBadge) {
+                oldBadge.style.display = 'none';
+            }
             
-            if (count > 0) {
-                if (!badge) {
-                    const invitationsBtn = document.getElementById('p2p-invitations-btn');
-                    badge = document.createElement('div');
-                    badge.className = 'pending-invitations-badge';
-                    invitationsBtn.appendChild(badge);
+            // Update new menu badge
+            const menuBadge = document.getElementById('menu-pending-badge');
+            if (menuBadge) {
+                if (count > 0) {
+                    menuBadge.textContent = count > 9 ? '9+' : count;
+                    menuBadge.style.display = 'flex';
+                } else {
+                    menuBadge.style.display = 'none';
                 }
-                badge.textContent = count;
-                badge.style.display = 'flex';
-            } else if (badge) {
-                badge.style.display = 'none';
             }
             
             p2pPendingInvitationsCount = count;
