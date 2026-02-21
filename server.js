@@ -260,6 +260,20 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	// PWA manifest - public
+	if (pathname === '/manifest.json') {
+		console.log('Serving manifest.json');
+		serveFile(res, 'manifest.json', 'application/json');
+		return;
+	}
+
+	// Service worker - public
+	if (pathname === '/sw.js') {
+		console.log('Serving sw.js');
+		serveFile(res, 'sw.js', 'application/javascript');
+		return;
+	}
+
 	// Serve static files (.js, .css, images) without authentication
 	if (pathname.endsWith('.js') || pathname.endsWith('.css') ||
 	    pathname.endsWith('.png') || pathname.endsWith('.jpg') ||
@@ -267,23 +281,37 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	    pathname.endsWith('.svg') || pathname.endsWith('.ico')) {
 		const fileName = path.basename(pathname); // Extract filename from path
 		const contentType = getMimeType(fileName);
-		
+
 		// Try to get from embedded assets first, then fall back to file system
 		let assetData = AssetLoader.getAsset(fileName);
-		
+
 		if (!assetData) {
-			// Fall back to file system for development
-			const filePath = path.join(__dirname, fileName);
-			try {
-				assetData = fs.readFileSync(filePath);
-			} catch (err) {
-				console.log(`Static file not found: ${fileName}`);
-				res.writeHead(404, { 'Content-Type': 'text/plain' });
-				res.end('File not found');
-				return;
+			// Check for icons in assets/icons directory
+			if (pathname.startsWith('/icons/')) {
+				const iconPath = path.join(__dirname, 'assets', 'icons', fileName);
+				try {
+					assetData = fs.readFileSync(iconPath);
+					console.log(`Serving icon from assets/icons: ${fileName}`);
+				} catch (err) {
+					console.log(`Icon not found: ${fileName}`);
+					res.writeHead(404, { 'Content-Type': 'text/plain' });
+					res.end('Icon not found');
+					return;
+				}
+			} else {
+				// Fall back to file system for development
+				const filePath = path.join(__dirname, fileName);
+				try {
+					assetData = fs.readFileSync(filePath);
+				} catch (err) {
+					console.log(`Static file not found: ${fileName}`);
+					res.writeHead(404, { 'Content-Type': 'text/plain' });
+					res.end('File not found');
+					return;
+				}
 			}
 		}
-		
+
 		console.log(`Serving static file: ${fileName}`);
 		res.writeHead(200, { 'Content-Type': contentType });
 		res.end(assetData);
