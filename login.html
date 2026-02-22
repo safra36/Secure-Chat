@@ -7606,27 +7606,29 @@
                 if (callState !== 'RINGING_OUT' || !activeCallSession) return;
 
                 try {
-                    // Try to receive audio - if the call is ACTIVE, server will respond
+                    // Poll call status endpoint to check if call is active
                     const resp = await authenticatedFetch(
-                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?afterSeq=-1&maxWaitMs=100`,
+                        `/call/poll/${activeCallSession.chatHandle}`,
                         { method: 'GET' }
                     );
 
                     if (resp.status === 200) {
                         const data = await resp.json();
                         if (data.callStatus === 'ENDED') {
-                            showToast('Call rejected', 'info');
+                            showToast('Call ended', 'info');
                             endCall();
                             return;
                         }
-                        // Call is active (we got a response from audio endpoint)
-                        callState = 'ACTIVE';
-                        activeCallSession.startTime = Date.now();
-                        updateCallUI();
-                        startCallAudio();
-                        showToast('Call connected', 'success');
-                        clearInterval(callPollInterval);
-                        callPollInterval = null;
+                        if (data.status === 'ACTIVE') {
+                            // Call is active, start audio
+                            callState = 'ACTIVE';
+                            activeCallSession.startTime = Date.now();
+                            updateCallUI();
+                            startCallAudio();
+                            showToast('Call connected', 'success');
+                            clearInterval(callPollInterval);
+                            callPollInterval = null;
+                        }
                     } else if (resp.status === 400) {
                         // Call might have been rejected/ended
                         const data = await resp.json().catch(() => ({}));

@@ -1,7 +1,6 @@
 // Service Worker for Secure Chat PWA
-const CACHE_NAME = 'secure-chat-v1';
+const CACHE_NAME = 'secure-chat-v2';
 const STATIC_ASSETS = [
-  '/',
   '/index.html',
   '/login.html',
   '/auth.js',
@@ -11,7 +10,9 @@ const STATIC_ASSETS = [
   '/pako.min.js',
   '/content-cache-db.js',
   '/p2p-transfer-manager.js',
-  '/manifest.json'
+  '/manifest.json',
+  '/sw.js',
+  '/pwa-register.js'
 ];
 
 // Install event - cache static assets
@@ -71,7 +72,31 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For API requests, always go to network first
+  // For navigation requests (HTML pages), always go to network first
+  // This ensures authentication redirects work properly
+  if (request.mode === 'navigate' || 
+      request.headers.get('accept')?.includes('text/html')) {
+    event.respondWith(
+      fetch(request)
+        .then((networkResponse) => {
+          // Cache the page for offline use, but don't serve stale cached versions
+          if (networkResponse && networkResponse.status === 200) {
+            const responseClone = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(request, responseClone);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() => {
+          // Network failed, try cache as fallback
+          return caches.match(request);
+        })
+    );
+    return;
+  }
+
+  // For API requests, always go to network
   if (url.pathname.startsWith('/messages/') ||
       url.pathname.startsWith('/send/') ||
       url.pathname.startsWith('/heartbeat/') ||
@@ -81,7 +106,7 @@ self.addEventListener('fetch', (event) => {
       url.pathname.startsWith('/call/') ||
       url.pathname.startsWith('/verify') ||
       url.pathname.startsWith('/time-sync')) {
-    
+
     event.respondWith(
       fetch(request)
         .then((response) => {
@@ -102,7 +127,7 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // For static assets and pages, use cache-first strategy
+  // For static assets (JS, CSS, images), use cache-first strategy
   event.respondWith(
     caches.match(request)
       .then((cachedResponse) => {
@@ -127,10 +152,6 @@ self.addEventListener('fetch', (event) => {
           })
           .catch((err) => {
             console.log('[SW] Fetch failed:', err);
-            // For navigation requests, serve offline page
-            if (request.mode === 'navigate') {
-              return caches.match('/index.html');
-            }
           });
       })
   );
