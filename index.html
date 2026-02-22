@@ -142,6 +142,36 @@
         .success.show {
             display: block;
         }
+
+        .remember-me {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 20px 0;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .remember-me input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .remember-me label {
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .session-info {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 8px;
+            opacity: 0.8;
+        }
     </style>
 </head>
 
@@ -153,6 +183,13 @@
             <label for="server-password">Enter Server Password to Continue:</label>
             <input type="password" id="server-password" placeholder="Enter password">
         </div>
+        
+        <label class="remember-me">
+            <input type="checkbox" id="remember-me" checked>
+            <label for="remember-me">Remember me on this device</label>
+        </label>
+        <div class="session-info">Stay logged in for 7 days</div>
+        
         <button id="submit-btn">Submit</button>
         <div id="error-message" class="error">Incorrect password. Please try again.</div>
         <div id="success-message" class="success">Access granted! Redirecting...</div>
@@ -161,6 +198,88 @@
     <script>
         // Store page load time immediately for accurate time offset calculation
         window.pageLoadTime = Date.now();
+
+        // Session configuration
+        const SESSION_CONFIG = {
+            REMEMBER_DURATION: 7 * 24 * 60 * 60 * 1000, // 7 days
+            SHORT_SESSION_DURATION: 24 * 60 * 60 * 1000, // 24 hours (if not checked)
+            CHECK_INTERVAL: 60 * 1000 // Check every minute if session is expired
+        };
+
+        /**
+         * Check if the current session is still valid
+         * @returns {boolean} True if session is valid, false if expired or missing
+         */
+        function isSessionValid() {
+            const savedPrivateKey = localStorage.getItem("privateKey");
+            const savedUserId = localStorage.getItem("userId");
+            const sessionLoginTime = localStorage.getItem("sessionLoginTime");
+
+            if (!savedPrivateKey || !savedUserId || !sessionLoginTime) {
+                return false;
+            }
+
+            const loginTime = parseInt(sessionLoginTime, 10);
+            const now = Date.now();
+            const sessionDuration = localStorage.getItem("sessionDuration");
+            const maxAge = sessionDuration ? parseInt(sessionDuration, 10) : SESSION_CONFIG.REMEMBER_DURATION;
+
+            if (now - loginTime > maxAge) {
+                console.log('[Session] Session expired, clearing credentials');
+                clearCredentials();
+                return false;
+            }
+
+            return true;
+        }
+
+        /**
+         * Store session login time
+         */
+        function storeSessionInfo(rememberMe, duration) {
+            localStorage.setItem("sessionLoginTime", Date.now().toString());
+            localStorage.setItem("sessionDuration", duration.toString());
+            localStorage.setItem("sessionRememberMe", rememberMe ? "true" : "false");
+        }
+
+        /**
+         * Clear all credentials and session data
+         */
+        function clearCredentials() {
+            localStorage.removeItem("privateKey");
+            localStorage.removeItem("userId");
+            localStorage.removeItem("serverPassword");
+            localStorage.removeItem("sessionLoginTime");
+            localStorage.removeItem("sessionDuration");
+            localStorage.removeItem("sessionRememberMe");
+            localStorage.removeItem("pageLoadTime");
+            localStorage.removeItem("serverTime");
+        }
+
+        /**
+         * Start session expiry checker
+         * Checks periodically if session has expired and redirects to login if so
+         */
+        function startSessionExpiryChecker() {
+            // Clear any existing checker
+            if (window.sessionExpiryInterval) {
+                clearInterval(window.sessionExpiryInterval);
+            }
+
+            window.sessionExpiryInterval = setInterval(() => {
+                if (!isSessionValid()) {
+                    // Session expired, redirect to login
+                    console.log('[Session] Session expired, redirecting to login');
+                    clearCredentials();
+                    window.location.href = '/';
+                }
+            }, SESSION_CONFIG.CHECK_INTERVAL);
+        }
+
+        // Export clearCredentials for use in other pages
+        window.clearCredentials = clearCredentials;
+        window.startSessionExpiryChecker = startSessionExpiryChecker;
+        window.isSessionValid = isSessionValid;
 
         function padKey(keyStr) {
 
@@ -301,7 +420,14 @@
                 localStorage.setItem("privateKey", variables.privateKey);
                 localStorage.setItem("userId", variables.userId);
                 localStorage.setItem("serverPassword", userKey);
-                
+
+                // Store session info based on "Remember Me" checkbox
+                const rememberMe = document.getElementById('remember-me').checked;
+                const sessionDuration = rememberMe 
+                    ? SESSION_CONFIG.REMEMBER_DURATION 
+                    : SESSION_CONFIG.SHORT_SESSION_DURATION;
+                storeSessionInfo(rememberMe, sessionDuration);
+
                 // Store page load time and server time for accurate time offset calculation
                 if (variables.serverTime) {
                     localStorage.setItem("pageLoadTime", window.pageLoadTime.toString());
@@ -312,7 +438,9 @@
                 // Show success message
                 successMessage.classList.add('show');
 
-                
+                // Start session expiry checker
+                startSessionExpiryChecker();
+
                 // Clear input and redirect after short delay
                 passwordInput.value = '';
                 setTimeout(() => {
@@ -344,11 +472,11 @@
         document.head.appendChild(style);
 
         document.addEventListener("DOMContentLoaded", async () => {
-            // Check if user already has valid credentials
-            const savedPrivateKey = localStorage.getItem("privateKey");
-            const savedUserId = localStorage.getItem("userId");
+            // Check if user already has valid credentials and session is not expired
+            if (isSessionValid()) {
+                const savedPrivateKey = localStorage.getItem("privateKey");
+                const savedUserId = localStorage.getItem("userId");
 
-            if (savedPrivateKey && savedUserId) {
                 // User is already authenticated, verify with server
                 const hashBuffer = await crypto.subtle.digest("SHA-256", `${savedPrivateKey}:${Date.now() - (Date.now() % 5000)}`);
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
@@ -360,14 +488,18 @@
                 });
 
                 if (response.ok) {
-                    // Credentials are valid, redirect to chat
+                    // Credentials are valid, start session checker and redirect to chat
+                    console.log('[Session] Auto-login successful, starting session checker');
+                    startSessionExpiryChecker();
                     window.location = "/chat/login";
                     return;
                 } else {
-                    // Credentials invalid, clear them
-                    localStorage.removeItem("privateKey");
-                    localStorage.removeItem("userId");
+                    // Server verification failed, clear credentials
+                    console.log('[Session] Server verification failed, clearing credentials');
+                    clearCredentials();
                 }
+            } else {
+                console.log('[Session] No valid session found, showing login form');
             }
 
             // User needs to authenticate, show login form

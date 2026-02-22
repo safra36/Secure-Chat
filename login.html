@@ -14,6 +14,75 @@
     <script src="auth.js"></script>
     <script src="pako.min.js"></script>
     <script src="content-cache-db.js"></script>
+    <script>
+        // Session configuration (must be loaded before auth.js functions)
+        const SESSION_CONFIG = {
+            REMEMBER_DURATION: 7 * 24 * 60 * 60 * 1000, // 7 days
+            SHORT_SESSION_DURATION: 24 * 60 * 60 * 1000, // 24 hours (if not checked)
+            CHECK_INTERVAL: 60 * 1000 // Check every minute if session is expired
+        };
+
+        /**
+         * Check if the current session is still valid
+         * @returns {boolean} True if session is valid, false if expired or missing
+         */
+        function isSessionValid() {
+            const savedPrivateKey = localStorage.getItem("privateKey");
+            const savedUserId = localStorage.getItem("userId");
+            const sessionLoginTime = localStorage.getItem("sessionLoginTime");
+
+            if (!savedPrivateKey || !savedUserId || !sessionLoginTime) {
+                return false;
+            }
+
+            const loginTime = parseInt(sessionLoginTime, 10);
+            const now = Date.now();
+            const sessionDuration = localStorage.getItem("sessionDuration");
+            const maxAge = sessionDuration ? parseInt(sessionDuration, 10) : SESSION_CONFIG.REMEMBER_DURATION;
+
+            if (now - loginTime > maxAge) {
+                console.log('[Session] Session expired, clearing credentials');
+                clearCredentials();
+                return false;
+            }
+
+            return true;
+        }
+
+        /**
+         * Clear all credentials and session data
+         */
+        function clearCredentials() {
+            localStorage.removeItem("privateKey");
+            localStorage.removeItem("userId");
+            localStorage.removeItem("serverPassword");
+            localStorage.removeItem("sessionLoginTime");
+            localStorage.removeItem("sessionDuration");
+            localStorage.removeItem("sessionRememberMe");
+            localStorage.removeItem("pageLoadTime");
+            localStorage.removeItem("serverTime");
+        }
+
+        /**
+         * Start session expiry checker
+         * Checks periodically if session has expired and redirects to login if so
+         */
+        function startSessionExpiryChecker() {
+            // Clear any existing checker
+            if (window.sessionExpiryInterval) {
+                clearInterval(window.sessionExpiryInterval);
+            }
+
+            window.sessionExpiryInterval = setInterval(() => {
+                if (!isSessionValid()) {
+                    // Session expired, redirect to login
+                    console.log('[Session] Session expired, redirecting to login');
+                    clearCredentials();
+                    window.location.href = '/';
+                }
+            }, SESSION_CONFIG.CHECK_INTERVAL);
+        }
+    </script>
     <style>
         * {
             box-sizing: border-box;
@@ -4264,9 +4333,16 @@
 
         // Initialize the app
         document.addEventListener('DOMContentLoaded', async () => {
+            // Check session validity
             if (!validateCredentials()) {
                 window.location.href = '/';
                 return;
+            }
+
+            // Start session expiry checker (defined in index.html)
+            if (typeof startSessionExpiryChecker === 'function') {
+                startSessionExpiryChecker();
+                console.log('[Session] Session expiry checker started');
             }
 
             // Initialize storage (IndexedDB with localStorage fallback)

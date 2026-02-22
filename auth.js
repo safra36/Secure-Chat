@@ -107,9 +107,16 @@ async function getAuthHeader() {
 
 /**
  * Validate that credentials exist and are stored
- * @returns {boolean} True if credentials are valid, false otherwise
+ * Also checks if session has expired
+ * @returns {boolean} True if credentials are valid and session not expired, false otherwise
  */
 function validateCredentials() {
+	// Check if session management functions are available
+	if (typeof isSessionValid === 'function') {
+		return isSessionValid();
+	}
+	
+	// Fallback: just check if credentials exist
 	const credentials = getCredentials();
 	return credentials !== null;
 }
@@ -123,9 +130,28 @@ function logout(automatic = false) {
 	if (!automatic && !confirm('Are you sure you want to logout?')) {
 		return;
 	}
-	
-	localStorage.removeItem('privateKey');
-	localStorage.removeItem('userId');
+
+	// Clear all credentials including session data
+	if (window.clearCredentials) {
+		window.clearCredentials();
+	} else {
+		// Fallback if clearCredentials is not available
+		localStorage.removeItem('privateKey');
+		localStorage.removeItem('userId');
+		localStorage.removeItem('serverPassword');
+		localStorage.removeItem('sessionLoginTime');
+		localStorage.removeItem('sessionDuration');
+		localStorage.removeItem('sessionRememberMe');
+		localStorage.removeItem('pageLoadTime');
+		localStorage.removeItem('serverTime');
+	}
+
+	// Clear session expiry checker
+	if (window.sessionExpiryInterval) {
+		clearInterval(window.sessionExpiryInterval);
+		window.sessionExpiryInterval = null;
+	}
+
 	window.location.href = '/';
 }
 
