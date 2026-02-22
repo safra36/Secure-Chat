@@ -594,6 +594,7 @@
             -webkit-overflow-scrolling: touch;
             padding: 16px;
             scroll-behavior: smooth;
+            position: relative;
         }
 
         .messages::-webkit-scrollbar {
@@ -607,6 +608,58 @@
         .messages::-webkit-scrollbar-thumb {
             background: var(--bg-tertiary);
             border-radius: 3px;
+        }
+
+        /* Scroll to Bottom Button */
+        .scroll-to-bottom-btn {
+            position: absolute;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--tg-bg-secondary);
+            color: var(--tg-text);
+            border: 1px solid var(--tg-border);
+            font-size: 20px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 50;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+            opacity: 0;
+        }
+
+        .scroll-to-bottom-btn.visible {
+            display: flex;
+            opacity: 1;
+            transform: translateX(-50%) translateY(0);
+        }
+
+        .scroll-to-bottom-btn:hover {
+            background: var(--tg-accent);
+            color: #fff;
+            transform: translateX(-50%) scale(1.1);
+        }
+
+        .unread-message-count {
+            position: absolute;
+            top: -5px;
+            right: -5px;
+            min-width: 18px;
+            height: 18px;
+            background: var(--error);
+            color: #fff;
+            border-radius: 9px;
+            font-size: 10px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 4px;
         }
 
         .message-group {
@@ -1479,6 +1532,7 @@
                 background-image:
                     radial-gradient(circle at 20% 50%, rgba(45, 82, 120, 0.03) 0%, transparent 50%),
                     radial-gradient(circle at 80% 80%, rgba(45, 82, 120, 0.02) 0%, transparent 50%);
+                position: relative;
             }
             
             .messages::-webkit-scrollbar {
@@ -1600,6 +1654,21 @@
                 bottom: 0;
                 z-index: 100;
                 flex-shrink: 0;
+            }
+
+            /* Scroll to Bottom Button - Mobile */
+            .scroll-to-bottom-btn {
+                bottom: 90px;
+                width: 44px;
+                height: 44px;
+                background: var(--tg-bg-secondary);
+                border: 1px solid var(--tg-border);
+                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+            }
+
+            .scroll-to-bottom-btn:hover {
+                background: var(--tg-accent);
+                color: #fff;
             }
             
             /* Expandable Attachment Menu */
@@ -3058,6 +3127,12 @@
 
         <div id="messages" class="messages"></div>
 
+        <!-- Scroll to Bottom Button -->
+        <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" style="display: none;" title="Scroll to bottom">
+            ↓
+            <span id="unread-message-count" class="unread-message-count" style="display: none;"></span>
+        </button>
+
         <div class="input-area">
             <div id="image-preview" class="image-preview"></div>
             
@@ -3882,6 +3957,8 @@
         const backBtn = document.getElementById('back-btn');
         const messageInput = document.getElementById('message-input');
         const messagesContainer = document.getElementById('messages');
+        const scrollToBottomBtn = document.getElementById('scroll-to-bottom-btn');
+        const unreadMessageCount = document.getElementById('unread-message-count');
         const statusDot = document.getElementById('status-dot');
         const statusText = document.getElementById('status-text');
         const chatName = document.getElementById('chat-name');
@@ -3967,6 +4044,11 @@
 
         const renderedMessageIds = new Set();
         const activeAudioPlayers = new Map();
+
+        // Scroll tracking for auto-scroll and new message indicator
+        let isAtBottom = true;
+        let unreadMessageCounter = 0;
+        const SCROLL_THRESHOLD = 100; // pixels from bottom to consider "at bottom"
 
         // Heartbeat and connection status
         let heartbeatInterval = null;
@@ -4273,6 +4355,20 @@
                 this.style.height = Math.min(this.scrollHeight, 100) + 'px';
             });
 
+            // Scroll to bottom button click handler
+            if (scrollToBottomBtn) {
+                scrollToBottomBtn.addEventListener('click', () => {
+                    scrollToBottom();
+                });
+            }
+
+            // Scroll event listener for tracking user position
+            if (messagesContainer) {
+                messagesContainer.addEventListener('scroll', () => {
+                    checkScrollPosition();
+                });
+            }
+
             // Determine which screen to show
             if (userName) {
                 showChatList();
@@ -4488,6 +4584,59 @@
             showToast('Chat deleted', 'success');
         }
 
+        // Scroll management functions
+        function scrollToBottom(smooth = true) {
+            if (messagesContainer) {
+                messagesContainer.scrollTo({
+                    top: messagesContainer.scrollHeight,
+                    behavior: smooth ? 'smooth' : 'auto'
+                });
+                // Reset counter when scrolling to bottom
+                unreadMessageCounter = 0;
+                updateScrollButton();
+            }
+        }
+
+        function checkScrollPosition() {
+            if (!messagesContainer) return;
+
+            const scrollTop = messagesContainer.scrollTop;
+            const scrollHeight = messagesContainer.scrollHeight;
+            const clientHeight = messagesContainer.clientHeight;
+
+            // Check if user is at bottom (within threshold)
+            const wasAtBottom = isAtBottom;
+            isAtBottom = (scrollHeight - scrollTop - clientHeight) < SCROLL_THRESHOLD;
+
+            // Update button visibility
+            updateScrollButton();
+        }
+
+        function updateScrollButton() {
+            if (!scrollToBottomBtn) return;
+
+            if (isAtBottom) {
+                // Hide button when at bottom
+                scrollToBottomBtn.classList.remove('visible');
+                unreadMessageCounter = 0;
+            } else {
+                // Show button with counter if there are unread messages
+                scrollToBottomBtn.classList.add('visible');
+                if (unreadMessageCounter > 0) {
+                    unreadMessageCount.textContent = unreadMessageCounter > 99 ? '99+' : unreadMessageCounter;
+                    unreadMessageCount.style.display = 'flex';
+                } else {
+                    unreadMessageCount.style.display = 'none';
+                }
+            }
+        }
+
+        function resetScrollState() {
+            isAtBottom = true;
+            unreadMessageCounter = 0;
+            updateScrollButton();
+        }
+
         function openChat(handle) {
             currentChat = chats.find(chat => chat.handle === handle);
             if (!currentChat) return;
@@ -4517,11 +4666,17 @@
             currentChat.unreadCount = 0;
             saveChats();
 
+            // Reset scroll state
+            resetScrollState();
+
             // Load cached messages from localStorage
             loadCachedMessages(handle);
-            
+
             // Track the last fetch time for incremental updates
             lastFetchTime = 0;
+
+            // Scroll to bottom after loading messages
+            setTimeout(() => scrollToBottom(false), 100);
 
             startPolling();
             startHeartbeat();
@@ -4546,6 +4701,9 @@
             renderChatList();
             // Restart polling on the other chats when going back to list
             startChatListPolling();
+            
+            // Reset scroll state
+            resetScrollState();
         }
 
         function startHeartbeat() {
@@ -4962,6 +5120,23 @@
                 
                 // Add to all messages for caching
                 allMessages.push(message);
+            }
+
+            // Auto-scroll handling for new messages
+            if (hasNewMessages) {
+                // Check scroll position after messages are added
+                setTimeout(() => {
+                    checkScrollPosition();
+                    
+                    if (isAtBottom) {
+                        // Auto-scroll to bottom if user was already at bottom
+                        scrollToBottom(false);
+                    } else {
+                        // User has scrolled up - increment counter and show button
+                        unreadMessageCounter++;
+                        updateScrollButton();
+                    }
+                }, 50);
             }
 
             // Save new messages to cache (merge with existing cache) and update polling cursor
