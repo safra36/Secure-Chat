@@ -1312,6 +1312,7 @@ function handleTransferAccept(req, res, pathname) {
 	// Update transfer status
 	transfer.status = 'ACCEPTED';
 	transfer.acceptedAt = Date.now();
+	transfer.receiverId = userId;
 
 	// Remove from pending invitations in this chat
 	const chatInvitations = transferInvitations.get(chatHandle);
@@ -1829,13 +1830,13 @@ function handleTransferCancel(req, res, pathname) {
 		return;
 	}
 
-	// Verify user is authorized (only sender can cancel)
-	if (transfer.senderId !== userId) {
+	// Verify user is authorized (sender or receiver can cancel)
+	if (transfer.senderId !== userId && transfer.receiverId !== userId) {
 		logP2PTransfer('CANCEL', transferSessionId, 'UNAUTHORIZED', {
 			statusCode: 403,
 			chatHandle,
 			userId,
-			error: `Sender mismatch: expected ${transfer.senderId}`
+			error: `Not sender (${transfer.senderId}) or receiver (${transfer.receiverId})`
 		});
 		res.writeHead(403, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Not authorized to cancel this transfer' }));
