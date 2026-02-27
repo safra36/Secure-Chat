@@ -2273,8 +2273,6 @@
                 display: flex;
                 align-items: flex-end;
                 gap: 8px;
-                background: var(--tg-bg-tertiary);
-                border-radius: 24px;
                 padding: 6px 8px;
                 position: relative;
             }
@@ -2302,9 +2300,10 @@
             
             .input-wrapper {
                 flex: 1;
-                background: transparent;
-                border-radius: 0;
-                padding: 8px 4px;
+                background: var(--bg-tertiary);
+                border: 1px solid var(--border-color);
+                border-radius: var(--radius-full);
+                padding: 10px 20px;
                 min-height: 40px;
                 display: flex;
                 align-items: center;
