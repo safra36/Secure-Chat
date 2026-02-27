@@ -1542,6 +1542,10 @@
             animation: pulse 1.5s ease-in-out infinite;
         }
 
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         @keyframes pulse {
             0%, 100% {
                 box-shadow: 0 0 0 0 rgba(231, 76, 60, 0.4);
@@ -1649,52 +1653,63 @@
         .voice-message-player {
             display: flex;
             align-items: center;
-            gap: 12px;
-            padding: 8px 12px;
-            background: rgba(0, 0, 0, 0.1);
-            border-radius: 8px;
-        }
-
-        .message.own .voice-message-player {
-            background: rgba(0, 0, 0, 0.1);
-        }
-
-        .voice-message-player.playing .play-btn {
-            background: rgba(255, 255, 255, 0.3);
+            gap: 10px;
+            padding: 10px 14px;
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 16px;
+            min-width: 220px;
         }
 
         .play-btn {
-            width: 36px;
-            height: 36px;
+            width: 40px;
+            height: 40px;
             border-radius: 50%;
-            background: rgba(0, 0, 0, 0.2);
+            background: rgba(255, 255, 255, 0.2);
             border: none;
-            color: inherit;
+            color: white;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 16px;
-            transition: all 0.2s ease;
+            transition: background 0.2s ease, transform 0.15s ease;
             flex-shrink: 0;
         }
 
         .play-btn:hover {
-            background: rgba(0, 0, 0, 0.3);
-            transform: scale(1.05);
+            background: rgba(255, 255, 255, 0.35);
+            transform: scale(1.08);
+        }
+
+        .play-btn:active {
+            transform: scale(0.95);
+        }
+
+        .voice-message-player.playing .play-btn {
+            background: rgba(255, 255, 255, 0.28);
         }
 
         .voice-waveform-wrapper {
             flex: 1;
-            height: 32px;
+            height: 40px;
             cursor: pointer;
+            position: relative;
+            min-width: 80px;
+        }
+
+        .voice-waveform-canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
         }
 
         .voice-duration {
             font-size: 12px;
-            opacity: 0.7;
-            min-width: 40px;
+            opacity: 0.85;
+            min-width: 36px;
             text-align: right;
+            font-variant-numeric: tabular-nums;
+            white-space: nowrap;
+            letter-spacing: 0.3px;
         }
 
         /* Lightbox */
@@ -2446,24 +2461,22 @@
             /* Voice Message Player */
             .voice-message-player {
                 background: rgba(0,0,0,0.15);
-                border-radius: 20px;
-                padding: 8px 12px;
-                min-width: 180px;
+                border-radius: 16px;
+                padding: 10px 12px;
+                min-width: 200px;
             }
-            
+
             .play-btn {
-                width: 36px;
-                height: 36px;
-                background: rgba(255,255,255,0.2);
+                width: 38px;
+                height: 38px;
             }
-            
-            .play-btn:hover {
-                background: rgba(255,255,255,0.3);
+
+            .voice-waveform-wrapper {
+                height: 38px;
             }
-            
+
             .voice-duration {
-                color: rgba(255,255,255,0.8);
-                font-size: 12px;
+                font-size: 11px;
             }
             
             /* Upload Progress */
@@ -4752,6 +4765,7 @@
         let mediaRecorder = null;
         let audioChunks = [];
         let isRecording = false;
+        let isCancellingRecording = false;
         let recordingStartTime = null;
         let recordingTimer = null;
 
@@ -6062,13 +6076,45 @@
             }
         }
 
+        const SVG_PLAY  = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px;margin-left:2px"><polygon points="5,3 19,12 5,21"/></svg>`;
+        const SVG_PAUSE = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
+
+        function _voiceRoundRect(ctx, x, y, w, h, r) {
+            if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); }
+            else { ctx.rect(x, y, w, h); }
+        }
+
+        function _computeWaveformBars(audioBuffer, count) {
+            const data = audioBuffer.getChannelData(0);
+            const step = Math.ceil(data.length / count);
+            const bars = [];
+            for (let i = 0; i < count; i++) {
+                let peak = 0;
+                for (let j = 0; j < step; j++) {
+                    const v = Math.abs(data[i * step + j] || 0);
+                    if (v > peak) peak = v;
+                }
+                bars.push(peak);
+            }
+            const max = Math.max(...bars, 0.01);
+            return bars.map(b => Math.max(0.06, b / max));
+        }
+
+        function _placeholderBars(count) {
+            const bars = [];
+            for (let i = 0; i < count; i++) {
+                bars.push(Math.max(0.06, 0.25 + 0.5 * Math.abs(Math.sin(i * 0.38 + 1))));
+            }
+            return bars;
+        }
+
         async function createVoicePlayer(audioUrl, duration) {
             const player = document.createElement('div');
             player.className = 'voice-message-player';
 
             const playBtn = document.createElement('button');
             playBtn.className = 'play-btn';
-            playBtn.innerHTML = '▶';
+            playBtn.innerHTML = SVG_PLAY;
             playBtn.type = 'button';
 
             const waveformWrapper = document.createElement('div');
@@ -6076,134 +6122,156 @@
 
             const waveformCanvas = document.createElement('canvas');
             waveformCanvas.className = 'voice-waveform-canvas';
-            waveformCanvas.width = 200;
-            waveformCanvas.height = 32;
+            waveformWrapper.appendChild(waveformCanvas);
 
-            const durationEl = document.createElement('span');
-            durationEl.className = 'voice-duration';
-            
-            // Validate duration to prevent Infinity:NaN display
+            const timeEl = document.createElement('span');
+            timeEl.className = 'voice-duration';
+
             let validDuration = 0;
             if (typeof duration === 'number' && isFinite(duration) && !isNaN(duration) && duration > 0) {
                 validDuration = duration;
-            } else {
-                console.warn('Invalid audio duration:', duration, '- using default 0');
             }
-            
-            const minutes = Math.floor(validDuration / 60).toString().padStart(2, '0');
-            const seconds = Math.floor(validDuration % 60).toString().padStart(2, '0');
-            durationEl.textContent = `${minutes}:${seconds}`;
 
-            waveformWrapper.appendChild(waveformCanvas);
+            function fmt(secs) {
+                const m = Math.floor(secs / 60).toString().padStart(2, '0');
+                const s = Math.floor(secs % 60).toString().padStart(2, '0');
+                return `${m}:${s}`;
+            }
+            timeEl.textContent = fmt(validDuration);
+
             player.appendChild(playBtn);
             player.appendChild(waveformWrapper);
-            player.appendChild(durationEl);
+            player.appendChild(timeEl);
 
-            // Generate waveform with better error handling
+            // Build waveform bar data
+            const BAR_COUNT = 52;
+            let bars = _placeholderBars(BAR_COUNT);
             try {
-                const response = await fetch(audioUrl);
-                const arrayBuffer = await response.arrayBuffer();
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-                drawPlaybackWaveform(audioBuffer, waveformCanvas);
-            } catch (e) {
-                console.error('Error generating waveform:', e);
-                drawPlaceholderWaveform(waveformCanvas);
-            }
+                const resp = await fetch(audioUrl);
+                const ab = await resp.arrayBuffer();
+                const actx = new (window.AudioContext || window.webkitAudioContext)();
+                const audioBuf = await actx.decodeAudioData(ab);
+                bars = _computeWaveformBars(audioBuf, BAR_COUNT);
+            } catch (e) { /* keep placeholder */ }
 
-            // Audio element
             const audio = new Audio(audioUrl);
             audio.preload = 'auto';
 
-            // Play/Pause functionality
+            // Draw function
+            function drawWaveform(progress) {
+                const dpr = window.devicePixelRatio || 1;
+                const cssW = waveformWrapper.clientWidth || 160;
+                const cssH = waveformWrapper.clientHeight || 40;
+                const pw = cssW * dpr;
+                const ph = cssH * dpr;
+                if (waveformCanvas.width !== pw || waveformCanvas.height !== ph) {
+                    waveformCanvas.width = pw;
+                    waveformCanvas.height = ph;
+                    waveformCanvas.style.width = cssW + 'px';
+                    waveformCanvas.style.height = cssH + 'px';
+                }
+                const ctx = waveformCanvas.getContext('2d');
+                ctx.clearRect(0, 0, pw, ph);
+
+                const GAP = 2 * dpr;
+                const barW = Math.max(2 * dpr, (pw - GAP * (BAR_COUNT - 1)) / BAR_COUNT);
+                const playX = progress * pw;
+                const now = Date.now();
+                const isPlaying = !audio.paused && !audio.ended;
+
+                for (let i = 0; i < BAR_COUNT; i++) {
+                    const x = i * (barW + GAP);
+                    let h = bars[i] * ph * 0.82;
+                    // Animate 3 bars near playhead while playing
+                    if (isPlaying) {
+                        const dist = Math.abs(x + barW / 2 - playX);
+                        if (dist < barW * 3.5) {
+                            h = Math.min(ph * 0.9, h * (1 + 0.18 * Math.sin(now / 70 + i * 1.3)));
+                        }
+                    }
+                    const y = (ph - h) / 2;
+                    const r = Math.min(barW / 2, 3 * dpr);
+                    const played = x + barW <= playX;
+                    const partial = !played && x < playX;
+                    ctx.fillStyle = (played || partial) ? 'rgba(255,255,255,0.92)' : 'rgba(255,255,255,0.28)';
+                    ctx.beginPath();
+                    _voiceRoundRect(ctx, x, y, barW, h, r);
+                    ctx.fill();
+                }
+
+                // Playhead cursor
+                if (progress > 0.005 && progress < 0.998) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+                    ctx.fillRect(playX - dpr, 0, 2 * dpr, ph);
+                    // Dot on playhead
+                    ctx.beginPath();
+                    ctx.arc(playX, ph / 2, 4 * dpr, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Animation loop
+            let rafId = null;
+            function animate() {
+                const progress = validDuration > 0 ? audio.currentTime / validDuration : 0;
+                drawWaveform(progress);
+                timeEl.textContent = fmt(audio.currentTime);
+                if (!audio.paused && !audio.ended) {
+                    rafId = requestAnimationFrame(animate);
+                }
+            }
+
+            // Initial draw after layout
+            requestAnimationFrame(() => drawWaveform(0));
+
+            // Play / pause
             playBtn.addEventListener('click', async (e) => {
                 e.stopPropagation();
-                
                 try {
                     if (audio.paused) {
                         await audio.play();
-                        playBtn.innerHTML = '⏸';
+                        playBtn.innerHTML = SVG_PAUSE;
                         player.classList.add('playing');
+                        rafId = requestAnimationFrame(animate);
                     } else {
                         audio.pause();
-                        playBtn.innerHTML = '▶';
+                        cancelAnimationFrame(rafId);
+                        playBtn.innerHTML = SVG_PLAY;
                         player.classList.remove('playing');
                     }
-                } catch (error) {
-                    console.error('Error playing audio:', error);
+                } catch (err) {
                     showToast('Failed to play audio', 'error');
                 }
             });
 
             audio.addEventListener('ended', () => {
-                playBtn.innerHTML = '▶';
+                cancelAnimationFrame(rafId);
+                playBtn.innerHTML = SVG_PLAY;
                 player.classList.remove('playing');
+                timeEl.textContent = fmt(validDuration);
+                drawWaveform(0);
             });
 
-            audio.addEventListener('error', (e) => {
-                console.error('Audio error:', e);
-                showToast('Error playing audio', 'error');
-            });
+            audio.addEventListener('error', () => showToast('Error playing audio', 'error'));
 
-            // Click on waveform to seek
+            // Seek on click
             waveformWrapper.addEventListener('click', (e) => {
                 const rect = waveformWrapper.getBoundingClientRect();
-                const clickX = e.clientX - rect.left;
-                const percentage = clickX / rect.width;
-                audio.currentTime = percentage * duration;
+                const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                audio.currentTime = pct * validDuration;
+                const p = validDuration > 0 ? pct : 0;
+                drawWaveform(p);
+                timeEl.textContent = fmt(audio.currentTime);
             });
 
-            // Store for cleanup
+            // Redraw on resize
+            new ResizeObserver(() => {
+                const p = validDuration > 0 ? audio.currentTime / validDuration : 0;
+                drawWaveform(p);
+            }).observe(waveformWrapper);
+
             activeAudioPlayers.set(player, { audio, playBtn });
-
             return player;
-        }
-
-        function drawPlaceholderWaveform(canvas) {
-            const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
-            
-            ctx.clearRect(0, 0, width, height);
-            ctx.fillStyle = '#ffffff';
-            
-            // Draw a simple sine wave pattern
-            ctx.beginPath();
-            ctx.moveTo(0, height / 2);
-            
-            for (let i = 0; i < width; i++) {
-                const y = height / 2 + Math.sin(i * 0.1) * (height / 4);
-                ctx.lineTo(i, y);
-            }
-            
-            ctx.strokeStyle = '#ffffff';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-        }
-
-        async function drawPlaybackWaveform(audioBuffer, canvas) {
-            const ctx = canvas.getContext('2d');
-            const width = canvas.width;
-            const height = canvas.height;
-            const data = audioBuffer.getChannelData(0);
-            const step = Math.ceil(data.length / width);
-            const amp = height / 2;
-
-            ctx.clearRect(0, 0, width, height);
-            ctx.fillStyle = '#ffffff';
-
-            for (let i = 0; i < width; i++) {
-                let min = 1.0;
-                let max = -1.0;
-                for (let j = 0; j < step; j++) {
-                    const datum = data[i * step + j];
-                    if (datum < min) min = datum;
-                    if (datum > max) max = datum;
-                }
-                const barHeight = Math.max(1, (max - min) * amp);
-                const barY = (1 + min) * amp;
-                ctx.fillRect(i, barY, 1, barHeight);
-            }
         }
 
         function startVoiceRecording() {
@@ -6220,10 +6288,14 @@
                         audioChunks.push(event.data);
                     };
                     mediaRecorder.onstop = () => {
-                        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-                        sendVoiceMessage(audioBlob);
                         stopWaveformVisualization();
                         stream.getTracks().forEach(track => track.stop());
+                        if (!isCancellingRecording) {
+                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                            sendVoiceMessage(audioBlob);
+                        }
+                        audioChunks = [];
+                        isCancellingRecording = false;
                     };
                     mediaRecorder.start();
 
@@ -6261,6 +6333,7 @@
 
         function cancelVoiceRecording() {
             if (mediaRecorder && isRecording) {
+                isCancellingRecording = true;
                 mediaRecorder.stop();
                 clearInterval(recordingTimer);
                 stopWaveformVisualization();
@@ -6269,8 +6342,6 @@
                 inputContainer.style.display = 'flex';
                 voiceRecording.classList.remove('active');
                 recordingTime.textContent = '00:00';
-                
-                audioChunks = [];
             }
         }
 
@@ -7028,48 +7099,94 @@
         function createDeferredContentButton(messageId, contentType) {
             const container = document.createElement('div');
             container.className = 'deferred-content';
-            container.style.display = 'flex';
-            container.style.alignItems = 'center';
-            container.style.justifyContent = 'center';
-            container.style.padding = '12px';
-            container.style.background = 'rgba(0, 0, 0, 0.1)';
-            container.style.borderRadius = '8px';
-            container.style.minHeight = '60px';
-            container.style.gap = '8px';
-            container.style.flexDirection = 'column';
 
-            const label = document.createElement('div');
-            label.textContent = contentType === 'voice' ? 'Voice message' : 'Image';
-            label.style.fontSize = '14px';
-            label.style.color = 'inherit';
+            if (contentType === 'voice') {
+                // Voice: render like a voice player but with a download button
+                container.className += ' voice-message-player';
 
+                // Download circle button
+                const btn = document.createElement('button');
+                btn.className = 'play-btn';
+                btn.type = 'button';
+                btn.title = 'Download voice message';
+                const originalHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+                btn.innerHTML = originalHTML;
+
+                // Fake waveform
+                const waveformWrapper = document.createElement('div');
+                waveformWrapper.className = 'voice-waveform-wrapper';
+                const canvas = document.createElement('canvas');
+                canvas.className = 'voice-waveform-canvas';
+                waveformWrapper.appendChild(canvas);
+
+                // Label
+                const timeEl = document.createElement('span');
+                timeEl.className = 'voice-duration';
+                timeEl.textContent = '--:--';
+
+                container.appendChild(btn);
+                container.appendChild(waveformWrapper);
+                container.appendChild(timeEl);
+
+                // Draw dimmed placeholder bars on canvas
+                requestAnimationFrame(() => {
+                    const dpr = window.devicePixelRatio || 1;
+                    const cssW = waveformWrapper.clientWidth || 160;
+                    const cssH = 40;
+                    canvas.width = cssW * dpr;
+                    canvas.height = cssH * dpr;
+                    canvas.style.width = cssW + 'px';
+                    canvas.style.height = cssH + 'px';
+                    const ctx = canvas.getContext('2d');
+                    const BAR_COUNT = 52;
+                    const GAP = 2 * dpr;
+                    const barW = Math.max(2 * dpr, (canvas.width - GAP * (BAR_COUNT - 1)) / BAR_COUNT);
+                    const bars = _placeholderBars(BAR_COUNT);
+                    ctx.fillStyle = 'rgba(255,255,255,0.22)';
+                    for (let i = 0; i < BAR_COUNT; i++) {
+                        const x = i * (barW + GAP);
+                        const h = bars[i] * canvas.height * 0.82;
+                        const y = (canvas.height - h) / 2;
+                        const r = Math.min(barW / 2, 3 * dpr);
+                        ctx.beginPath();
+                        _voiceRoundRect(ctx, x, y, barW, h, r);
+                        ctx.fill();
+                    }
+                });
+
+                btn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+                    await downloadDeferredContent(messageId, contentType, btn);
+                });
+
+                return container;
+            }
+
+            // Image: placeholder box with image icon + download overlay button
+            container.style.cssText = 'position:relative;width:100%;max-width:300px;border-radius:12px;overflow:hidden;background:rgba(0,0,0,0.18);aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;cursor:pointer';
+
+            // Centre icon
+            const iconWrap = document.createElement('div');
+            iconWrap.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:10px;opacity:0.55';
+            iconWrap.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:48px;height:48px"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg><span style="font-size:12px;font-weight:500;letter-spacing:0.4px">TAP TO DOWNLOAD</span>`;
+
+            // Download badge (bottom-right)
+            const originalHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
             const btn = document.createElement('button');
-            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:-0.1em;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download';
-            btn.style.padding = '6px 12px';
-            btn.style.background = 'rgba(79, 195, 247, 0.2)';
-            btn.style.border = '1px solid rgba(79, 195, 247, 0.4)';
-            btn.style.color = 'inherit';
-            btn.style.borderRadius = '6px';
-            btn.style.cursor = 'pointer';
-            btn.style.fontSize = '12px';
-            btn.style.transition = 'all 0.3s ease';
-
-            btn.addEventListener('mouseover', () => {
-                btn.style.background = 'rgba(79, 195, 247, 0.3)';
-            });
-
-            btn.addEventListener('mouseout', () => {
-                btn.style.background = 'rgba(79, 195, 247, 0.2)';
-            });
+            btn.innerHTML = originalHTML;
+            btn.style.cssText = 'position:absolute;bottom:10px;right:10px;width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,0.18);border:none;color:white;display:flex;align-items:center;justify-content:center;cursor:pointer;transition:background 0.2s';
+            btn.addEventListener('mouseenter', () => { btn.style.background = 'rgba(255,255,255,0.28)'; });
+            btn.addEventListener('mouseleave', () => { btn.style.background = 'rgba(255,255,255,0.18)'; });
 
             btn.addEventListener('click', async (e) => {
                 e.stopPropagation();
+                btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
                 await downloadDeferredContent(messageId, contentType, btn);
             });
 
-            container.appendChild(label);
+            container.appendChild(iconWrap);
             container.appendChild(btn);
-
             return container;
         }
 
@@ -7095,7 +7212,9 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Download failed: ${response.status}`);
+                    const err = new Error(`Download failed: ${response.status}`);
+                    err.status = response.status;
+                    throw err;
                 }
 
                 const data = await response.json();
@@ -7171,7 +7290,7 @@
                             if (!deferredElement) {
                                 console.warn('Deferred element not found');
                                 if (btn) {
-                                    btn.textContent = originalText;
+                                    btn.innerHTML = originalHTML;
                                     btn.disabled = false;
                                 }
                                 return;
@@ -7217,7 +7336,7 @@
                             console.error('Error rendering downloaded content:', err);
                             showToast('Error displaying content', 'error');
                             if (btn) {
-                                btn.textContent = originalText;
+                                btn.innerHTML = originalHTML;
                                 btn.disabled = false;
                             }
                         }
@@ -7225,15 +7344,32 @@
                 }
 
                 if (btn) {
-                    btn.textContent = originalText;
+                    btn.innerHTML = originalHTML;
                     btn.disabled = false;
                 }
             } catch (error) {
                 console.error('Download error:', error);
-                showToast(`Failed to download ${contentType}`, 'error');
-                if (btn) {
-                    btn.innerHTML = originalHTML;
-                    btn.disabled = false;
+                if (error.status === 404 && btn) {
+                    const container = btn.closest('.deferred-content');
+                    if (container) {
+                        if (container.classList.contains('voice-message-player')) {
+                            // Replace play btn with expired icon, dim waveform
+                            btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;opacity:0.5"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`;
+                            btn.disabled = true;
+                            btn.style.cursor = 'default';
+                            const timeEl = container.querySelector('.voice-duration');
+                            if (timeEl) { timeEl.textContent = 'Expired'; timeEl.style.opacity = '0.45'; }
+                        } else {
+                            container.style.cursor = 'default';
+                            container.innerHTML = `<div style="display:flex;flex-direction:column;align-items:center;gap:8px;opacity:0.4"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:44px;height:44px"><rect x="3" y="3" width="18" height="18" rx="3"/><line x1="3" y1="3" x2="21" y2="21"/></svg><span style="font-size:12px;font-weight:500;letter-spacing:0.4px">IMAGE EXPIRED</span></div>`;
+                        }
+                    }
+                } else {
+                    showToast(`Failed to download ${contentType}`, 'error');
+                    if (btn) {
+                        btn.innerHTML = originalHTML;
+                        btn.disabled = false;
+                    }
                 }
             }
         }
