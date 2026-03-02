@@ -12,6 +12,7 @@
     <link rel="apple-touch-icon" href="/icons/icon.svg">
     <title>Secure Chat</title>
     <script src="auth.js"></script>
+    <script src="error-reporter.js"></script>
     <script src="pako.min.js"></script>
     <script src="content-cache-db.js"></script>
     <script>
@@ -4130,6 +4131,7 @@
                     isCompressed: true
                 };
             } catch (error) {
+                window.reportClientError(error, 'compress data');
                 console.error('Compression error:', error);
                 return {
                     compressed: data,
@@ -4151,6 +4153,7 @@
                 }
                 return data;
             } catch (error) {
+                window.reportClientError(error, 'decompress data');
                 console.error('Decompression error:', error);
                 return data;
             }
@@ -4199,6 +4202,7 @@
                     await migrateFromLocalStorage();
                 }
             } catch (error) {
+                window.reportClientError(error, 'initialize IndexedDB');
                 console.warn('Failed to initialize IndexedDB, falling back to localStorage:', error);
                 indexedDBReady = false;
             }
@@ -4239,6 +4243,7 @@
                             migratedCount++;
                         }
                     } catch (err) {
+                        window.reportClientError(err, 'migrate content to IndexedDB');
                         console.warn(`Failed to migrate ${key}:`, err);
                     }
                 }
@@ -4250,6 +4255,7 @@
                 migrationDone = true;
                 
             } catch (error) {
+                window.reportClientError(error, 'migration from localStorage');
                 console.error('Migration failed:', error);
                 // Continue without migration - localStorage will still work
             }
@@ -4266,16 +4272,18 @@
                 }
                 return totalBytes;
             } catch (e) {
+                window.reportClientError(e, 'calculate localStorage usage');
                 return 0;
             }
         }
-        
+
         // Check if we can store data of given size
         function canStoreInCache(dataSize) {
             try {
                 const currentUsage = getLocalStorageUsage();
                 return (currentUsage + dataSize) < MAX_CACHE_SIZE_BYTES;
             } catch (e) {
+                window.reportClientError(e, 'check cache size limit');
                 return false;
             }
         }
@@ -4308,6 +4316,7 @@
                     console.log(`✅ Cached content for message ${messageId} in IndexedDB (${dataSize} bytes)`);
                     return true;
                 } catch (error) {
+                    window.reportClientError(error, 'cache content in IndexedDB');
                     console.warn(`IndexedDB cache failed for ${messageId}:`, error);
                     // Continue to localStorage fallback
                 }
@@ -4332,6 +4341,7 @@
                     return true;
                     
                 } catch (e) {
+                    window.reportClientError(e, 'cache content in localStorage');
                     if (e.name === 'QuotaExceededError') {
                         console.warn(`QuotaExceededError on attempt ${attempts + 1}/${maxAttempts}`);
                         
@@ -4415,6 +4425,7 @@
                 try {
                     idbStats = await contentCacheDB.getStats();
                 } catch (error) {
+                    window.reportClientError(error, 'get IndexedDB stats');
                     console.warn('Failed to get IndexedDB stats:', error);
                 }
             }
@@ -4478,6 +4489,7 @@
             // Clear from IndexedDB
             if (indexedDBReady && typeof contentCacheDB !== 'undefined') {
                 contentCacheDB.clearChatContent(chatHandle).catch(err => {
+                    window.reportClientError(err, 'clear chat content cache');
                     console.warn('Failed to clear IndexedDB chat content:', err);
                 });
             }
@@ -4501,6 +4513,7 @@
                         return content;
                     }
                 } catch (error) {
+                    window.reportClientError(error, 'get cached content from IndexedDB');
                     console.warn(`IndexedDB get failed for ${messageId}:`, error);
                     // Continue to localStorage fallback
                 }
@@ -4589,6 +4602,7 @@
                         try {
                             await uploader.cancel(currentChat.handle);
                         } catch (e) {
+                            window.reportClientError(e, 'cancel upload');
                             console.warn('Failed to cancel upload on server:', e);
                         }
                     }
@@ -4665,6 +4679,7 @@
                     console.log('All chunks uploaded successfully');
                     return true;
                 } catch (error) {
+                    window.reportClientError(error, 'chunked upload');
                     console.error('Chunked upload error:', error);
                     throw error;
                 }
@@ -4692,6 +4707,7 @@
                     console.log('Upload completed:', result);
                     return result;
                 } catch (error) {
+                    window.reportClientError(error, 'finalize upload');
                     console.error('Finalize error:', error);
                     throw error;
                 }
@@ -4709,6 +4725,7 @@
                         console.warn(`Failed to cancel upload: ${response.status}`);
                     }
                 } catch (error) {
+                    window.reportClientError(error, 'cancel upload request');
                     console.error('Cancel error:', error);
                 }
             }
@@ -4848,6 +4865,7 @@
             try {
                 localStorage.setItem('pollingCursors', JSON.stringify(pollingCursors));
             } catch (error) {
+                window.reportClientError(error, 'save polling cursors');
                 console.warn('Failed to save polling cursors:', error);
             }
         }
@@ -4890,6 +4908,7 @@
 
                 return parseInt(new TextDecoder().decode(decrypted), 10);
             } catch (error) {
+                window.reportClientError(error, 'decrypt server timestamp');
                 console.error('Failed to decrypt server timestamp:', error);
                 throw error;
             }
@@ -4927,6 +4946,7 @@
                 // Convert to base64 for transmission
                 return btoa(String.fromCharCode(...result));
             } catch (error) {
+                window.reportClientError(error, 'encrypt timestamp with server key');
                 console.error('Timestamp encryption error:', error);
                 throw error;
             }
@@ -4982,10 +5002,12 @@
                     console.log(`✅ Time synced. Server: ${serverTime}ms, Client: ${clientTime}ms, Offset: ${timeOffset}ms`);
                     return true;
                 } catch (decryptErr) {
+                    window.reportClientError(decryptErr, 'decrypt server time in sync');
                     console.warn('Failed to decrypt server time:', decryptErr);
                     return false;
                 }
             } catch (error) {
+                window.reportClientError(error, 'time sync');
                 console.error('Time sync error:', error);
                 return false;
             }
@@ -5015,6 +5037,7 @@
                             const timestamp = await decryptServerTimestamp(msg.encryptedTimestamp);
                             return { message: msg, timestamp };
                         } catch (err) {
+                            window.reportClientError(err, 'decrypt message timestamp');
                             console.warn(`Failed to decrypt timestamp for message ${msg.id}, using 0`);
                             return { message: msg, timestamp: 0 };
                         }
@@ -5027,6 +5050,7 @@
                 // Return sorted messages
                 return messagesWithTimestamps.map(item => item.message);
             } catch (error) {
+                window.reportClientError(error, 'sort messages by timestamp');
                 console.error('Error sorting messages by timestamp:', error);
                 // Fallback: return unsorted messages
                 return messages;
@@ -5548,6 +5572,7 @@
                 connectionStatus = 'connected';
                 updateConnectionStatus();
             } catch (error) {
+                window.reportClientError(error, 'heartbeat');
                 console.error('Heartbeat error:', error);
                 connectionStatus = 'disconnected';
                 updateConnectionStatus();
@@ -5570,6 +5595,7 @@
                     const userName = await decryptMessage(encryptedUserName, currentChat.encryptionKey);
                     return { userName, status };
                 } catch (err) {
+                    window.reportClientError(err, 'decrypt heartbeat username');
                     // If decryption fails, return the encrypted value as fallback
                     console.warn('Failed to decrypt user name:', err);
                     return { userName: encryptedUserName, status };
@@ -5688,6 +5714,7 @@
                     savePollingCursors(); // Persist to localStorage
                 }
             } catch (error) {
+                window.reportClientError(error, 'fetch messages');
                 console.error('Fetch error:', error);
             }
         }
@@ -5712,6 +5739,7 @@
                 try {
                     senderName = await decryptMessage(message.encryptedName, currentChat.encryptionKey);
                 } catch (err) {
+                    window.reportClientError(err, 'decrypt sender name');
                     // Failed to decrypt sender name - skip this message entirely
                     console.warn('Failed to decrypt sender name for message:', message.id);
                     allMessages.push(message);
@@ -5730,6 +5758,7 @@
                     const time = new Date(syncedTimestamp);
                     timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 } catch (err) {
+                    window.reportClientError(err, 'get server timestamp for message');
                     timeStr = '--:--';
                 }
 
@@ -5823,6 +5852,7 @@
                         contentHtml = `<div class="message-content">${escapeHtml(decrypted)}</div>`;
                     }
                 } catch (err) {
+                    window.reportClientError(err, 'decrypt message content');
                     // For deferred content, just show the download button
                     if (isVoice || isImage) {
                         const contentType = isVoice ? 'voice' : 'image';
@@ -5898,6 +5928,7 @@
                     const timestampStr = new Date(syncedTimestamp).toISOString();
                     updateLastMessage(currentChat.handle, textContent, timestampStr);
                 } catch (err) {
+                    window.reportClientError(err, 'update last message timestamp');
                     updateLastMessage(currentChat.handle, textContent, new Date().toISOString());
                 }
                 
@@ -5927,6 +5958,7 @@
                     try {
                         existingMessages = JSON.parse(cachedMessagesJson);
                     } catch (e) {
+                        window.reportClientError(e, 'parse cached messages');
                         console.error('Error parsing cache:', e);
                     }
                 }
@@ -6152,7 +6184,10 @@
                 const actx = new (window.AudioContext || window.webkitAudioContext)();
                 const audioBuf = await actx.decodeAudioData(ab);
                 bars = _computeWaveformBars(audioBuf, BAR_COUNT);
-            } catch (e) { /* keep placeholder */ }
+            } catch (e) {
+                window.reportClientError(e, 'decode audio data');
+                /* keep placeholder */
+            }
 
             const audio = new Audio(audioUrl);
             audio.preload = 'auto';
@@ -6240,6 +6275,7 @@
                         player.classList.remove('playing');
                     }
                 } catch (err) {
+                    window.reportClientError(err, 'play audio');
                     showToast('Failed to play audio', 'error');
                 }
             });
@@ -6306,6 +6342,7 @@
                     recordingTimer = setInterval(updateRecordingTime, 1000);
                 })
                 .catch(err => {
+                    window.reportClientError(err, 'microphone access');
                     showToast('Microphone access denied', 'error');
                     isRecording = false;
                 });
@@ -6375,6 +6412,7 @@
                 osc.start(now);
                 osc.stop(now + 0.15);
             } catch (err) {
+                window.reportClientError(err, 'play notification sound');
                 console.log('Could not play notification sound:', err);
             }
         }
@@ -6419,6 +6457,7 @@
                                 lastId = lastMessage.id;
                             }
                         } catch (e) {
+                            window.reportClientError(e, 'parse polling cursor cache');
                             console.error('Error parsing cache for polling:', e);
                         }
                     }
@@ -6449,6 +6488,7 @@
                             try {
                                 existingMessages = JSON.parse(cachedMessagesJson);
                             } catch (e) {
+                                window.reportClientError(e, 'parse cached messages for polling');
                                 console.error('Error parsing cache:', e);
                             }
                         }
@@ -6483,6 +6523,7 @@
                         renderChatList();
                     }
                 } catch (error) {
+                    window.reportClientError(error, 'poll chat messages');
                     console.error(`Error polling chat ${chat.handle}:`, error);
                 }
             }
@@ -6507,6 +6548,7 @@
                     
                     return response;
                 } catch (error) {
+                    window.reportClientError(error, 'fetch with retry');
                     // If this was the last attempt, throw the error
                     if (attempt === maxAttempts - 1) {
                         throw error;
@@ -6539,6 +6581,7 @@
                 try {
                     encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
                 } catch (error) {
+                    window.reportClientError(error, 'encrypt timestamp');
                     showToast('Failed to encrypt timestamp', 'error');
                     return;
                 }
@@ -6559,6 +6602,7 @@
                     messageData.content = encryptedText;
                     messageData.type = 'text';
                 } catch (error) {
+                    window.reportClientError(error, 'encrypt message text');
                     showToast('Failed to encrypt message', 'error');
                     return;
                 }
@@ -6576,6 +6620,7 @@
 
                     fetchMessages();
                 } catch (error) {
+                    window.reportClientError(error, 'send message');
                     showToast('Failed to send message', 'error');
                 }
             }
@@ -6709,6 +6754,7 @@
                 window.removeImage();
                 
             } catch (error) {
+                window.reportClientError(error, 'image upload');
                 console.error('Image upload error:', error);
                 showUploadProgress(false);
 
@@ -6721,6 +6767,7 @@
                     try {
                         await uploader.cancel(currentChat.handle);
                     } catch (cancelError) {
+                        window.reportClientError(cancelError, 'cancel image upload');
                         console.error('Failed to cancel upload:', cancelError);
                     }
                 }
@@ -6747,6 +6794,7 @@
                         console.log(`Image cached locally: ${actualMessageId}`);
                     }
                 } catch (cacheError) {
+                    window.reportClientError(cacheError, 'cache image locally');
                     console.error('Cache error (non-fatal):', cacheError);
                     showToast('Image sent successfully (cache unavailable)', 'info');
                 }
@@ -6785,6 +6833,7 @@
                 try {
                     encryptedAudio = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
                 } catch (error) {
+                    window.reportClientError(error, 'encrypt binary for voice');
                     showToast('Failed to encrypt voice message', 'error');
                     showUploadProgress(false);
                     encryptionFailed = true;
@@ -6852,6 +6901,7 @@
                 showUploadProgress(false);
                 
             } catch (error) {
+                window.reportClientError(error, 'voice upload');
                 console.error('Voice upload error:', error);
                 showUploadProgress(false);
                 
@@ -6875,6 +6925,7 @@
                         console.log(`Voice message cached locally: ${actualMessageId}`);
                     }
                 } catch (cacheError) {
+                    window.reportClientError(cacheError, 'cache voice message');
                     console.error('Cache error (non-fatal):', cacheError);
                     showToast('Voice sent successfully (cache unavailable)', 'info');
                 }
@@ -6935,9 +6986,11 @@
                 
                 // Render all cached messages
                 appendMessages(cachedMessages).catch(err => {
+                    window.reportClientError(err, 'render cached messages');
                     console.error('Error rendering cached messages:', err);
                 });
             } catch (error) {
+                window.reportClientError(error, 'load cached messages');
                 console.error('Error loading cached messages:', error);
             }
         }
@@ -6956,6 +7009,7 @@
                     localStorage.setItem(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
                 }
             } catch (error) {
+                window.reportClientError(error, 'save cached messages');
                 console.error('Error saving cached messages:', error);
                 // If storage quota exceeded, clear oldest chat cache
                 if (error.name === 'QuotaExceededError') {
@@ -6999,6 +7053,7 @@
 
                 return btoa(String.fromCharCode(...result));
             } catch (error) {
+                window.reportClientError(error, 'encryptBinary');
                 throw error;
             }
         }
@@ -7025,6 +7080,7 @@
 
                 return new TextDecoder().decode(decrypted);
             } catch (error) {
+                window.reportClientError(error, 'decryptBinary');
                 throw error;
             }
         }
@@ -7060,6 +7116,7 @@
                 }
                 return btoa(binary);
             } catch (err) {
+                window.reportClientError(err, 'encryptBinary inner');
                 throw err;
             }
         }
@@ -7091,6 +7148,7 @@
                     ciphertext
                 );
             } catch (err) {
+                window.reportClientError(err, 'decryptBinary inner');
                 throw err;
             }
         }
@@ -7249,6 +7307,7 @@
                             try {
                                 decompressedArray = pako.inflate(compressedBytes);
                             } catch (pakoError) {
+                                window.reportClientError(pakoError, 'decompress with pako');
                                 // If Pako inflate fails, it might mean:
                                 // 1. Data is not actually compressed (server flag is wrong)
                                 // 2. Data is corrupted
@@ -7268,11 +7327,13 @@
                                 encryptedBase64 = decompressedBase64;
                                 console.log(`Decompression complete: ${compressedBytes.length} bytes -> ${decompressedArray.length} bytes`);
                             } catch (btoa_err) {
+                                window.reportClientError(btoa_err, 'convert decompressed data to base64');
                                 console.error('Error converting decompressed data to base64:', btoa_err);
                                 throw new Error('Failed to encode decompressed content');
                             }
                         }
                     } catch (decompressErr) {
+                        window.reportClientError(decompressErr, 'decompression');
                         console.error('Decompression error:', decompressErr);
                         showToast(`Decompression failed: ${decompressErr.message}`, 'error');
                         throw new Error('Failed to decompress content');
@@ -7339,6 +7400,7 @@
                                 }
                             }
                         } catch (err) {
+                            window.reportClientError(err, 'render downloaded content');
                             console.error('Error rendering downloaded content:', err);
                             showToast('Error displaying content', 'error');
                             if (btn) {
@@ -7354,6 +7416,7 @@
                     btn.disabled = false;
                 }
             } catch (error) {
+                window.reportClientError(error, 'download content');
                 console.error('Download error:', error);
                 if (error.status === 404 && btn) {
                     const container = btn.closest('.deferred-content');
@@ -7389,6 +7452,7 @@
                 // Clear any upload state
                 localStorage.removeItem(`upload_session_${uploader?.sessionId}`);
             } catch (error) {
+                window.reportClientError(error, 'upload cleanup');
                 console.error('Error during upload cleanup:', error);
             }
         }
@@ -7447,6 +7511,7 @@
                 // Restore any in-progress transfers from localStorage
                 await restoreInProgressTransfers();
             } catch (error) {
+                window.reportClientError(error, 'initialize P2P transfer manager');
                 console.error('Failed to initialize P2P Transfer Manager:', error);
             }
         }
@@ -7500,6 +7565,7 @@
                                     displaySenderName = await decryptMessage(invitation.senderName, currentChat.encryptionKey);
                                 }
                             } catch (e) {
+                                window.reportClientError(e, 'decrypt invitation sender name');
                                 // Use defaults if decryption fails
                             }
                         }
@@ -7512,10 +7578,12 @@
                             if (window.notificationSound) {
                                 window.notificationSound.play().catch(() => {});
                             }
-                        } catch (e) {}
+                        } catch (e) {
+                            window.reportClientError(e, 'play invitation notification sound');
+                        }
                     }
                 }
-                
+
                 // Update badge
                 updatePendingInvitationsBadge(count);
                 
@@ -7525,6 +7593,7 @@
                     renderPendingInvitations(invitations);
                 }
             } catch (error) {
+                window.reportClientError(error, 'poll pending invitations');
                 console.warn('Failed to poll pending invitations:', error);
             }
         }
@@ -7568,6 +7637,7 @@
                     }
                 }
             } catch (error) {
+                window.reportClientError(error, 'restore in-progress transfers');
                 console.warn('Failed to restore in-progress transfers:', error);
             }
         }
@@ -7587,6 +7657,7 @@
             try {
                 localStorage.setItem('p2p_in_progress_transfers', JSON.stringify(transfers));
             } catch (error) {
+                window.reportClientError(error, 'save in-progress transfers');
                 console.warn('Failed to save in-progress transfers:', error);
             }
         }
@@ -7818,6 +7889,7 @@
                 });
 
             } catch (error) {
+                window.reportClientError(error, 'initiate P2P transfer');
                 console.error('Failed to initiate transfer:', error);
                 showToast(`Transfer failed: ${error.message}`, 'error');
                 
@@ -7961,6 +8033,7 @@
 
                 showToast('Transfer cancelled', 'info');
             } catch (error) {
+                window.reportClientError(error, 'cancel P2P transfer');
                 console.error('Failed to cancel transfer:', error);
             }
         };
@@ -7984,6 +8057,7 @@
                 try {
                     invitations = await p2pTransferManager.getPendingInvitations(currentChat.handle);
                 } catch (error) {
+                    window.reportClientError(error, 'get pending invitations');
                     console.error('Failed to get invitations:', error);
                     invitations = [];
                 }
@@ -8005,6 +8079,7 @@
                     try {
                         displaySenderName = await decryptMessage(invitation.senderName, currentChat.encryptionKey);
                     } catch (e) {
+                        window.reportClientError(e, 'decrypt invitation sender name (accept)');
                         console.warn('Failed to decrypt sender name:', e);
                         displaySenderName = 'Unknown';
                     }
@@ -8023,6 +8098,7 @@
                             displayFileSize = parseInt(decryptedSize, 10);
                         }
                     } catch (e) {
+                        window.reportClientError(e, 'decrypt invitation file metadata');
                         console.warn('Failed to decrypt file metadata:', e);
                     }
                 }
@@ -8117,6 +8193,7 @@
                 await renderPendingInvitations();
 
             } catch (error) {
+                window.reportClientError(error, 'accept P2P invitation');
                 console.error('Failed to accept invitation:', error);
                 showToast(`Failed to accept transfer: ${error.message}`, 'error');
             }
@@ -8132,6 +8209,7 @@
                 
                 showToast('Transfer declined', 'info');
             } catch (error) {
+                window.reportClientError(error, 'decline P2P invitation');
                 console.error('Failed to decline invitation:', error);
             }
         };
@@ -8218,6 +8296,7 @@
                     }
                 }, 30000);
             } catch (err) {
+                window.reportClientError(err, 'initiate call');
                 console.error('Call initiation error:', err);
                 callState = 'IDLE';
                 updateCallUI();
@@ -8258,6 +8337,7 @@
                             }
                         }
                     } catch (e) {
+                        window.reportClientError(e, 'caller poll');
                         console.error('[CALLER POLL] Error:', e);
                     }
                 }
@@ -8289,7 +8369,10 @@
                             playCallRingSound();
                         }
                     }
-                } catch (e) { /* ignore */ }
+                } catch (e) {
+                    window.reportClientError(e, 'ring sound polling');
+                    /* ignore */
+                }
             }, 2000);
         }
 
@@ -8319,7 +8402,10 @@
                     osc.start(now);
                     osc.stop(now + 0.8);
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                window.reportClientError(e, 'play call ring sound');
+                /* ignore */
+            }
         }
 
         async function acceptCall(callSessionId) {
@@ -8347,6 +8433,7 @@
                 startCallAudio();
                 showToast('Call connected', 'success');
             } catch (err) {
+                window.reportClientError(err, 'accept call');
                 console.error('Accept call error:', err);
                 callState = 'IDLE';
                 activeCallSession = null;
@@ -8363,7 +8450,10 @@
                     `/call/reject/${currentChat.handle}/${callSessionId}`,
                     { method: 'POST', headers: { 'Content-Type': 'application/json' } }
                 );
-            } catch (e) { /* ignore */ }
+            } catch (e) {
+                window.reportClientError(e, 'reject call');
+                /* ignore */
+            }
 
             callState = 'IDLE';
             activeCallSession = null;
@@ -8378,7 +8468,10 @@
                         `/call/end/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' } }
                     );
-                } catch (e) { /* ignore */ }
+                } catch (e) {
+                    window.reportClientError(e, 'end call');
+                    /* ignore */
+                }
             }
 
             stopCallAudio();
@@ -8427,6 +8520,7 @@
                             const encrypted = await encryptBinary(arrayBuffer, currentChat.encryptionKey);
                             await sendCallAudioChunk(encrypted);
                         } catch (e) {
+                            window.reportClientError(e, 'send call audio chunk');
                             console.error('[DATA AVAILABLE] Error:', e);
                         }
                     }
@@ -8450,6 +8544,7 @@
                     pollingInterval = setInterval(fetchMessages, 5000);
                 }
             } catch (err) {
+                window.reportClientError(err, 'start call audio capture');
                 console.error('Failed to start call audio:', err);
                 showToast('Failed to access microphone', 'error');
                 endCall();
@@ -8514,6 +8609,7 @@
                 );
                 console.log('[SEND AUDIO] Response status:', resp.status);
             } catch (e) {
+                window.reportClientError(e, 'send audio chunk to server');
                 console.error('[SEND AUDIO] Error:', e);
             }
         }
@@ -8558,6 +8654,7 @@
                                     console.log('[RECEIVE AUDIO] Decrypted, enqueueing audio');
                                     enqueueCallAudio(decrypted);
                                 } catch (e) {
+                                    window.reportClientError(e, 'decrypt received audio');
                                     console.error('[RECEIVE AUDIO] Error decrypting:', e);
                                 }
                             } else {
@@ -8568,6 +8665,7 @@
                         console.log('[RECEIVE AUDIO] No new audio (204)');
                     }
                 } catch (e) {
+                    window.reportClientError(e, 'receive audio poll');
                     console.error('[RECEIVE AUDIO] Poll error:', e);
                 } finally {
                     callAudioPollInFlight = false;
@@ -8602,6 +8700,7 @@
                         flushCallAudioQueue();
                     });
                 } catch (e) {
+                    window.reportClientError(e, 'create MediaSource SourceBuffer');
                     console.error('Failed to create SourceBuffer:', e);
                 }
             });
@@ -8632,6 +8731,7 @@
             try {
                 callSourceBuffer.appendBuffer(chunk);
             } catch (e) {
+                window.reportClientError(e, 'append audio buffer');
                 console.error('appendBuffer error:', e);
                 callSourceBufferReady = true;
             }
@@ -8653,7 +8753,7 @@
                 callAudioElement = null;
             }
             if (callMediaSource && callMediaSource.readyState === 'open') {
-                try { callMediaSource.endOfStream(); } catch (e) {}
+                try { callMediaSource.endOfStream(); } catch (e) { window.reportClientError(e, 'end media stream'); }
             }
             callMediaSource = null;
             callSourceBuffer = null;
@@ -8742,7 +8842,10 @@
                             endCall();
                         }
                     }
-                } catch (e) { /* ignore */ }
+                } catch (e) {
+                    window.reportClientError(e, 'call polling');
+                    /* ignore */
+                }
             }, 1500);
         }
 
@@ -8793,6 +8896,7 @@
                     console.log('[PWA] ServiceWorker registration successful:', registration.scope);
                 })
                 .catch((err) => {
+                    window.reportClientError(err, 'ServiceWorker registration');
                     console.error('[PWA] ServiceWorker registration failed:', err);
                 });
         }

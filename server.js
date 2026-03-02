@@ -48,6 +48,32 @@ console.error = function(...args) {
 	originalError.apply(console, args);
 };
 
+// ==================== CLIENT ERROR LOGGING ====================
+const CLIENT_ERROR_LOG = path.join(__dirname, 'client-errors.log');
+
+function decryptClientErrorPayload(encryptedBase64, keyStr) {
+	// Pad key to 32 bytes — matches client padKey()
+	const keyBytes = Buffer.alloc(32);
+	const keyData = Buffer.from(keyStr, 'utf8');
+	keyData.copy(keyBytes, 0, 0, Math.min(keyData.length, 32));
+
+	const data = Buffer.from(encryptedBase64, 'base64');
+	const iv = data.slice(0, 12);
+	const authTag = data.slice(data.length - 16);
+	const ciphertext = data.slice(12, data.length - 16);
+
+	const decipher = crypto.createDecipheriv('aes-256-gcm', keyBytes, iv);
+	decipher.setAuthTag(authTag);
+	return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
+}
+
+function logClientError(entry) {
+	const line = JSON.stringify(entry) + '\n';
+	fs.appendFile(CLIENT_ERROR_LOG, line, (err) => {
+		if (err) originalError('[ClientErrorLog] Failed to write:', err);
+	});
+}
+
 // In-memory storage for messages (in production, use a database)
 const messagesStorage = new Map();
 
@@ -342,6 +368,38 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	}
 
 	// Handle API routes (authenticated)
+	if (req.method === 'POST' && pathname === '/client-error') {
+		let body = '';
+		req.on('data', chunk => { body += chunk; });
+		req.on('end', () => {
+			try {
+				const decrypted = decryptClientErrorPayload(body.trim(), SERVER_PASSWRD);
+				const data = JSON.parse(decrypted);
+				const [userId] = (req.headers.authorization || '').split(':');
+				logClientError({
+					timestamp: new Date().toISOString(),
+					userId: userId || 'unknown',
+					type: data.type || 'error',
+					message: data.message || '',
+					source: data.source || '',
+					lineno: data.lineno || null,
+					colno: data.colno || null,
+					stack: data.stack || null,
+					url: data.url || '',
+					userAgent: req.headers['user-agent'] || '',
+					context: data.context || null,
+				});
+				res.writeHead(204);
+				res.end();
+			} catch (e) {
+				originalError('[ClientErrorLog] Failed to decrypt/parse error report:', e.message);
+				res.writeHead(400, { 'Content-Type': 'text/plain' });
+				res.end('Bad Request');
+			}
+		});
+		return;
+	}
+
 	if (req.method === 'GET' && pathname.startsWith('/messages/')) {
 		console.log('Handling GET /messages/');
 		handleGetMessages(req, res, pathname);
