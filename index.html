@@ -632,7 +632,14 @@
                 const savedUserId = localStorage.getItem("userId");
 
                 // User is already authenticated, verify with server
-                const hashBuffer = await crypto.subtle.digest("SHA-256", `${savedPrivateKey}:${Date.now() - (Date.now() % 5000)}`);
+                // Use server time offset (same logic as auth.js getEffectiveServerTime)
+                const _pageLoadTime = localStorage.getItem('pageLoadTime');
+                const _serverTime = localStorage.getItem('serverTime');
+                let _effectiveTime = (_pageLoadTime && _serverTime)
+                    ? parseInt(_serverTime, 10) + (Date.now() - parseInt(_pageLoadTime, 10))
+                    : Date.now();
+                const _timeBucket = _effectiveTime - (_effectiveTime % 5000);
+                const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${savedPrivateKey}:${_timeBucket}`));
                 const hashArray = Array.from(new Uint8Array(hashBuffer));
                 const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
