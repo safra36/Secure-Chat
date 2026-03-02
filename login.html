@@ -5423,12 +5423,12 @@
             closeAttachmentMenu();
 
             // Cleanup before opening new chat
-            cleanupAllBlobUrls();
             for (const [player, { audio }] of activeAudioPlayers.entries()) {
                 audio.pause();
                 audio.src = '';
             }
             activeAudioPlayers.clear();
+            cleanupAllBlobUrls();
 
             chatListContainer.style.display = 'none';
             chatContainer.style.display = 'flex';
@@ -5467,15 +5467,15 @@
             stopPolling();
             stopHeartbeat();
             
-            // Cleanup blob URLs to prevent memory leaks
-            cleanupAllBlobUrls();
-            
             // Cleanup audio players
             for (const [player, { audio }] of activeAudioPlayers.entries()) {
                 audio.pause();
                 audio.src = '';
             }
             activeAudioPlayers.clear();
+
+            // Cleanup blob URLs to prevent memory leaks
+            cleanupAllBlobUrls();
             
             chatContainer.style.display = 'none';
             chatListContainer.style.display = 'flex';
