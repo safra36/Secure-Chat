@@ -258,6 +258,7 @@ const encryption = new Encryption();
 
 // Create HTTP server
 const server = https.createServer(tlsOptions, (req, res) => {
+	try {
 	// Log all requests
 	console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
 
@@ -555,6 +556,13 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	console.log('404 Not Found');
 	res.writeHead(404, { 'Content-Type': 'text/plain' });
 	res.end('Not Found');
+	} catch (err) {
+		console.error(`[${new Date().toISOString()}] Unhandled request error for ${req.method} ${req.url}:`, err);
+		if (!res.headersSent) {
+			res.writeHead(500, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Internal server error', detail: err.message }));
+		}
+	}
 });
 
 function handleVerify(req) {
@@ -2470,6 +2478,10 @@ function getMimeType(filename) {
 
 	return mimeTypes[ext] || 'application/octet-stream';
 }
+
+server.on('error', (err) => {
+	console.error(`[${new Date().toISOString()}] Server error:`, err);
+});
 
 // Start server
 const PORT = process.env.PORT || 3000;

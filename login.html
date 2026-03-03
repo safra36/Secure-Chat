@@ -5746,11 +5746,8 @@
                     senderName = await decryptMessage(message.encryptedName, currentChat.encryptionKey);
                 } catch (err) {
                     window.reportClientError(err, 'decrypt sender name');
-                    // Failed to decrypt sender name - skip this message entirely
                     console.warn('Failed to decrypt sender name for message:', message.id);
-                    allMessages.push(message);
-                    renderedMessageIds.add(message.id);
-                    continue;
+                    senderName = 'Unknown';
                 }
 
                 const isOwn = senderName === userName;
