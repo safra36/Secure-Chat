@@ -5788,6 +5788,7 @@
                                     resolve(audio.duration);
                                 });
                                 audio.addEventListener('error', () => {
+                                    window.reportClientError(new Error(`Audio metadata load error: ${audio.error?.message || 'unknown'} (code ${audio.error?.code})`), 'audio duration load');
                                     resolve(0);
                                 });
                             });
@@ -5812,6 +5813,7 @@
                                         resolve(audio.duration);
                                     });
                                     audio.addEventListener('error', () => {
+                                        window.reportClientError(new Error(`Audio metadata load error: ${audio.error?.message || 'unknown'} (code ${audio.error?.code})`), 'audio duration load');
                                         resolve(0);
                                     });
                                 });
@@ -6292,7 +6294,10 @@
                 drawWaveform(0);
             });
 
-            audio.addEventListener('error', () => showToast('Error playing audio', 'error'));
+            audio.addEventListener('error', () => {
+                window.reportClientError(new Error(`Audio playback error: ${audio.error?.message || 'unknown'} (code ${audio.error?.code})`), 'audio playback');
+                showToast('Error playing audio', 'error');
+            });
 
             // Seek on click
             waveformWrapper.addEventListener('click', (e) => {
@@ -7377,6 +7382,7 @@
                                         resolve(audio.duration);
                                     });
                                     audio.addEventListener('error', () => {
+                                        window.reportClientError(new Error(`Audio metadata load error: ${audio.error?.message || 'unknown'} (code ${audio.error?.code})`), 'audio duration load');
                                         resolve(0);
                                     });
                                 });
