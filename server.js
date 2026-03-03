@@ -886,6 +886,12 @@ function handleUploadChunk(req, res, pathname) {
 
 	let bodyChunks = [];
 
+	req.on('error', (err) => {
+		console.error('Upload chunk request error:', err);
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Request error' }));
+	});
+
 	req.on('data', (chunk) => {
 		bodyChunks.push(chunk);
 	});
@@ -2486,4 +2492,12 @@ server.listen(PORT, () => {
 process.on('SIGINT', () => {
 	console.log('\nShutting down server...');
 	process.exit(0);
+});
+
+process.on('uncaughtException', (err) => {
+	console.error(`[${new Date().toISOString()}] Uncaught exception:`, err);
+});
+
+process.on('unhandledRejection', (reason) => {
+	console.error(`[${new Date().toISOString()}] Unhandled rejection:`, reason);
 });

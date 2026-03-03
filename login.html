@@ -4777,6 +4777,7 @@
         let currentChat = null;
         let isPolling = false;
         let pollingInterval = null;
+        let isFetchingMessages = false;
         let selectedImage = null;
 
         let mediaRecorder = null;
@@ -5670,7 +5671,8 @@
         }
 
         async function fetchMessages() {
-            if (!currentChat) return;
+            if (!currentChat || isFetchingMessages) return;
+            isFetchingMessages = true;
 
             // Use global polling cursor for this chat, not local rendered message IDs
             const pollingCursor = pollingCursors[currentChat.handle] || '';
@@ -5716,6 +5718,8 @@
             } catch (error) {
                 window.reportClientError(error, 'fetch messages');
                 console.error('Fetch error:', error);
+            } finally {
+                isFetchingMessages = false;
             }
         }
 
@@ -7080,7 +7084,6 @@
 
                 return new TextDecoder().decode(decrypted);
             } catch (error) {
-                window.reportClientError(error, 'decryptBinary');
                 throw error;
             }
         }
