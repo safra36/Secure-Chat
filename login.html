@@ -5781,7 +5781,7 @@
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
                             // Content is cached, decrypt and render immediately
                             const decryptedAudioBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
-                            const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                            const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm;codecs=opus' });
                             const audioUrl = createTrackedBlobUrl(audioBlob);
                             const audio = new Audio(audioUrl);
 
@@ -5806,7 +5806,7 @@
                                 // Cache and render immediately
                                 await cacheContentWithQuota(message.id, message.encryptedContent);
                                 const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
-                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm;codecs=opus' });
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
 
@@ -6331,7 +6331,17 @@
 
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream);
+                    let voiceMimeType = 'audio/webm;codecs=opus';
+                    if (!MediaRecorder.isTypeSupported(voiceMimeType)) {
+                        voiceMimeType = 'audio/webm';
+                        if (!MediaRecorder.isTypeSupported(voiceMimeType)) {
+                            voiceMimeType = 'audio/ogg;codecs=opus';
+                            if (!MediaRecorder.isTypeSupported(voiceMimeType)) {
+                                voiceMimeType = '';
+                            }
+                        }
+                    }
+                    mediaRecorder = new MediaRecorder(stream, voiceMimeType ? { mimeType: voiceMimeType } : {});
                     mediaRecorder.ondataavailable = event => {
                         audioChunks.push(event.data);
                     };
@@ -6339,7 +6349,7 @@
                         stopWaveformVisualization();
                         stream.getTracks().forEach(track => track.stop());
                         if (!isCancellingRecording) {
-                            const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
+                            const audioBlob = new Blob(audioChunks, { type: voiceMimeType || 'audio/webm' });
                             sendVoiceMessage(audioBlob);
                         }
                         audioChunks = [];
@@ -7376,7 +7386,7 @@
                             
                             if (contentType === 'voice') {
                                 const decryptedAudioBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
-                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm' });
+                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm;codecs=opus' });
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
                                 
