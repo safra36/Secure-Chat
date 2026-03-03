@@ -5449,6 +5449,7 @@
 
             // Cleanup before opening new chat
             for (const [player, { audio }] of activeAudioPlayers.entries()) {
+                audio._cleanup = true;
                 audio.pause();
                 audio.src = '';
             }
@@ -5494,6 +5495,7 @@
             
             // Cleanup audio players
             for (const [player, { audio }] of activeAudioPlayers.entries()) {
+                audio._cleanup = true;
                 audio.pause();
                 audio.src = '';
             }
@@ -6295,6 +6297,7 @@
             });
 
             audio.addEventListener('error', () => {
+                if (audio._cleanup) return;
                 window.reportClientError(new Error(`Audio playback error: ${audio.error?.message || 'unknown'} (code ${audio.error?.code})`), 'audio playback');
                 showToast('Error playing audio', 'error');
             });
