@@ -6302,14 +6302,16 @@
                 }
 
                 const messages = await response.json();
-                const newMessagesReceived = messages.length > 0;
+                // Snapshot known IDs before append so we can identify truly new messages
+                const knownIdsBefore = new Set(renderedMessageIds);
                 await appendMessages(messages);
 
-                // Update polling cursor immediately after receiving new messages (before next fetch)
-                if (newMessagesReceived && messages.length > 0) {
-                    const latestMessage = messages[messages.length - 1];
-                    pollingCursors[currentChat.handle] = latestMessage.id; // Use encrypted timestamp from server
-                    savePollingCursors(); // Persist to localStorage
+                // Only advance cursor for truly new messages (not reaction/edit re-sends)
+                const trulyNew = messages.filter(m => !knownIdsBefore.has(m.id));
+                if (trulyNew.length > 0) {
+                    const latestNew = trulyNew[trulyNew.length - 1];
+                    pollingCursors[currentChat.handle] = latestNew.id;
+                    savePollingCursors();
                 }
             } catch (error) {
                 window.reportClientError(error, 'fetch messages');
@@ -7218,7 +7220,7 @@
                         const cacheKey = `messages_${chat.handle}`;
                         const cachedMessagesJson = localStorage.getItem(cacheKey);
                         let existingMessages = [];
-                        
+
                         if (cachedMessagesJson) {
                             try {
                                 existingMessages = JSON.parse(cachedMessagesJson);
@@ -7228,7 +7230,11 @@
                             }
                         }
 
-                        // Merge messages
+                        // Identify truly new messages (not reaction/edit re-sends)
+                        const existingIds = new Set(existingMessages.map(m => m.id));
+                        const trulyNew = messages.filter(m => !existingIds.has(m.id));
+
+                        // Merge all messages (updates reactions/edits on existing + adds new)
                         const messageMap = new Map();
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => messageMap.set(msg.id, msg));
@@ -7239,23 +7245,20 @@
 
                         saveCachedMessages(chat.handle, mergedMessages);
 
-                        // Update polling cursor for this chat
-                        const latestMessage = messages[messages.length - 1];
-                        pollingCursors[chat.handle] = latestMessage.id;
-                        savePollingCursors(); // Persist to localStorage
+                        // Only notify and advance cursor for truly new messages
+                        if (trulyNew.length > 0) {
+                            const latestNew = trulyNew[trulyNew.length - 1];
+                            pollingCursors[chat.handle] = latestNew.id;
+                            savePollingCursors();
 
-                        // Update unread count
-                        chat.unreadCount = (chat.unreadCount || 0) + messages.length;
+                            chat.unreadCount = (chat.unreadCount || 0) + trulyNew.length;
+                            chat.lastMessage = 'New message...';
+                            chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();
 
-                        // Update last message
-                        const lastMessage = messages[messages.length - 1];
-                        chat.lastMessage = 'New message...';
-                        chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();
-
-                        // Play sound and update badge
-                        playNotificationSound();
-                        saveChats();
-                        renderChatList();
+                            playNotificationSound();
+                            saveChats();
+                            renderChatList();
+                        }
                     }
                 } catch (error) {
                     window.reportClientError(error, 'poll chat messages');
