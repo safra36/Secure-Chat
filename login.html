@@ -1155,14 +1155,12 @@
         }
 
         /* ── Message action toolbar ── */
-        .message-group {
-            position: relative;
-        }
-
+        /* Toolbar lives INSIDE .message (which already has position:relative),
+           so it never causes layout overflow of the full-width .message-group. */
         .message-actions {
             display: none;
             position: absolute;
-            top: 0;
+            bottom: 100%;
             gap: 2px;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
@@ -1171,21 +1169,19 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
             z-index: 10;
             white-space: nowrap;
+            margin-bottom: 2px;
         }
 
-        .message-group:hover .message-actions {
+        .message:hover .message-actions {
             display: flex;
         }
 
-        .message.own ~ .message-actions,
-        .message-group:has(.message.own) .message-actions {
-            right: 100%;
-            margin-right: 6px;
+        .message.own .message-actions {
+            right: 0;
         }
 
-        .message-group:has(.message.received) .message-actions {
-            left: 100%;
-            margin-left: 6px;
+        .message.received .message-actions {
+            left: 0;
         }
 
         .action-btn {
@@ -1210,6 +1206,16 @@
             flex-wrap: wrap;
             gap: 4px;
             margin-top: 4px;
+        }
+
+        /* Align reaction bar to same side as its bubble */
+        .message-group:has(.message.own) .reaction-bar {
+            align-self: flex-end;
+            justify-content: flex-end;
+        }
+
+        .message-group:has(.message.received) .reaction-bar {
+            align-self: flex-start;
         }
 
         .reaction-pill {
@@ -6528,9 +6534,9 @@
                     messageBubble.appendChild(contentHtml);
                 }
                 
-                messageElement.appendChild(messageBubble);
-
-                // Action toolbar (react, reply, edit for own)
+                // Action toolbar (react, reply, edit for own) — lives inside the bubble
+                // so position:absolute is relative to .message (already position:relative),
+                // never causing overflow of the full-width .message-group.
                 const actionsDiv = document.createElement('div');
                 actionsDiv.className = 'message-actions';
 
@@ -6576,7 +6582,8 @@
                     actionsDiv.appendChild(editBtn);
                 }
 
-                messageElement.appendChild(actionsDiv);
+                messageBubble.appendChild(actionsDiv);
+                messageElement.appendChild(messageBubble);
 
                 // Reaction bar (below bubble)
                 const reactionBar = document.createElement('div');
