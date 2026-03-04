@@ -7016,23 +7016,27 @@
 
         function saveCachedMessages(chatHandle, messages) {
             const cacheKey = `messages_${chatHandle}`;
+            const lastFetchKey = `lastFetch_${chatHandle}`;
 
-            try {
-                // Keep only latest MAX_CACHED_MESSAGES_PER_CHAT messages
-                const messagesToCache = messages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
-                localStorage.setItem(cacheKey, JSON.stringify(messagesToCache));
-
-                // Also save last fetch timestamp - use current time as approximation since we can't await in this context
-                const lastFetchKey = `lastFetch_${chatHandle}`;
-                if (messages.length > 0) {
-                    localStorage.setItem(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
-                }
-            } catch (error) {
-                window.reportClientError(error, 'save cached messages');
-                console.error('Error saving cached messages:', error);
-                // If storage quota exceeded, clear oldest chat cache
-                if (error.name === 'QuotaExceededError') {
-                    console.warn('localStorage quota exceeded, clearing old caches');
+            // FIFO eviction: keep only latest N, halving on quota error until it fits
+            let messagesToCache = messages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
+            while (messagesToCache.length > 0) {
+                try {
+                    localStorage.setItem(cacheKey, JSON.stringify(messagesToCache));
+                    if (messages.length > 0) {
+                        localStorage.setItem(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
+                    }
+                    return;
+                } catch (error) {
+                    if (error.name === 'QuotaExceededError' && messagesToCache.length > 10) {
+                        // Drop oldest half (FIFO)
+                        messagesToCache = messagesToCache.slice(Math.floor(messagesToCache.length / 2));
+                        console.warn(`localStorage quota exceeded, trimmed to ${messagesToCache.length} messages`);
+                    } else {
+                        window.reportClientError(error, 'save cached messages');
+                        console.error('Error saving cached messages:', error);
+                        return;
+                    }
                 }
             }
         }
