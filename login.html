@@ -1211,10 +1211,12 @@
         .message-group:has(.message.own) .reaction-bar {
             align-self: flex-end;
             justify-content: flex-end;
+            max-width: 80%;
         }
 
         .message-group:has(.message.received) .reaction-bar {
             align-self: flex-start;
+            max-width: 80%;
         }
 
         .reaction-pill {
@@ -6682,14 +6684,11 @@
                     }
                 }
 
-                // Merge: keep existing messages and add new ones, avoiding duplicates by ID
+                // Merge: existing cache (sorted) first, new appended — Map preserves insertion order
                 const messageMap = new Map();
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                 allMessages.forEach(msg => messageMap.set(msg.id, msg));
-
-                // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
-                const unsortedMessages = Array.from(messageMap.values());
-                const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
+                const mergedMessages = Array.from(messageMap.values());
 
                 // Update polling cursor to the latest message timestamp for this chat
                 if (mergedMessages.length > 0) {
@@ -7238,10 +7237,7 @@
                         const messageMap = new Map();
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => messageMap.set(msg.id, msg));
-
-                        // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
-                        const unsortedMessages = Array.from(messageMap.values());
-                        const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
+                        const mergedMessages = Array.from(messageMap.values());
 
                         saveCachedMessages(chat.handle, mergedMessages);
 
