@@ -1160,7 +1160,7 @@
         .message-actions {
             display: none;
             position: absolute;
-            bottom: 100%;
+            top: 6px;
             gap: 2px;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
@@ -1169,19 +1169,18 @@
             box-shadow: 0 2px 8px rgba(0,0,0,0.15);
             z-index: 10;
             white-space: nowrap;
-            transform: translateY(-2px);
         }
 
-        .message-group:hover .message-actions {
+        .message:hover .message-actions {
             display: flex;
         }
 
         .message.own .message-actions {
-            right: 0;
+            right: 6px;
         }
 
         .message.received .message-actions {
-            left: 0;
+            left: 6px;
         }
 
         .action-btn {
@@ -6307,10 +6306,8 @@
             
             for (const message of messages) {
                 if (renderedMessageIds.has(message.id)) {
-                    // Update reaction bar for already-rendered messages (reactions can change)
-                    if (message.reactions && Object.keys(message.reactions).length > 0) {
-                        updateReactionBar(message.id, message.reactions);
-                    }
+                    // Always sync reaction bar (handles additions and removals)
+                    updateReactionBar(message.id, message.reactions || {});
                     continue;
                 }
 
