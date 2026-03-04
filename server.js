@@ -407,6 +407,16 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	if (req.method === 'POST' && pathname.startsWith('/react/')) {
+		handleReaction(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/edit/')) {
+		handleEditMessage(req, res, pathname);
+		return;
+	}
+
 	if (req.method === 'POST' && pathname.startsWith('/send/')) {
 		console.log('Handling POST /send/');
 		handleSendMessage(req, res, pathname);
@@ -618,6 +628,27 @@ function handleVerify(req) {
 
 }
 
+// Serialize a message for the wire: hides senderUserId, computes isMine for reactions
+function serializeMessageForClient(message, requestingUserId) {
+	const transformedReactions = {};
+	for (const [encryptedEmoji, data] of Object.entries(message.reactions || {})) {
+		transformedReactions[encryptedEmoji] = {
+			count: data.userIds.length,
+			isMine: data.userIds.includes(requestingUserId)
+		};
+	}
+	return {
+		id: message.id,
+		encryptedName: message.encryptedName,
+		encryptedContent: message.encryptedContent,
+		encryptedTimestamp: message.encryptedTimestamp,
+		type: message.type,
+		replyTo: message.replyTo || null,
+		isEdited: (message.edits || []).length > 0,
+		reactions: transformedReactions
+	};
+}
+
 // Handle GET messages request
 function handleGetMessages(req, res, pathname) {
 	console.log(`GET messages request for path: ${pathname}`);
@@ -683,9 +714,13 @@ function handleGetMessages(req, res, pathname) {
 		}
 	});
 
-	// Send the (filtered and sorted) list
+	// Extract requesting userId for reaction isMine computation
+	const authorization = req.headers.authorization || '';
+	const [requestingUserId] = authorization.split(':');
+
+	// Send the (filtered and sorted) list, serialized for client
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify(filteredMessages));
+	res.end(JSON.stringify(filteredMessages.map(m => serializeMessageForClient(m, requestingUserId))));
 }
 
 // Generate UUID v4
@@ -740,15 +775,22 @@ function handleSendMessage(req, res, pathname) {
 				return;
 			}
 
+			// Extract userId for edit authorization
+			const authorization = req.headers.authorization || '';
+			const [senderUserId] = authorization.split(':');
+
 			// Create message object with encrypted timestamp as ID (secure and chronological)
 			const messageId = messageData.encryptedTimestamp;
 			const message = {
-				sender: messageData.sender,
 				encryptedName: messageData.encryptedName,
 				encryptedContent: messageData.content,
-				encryptedTimestamp: messageData.encryptedTimestamp, // Encrypted timestamp for security + ID
+				encryptedTimestamp: messageData.encryptedTimestamp,
 				type: messageData.type || 'text',
-				id: messageId, // Use encrypted timestamp as secure ID
+				id: messageId,
+				senderUserId,          // stored server-side only, never sent to clients
+				reactions: {},         // encryptedEmoji → { userIds: [], encryptedUserNames: {} }
+				edits: [],             // [{ encryptedEditTimestamp }]
+				replyTo: messageData.replyTo || null, // { messageId, encryptedPreview, encryptedSenderName }
 			};
 
 			// Store message
@@ -902,6 +944,147 @@ function handleHeartbeat(req, res, pathname) {
 			console.error('Error processing heartbeat:', error);
 			res.writeHead(400, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ error: 'Invalid heartbeat data' }));
+		}
+	});
+}
+
+// Handle reaction toggle
+// POST /react/{chatHandle}/{messageId}
+// Body: { encryptedEmoji, encryptedUserName }
+// encryptedEmoji uses deterministic IV so same emoji always produces same ciphertext for this message.
+// Server stores { userIds: [], encryptedUserNames: {} } per emoji and toggles on/off.
+function handleReaction(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+	const messageId = decodeURIComponent(parts.slice(3).join('/'));
+
+	const authorization = req.headers.authorization || '';
+	const [userId] = authorization.split(':');
+
+	if (!chatHandle || !messageId || !userId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Missing params' }));
+		return;
+	}
+
+	let body = '';
+	req.on('data', chunk => { body += chunk.toString(); });
+	req.on('end', () => {
+		try {
+			const { encryptedEmoji, encryptedUserName } = JSON.parse(body);
+			if (!encryptedEmoji) {
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Missing encryptedEmoji' }));
+				return;
+			}
+
+			const chatMessages = messagesStorage.get(chatHandle) || [];
+			const message = chatMessages.find(m => m.id === messageId);
+			if (!message) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Message not found' }));
+				return;
+			}
+
+			if (!message.reactions[encryptedEmoji]) {
+				message.reactions[encryptedEmoji] = { userIds: [], encryptedUserNames: {} };
+			}
+
+			const reactionData = message.reactions[encryptedEmoji];
+			const existingIdx = reactionData.userIds.indexOf(userId);
+
+			if (existingIdx !== -1) {
+				// Toggle off: remove
+				reactionData.userIds.splice(existingIdx, 1);
+				delete reactionData.encryptedUserNames[userId];
+				// Clean up empty reaction group
+				if (reactionData.userIds.length === 0) {
+					delete message.reactions[encryptedEmoji];
+				}
+			} else {
+				// Toggle on: add
+				reactionData.userIds.push(userId);
+				if (encryptedUserName) reactionData.encryptedUserNames[userId] = encryptedUserName;
+			}
+
+			// Return updated reactions for this message (isMine computed for requester)
+			const transformedReactions = {};
+			for (const [emoji, data] of Object.entries(message.reactions)) {
+				transformedReactions[emoji] = {
+					count: data.userIds.length,
+					isMine: data.userIds.includes(userId)
+				};
+			}
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ success: true, reactions: transformedReactions }));
+		} catch (e) {
+			console.error('Reaction error:', e);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid data' }));
+		}
+	});
+}
+
+// Handle message edit
+// POST /edit/{chatHandle}/{messageId}
+// Body: { encryptedContent, encryptedEditTimestamp }
+// Auth: only the original sender (senderUserId) may edit.
+function handleEditMessage(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+	const messageId = decodeURIComponent(parts.slice(3).join('/'));
+
+	const authorization = req.headers.authorization || '';
+	const [userId] = authorization.split(':');
+
+	if (!chatHandle || !messageId || !userId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Missing params' }));
+		return;
+	}
+
+	let body = '';
+	req.on('data', chunk => { body += chunk.toString(); });
+	req.on('end', () => {
+		try {
+			const { encryptedContent, encryptedEditTimestamp } = JSON.parse(body);
+
+			const chatMessages = messagesStorage.get(chatHandle) || [];
+			const message = chatMessages.find(m => m.id === messageId);
+
+			if (!message) {
+				res.writeHead(404, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Message not found' }));
+				return;
+			}
+
+			// Only the original sender may edit
+			if (message.senderUserId !== userId) {
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Forbidden' }));
+				return;
+			}
+
+			// Validate the edit timestamp (server-key encrypted)
+			try {
+				decryptTimestamp(encryptedEditTimestamp);
+			} catch (e) {
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid edit timestamp' }));
+				return;
+			}
+
+			// Apply edit
+			message.encryptedContent = encryptedContent;
+			message.edits.push({ encryptedEditTimestamp });
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ success: true }));
+		} catch (e) {
+			console.error('Edit error:', e);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid data' }));
 		}
 	});
 }
