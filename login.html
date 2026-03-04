@@ -1355,6 +1355,27 @@
             gap: 4px;
             box-shadow: 0 4px 16px rgba(0,0,0,0.25);
             z-index: 1000;
+            max-width: 90vw;
+            max-width: min(400px, 90vw);
+            overflow-x: auto;
+            overflow-y: hidden;
+            flex-wrap: nowrap;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) transparent;
+        }
+
+        .emoji-picker::-webkit-scrollbar {
+            height: 6px;
+        }
+
+        .emoji-picker::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .emoji-picker::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
         }
 
         .emoji-picker.visible {
