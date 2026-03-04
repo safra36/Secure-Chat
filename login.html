@@ -6827,23 +6827,25 @@
                 if (!prepend) messageOrder.push(message.id);
                 if (!prepend) lastReadId = message.id; // track latest seen for outgoing heartbeat
 
-                // Update last message in chat list
-                const tempDiv = document.createElement('div');
-                if (typeof contentHtml === 'string') {
-                    tempDiv.innerHTML = contentHtml;
-                } else {
-                    tempDiv.textContent = 'Voice message';
-                }
-                const textContent = tempDiv.textContent || tempDiv.innerText || 'Media message';
-                // Update last message time using decrypted and synced timestamp
-                try {
-                    const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
-                    const syncedTimestamp = serverTimestamp + timeOffset;
-                    const timestampStr = new Date(syncedTimestamp).toISOString();
-                    updateLastMessage(currentChat.handle, textContent, timestampStr);
-                } catch (err) {
-                    window.reportClientError(err, 'update last message timestamp');
-                    updateLastMessage(currentChat.handle, textContent, new Date().toISOString());
+                // Update last message in chat list (skip for history prepend to avoid overwriting with old timestamps)
+                if (!prepend) {
+                    const tempDiv = document.createElement('div');
+                    if (typeof contentHtml === 'string') {
+                        tempDiv.innerHTML = contentHtml;
+                    } else {
+                        tempDiv.textContent = 'Voice message';
+                    }
+                    const textContent = tempDiv.textContent || tempDiv.innerText || 'Media message';
+                    // Update last message time using decrypted and synced timestamp
+                    try {
+                        const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
+                        const syncedTimestamp = serverTimestamp + timeOffset;
+                        const timestampStr = new Date(syncedTimestamp).toISOString();
+                        updateLastMessage(currentChat.handle, textContent, timestampStr);
+                    } catch (err) {
+                        window.reportClientError(err, 'update last message timestamp');
+                        // Skip update on decryption failure to avoid corrupting lastMessageTime
+                    }
                 }
                 
                 // Add to all messages for caching (skip for history prepend)
