@@ -6688,7 +6688,10 @@
                 const messageMap = new Map();
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                 allMessages.forEach(msg => messageMap.set(msg.id, msg));
-                const mergedMessages = Array.from(messageMap.values());
+
+                // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
+                const unsortedMessages = Array.from(messageMap.values());
+                const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
 
                 // Update polling cursor to the latest message timestamp for this chat
                 if (mergedMessages.length > 0) {
@@ -7237,7 +7240,10 @@
                         const messageMap = new Map();
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => messageMap.set(msg.id, msg));
-                        const mergedMessages = Array.from(messageMap.values());
+
+                        // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
+                        const unsortedMessages = Array.from(messageMap.values());
+                        const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
 
                         saveCachedMessages(chat.handle, mergedMessages);
 
