@@ -7340,6 +7340,17 @@
 
                     // Patch in-place — no DOM reset (avoids losing client-cached messages)
                     patchRenderedMessage(messageId, message, true, encryptedContent);
+
+                    // Update sender's own cache so re-opening the chat shows the edited version
+                    const cacheKey = `messages_${currentChat.handle}`;
+                    try {
+                        const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                        const idx = cached.findIndex(m => m.id === messageId);
+                        if (idx !== -1) {
+                            cached[idx] = { ...cached[idx], encryptedContent, isEdited: true };
+                            setItemWithEviction(cacheKey, JSON.stringify(cached));
+                        }
+                    } catch (e) { /* cache update is best-effort */ }
                 } catch (error) {
                     window.reportClientError(error, 'edit message');
                     showToast('Failed to edit message', 'error');
