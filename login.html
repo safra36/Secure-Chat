@@ -5158,6 +5158,7 @@
         let replyContext = null;   // { messageId, encryptedPreview, encryptedSenderName }
         let emojiPickerTarget = null; // messageId for pending emoji pick
         const emojiDecryptCache = new Map(); // encryptedEmoji → plaintext emoji
+        const renderedEditedState = new Map(); // messageId → isEdited bool
 
         // Authentication failure tracking
         let failedAuthAttempts = 0;
@@ -5817,6 +5818,7 @@
             clearReplyContext();
             hideEmojiPicker();
             emojiDecryptCache.clear();
+            renderedEditedState.clear();
 
             // Clear unread count when opening the chat
             currentChat.unreadCount = 0;
@@ -6146,6 +6148,26 @@
             }
         }
 
+        function patchRenderedMessage(messageId, plaintext, isEdited) {
+            const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(messageId)}"]`);
+            if (!msgGroup) return;
+            const contentEl = msgGroup.querySelector('.message-content');
+            if (contentEl && plaintext !== undefined) {
+                contentEl.innerHTML = escapeHtml(plaintext);
+            }
+            if (isEdited) {
+                const header = msgGroup.querySelector('.message-header');
+                if (header && !header.querySelector('.edited-badge')) {
+                    const badge = document.createElement('span');
+                    badge.className = 'edited-badge';
+                    badge.textContent = 'edited';
+                    const timeSpan = header.querySelector('.message-time');
+                    if (timeSpan) timeSpan.after(badge);
+                }
+            }
+            renderedEditedState.set(messageId, isEdited);
+        }
+
         async function updateReactionBar(messageId, reactions) {
             const bar = document.querySelector(`.reaction-bar[data-message-id="${CSS.escape(messageId)}"]`);
             if (!bar) return;
@@ -6308,6 +6330,12 @@
                 if (renderedMessageIds.has(message.id)) {
                     // Always sync reaction bar (handles additions and removals)
                     updateReactionBar(message.id, message.reactions || {});
+                    // Sync edited content if edit state changed
+                    if (message.isEdited && !renderedEditedState.get(message.id)) {
+                        decryptMessage(message.encryptedContent, currentChat.encryptionKey)
+                            .then(plaintext => patchRenderedMessage(message.id, plaintext, true))
+                            .catch(() => {});
+                    }
                     continue;
                 }
 
@@ -6594,6 +6622,7 @@
 
                 messagesContainer.appendChild(messageElement);
                 renderedMessageIds.add(message.id);
+                renderedEditedState.set(message.id, message.isEdited || false);
                 messageOrder.push(message.id);
                 lastReadId = message.id; // track latest seen for outgoing heartbeat
 
@@ -7302,12 +7331,8 @@
                         throw new Error(`Edit failed: ${editResponse.status}`);
                     }
 
-                    // Force full refresh so edited content appears
-                    renderedMessageIds.clear();
-                    messageOrder.length = 0;
-                    messagesContainer.innerHTML = '';
-                    emojiDecryptCache.clear();
-                    fetchMessages();
+                    // Patch in-place — no DOM reset (avoids losing client-cached messages)
+                    patchRenderedMessage(messageId, message, true);
                 } catch (error) {
                     window.reportClientError(error, 'edit message');
                     showToast('Failed to edit message', 'error');
