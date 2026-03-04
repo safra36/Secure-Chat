@@ -816,7 +816,7 @@ function handleHeartbeat(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const heartbeatData = JSON.parse(body);
-			const { encryptedUserName } = heartbeatData;
+			const { encryptedUserName, encryptedTyping, lastReadId } = heartbeatData;
 
 			const now = Date.now();
 
@@ -835,10 +835,26 @@ function handleHeartbeat(req, res, pathname) {
 				}
 			}
 
+			// Decrypt encryptedTyping (server-key encrypted by client) to get bool for expiry logic
+			let isTypingBool = false;
+			if (encryptedTyping) {
+				try {
+					const typingVal = decryptTimestamp(encryptedTyping);
+					isTypingBool = typingVal === 1;
+				} catch (e) {
+					// Invalid or missing — treat as not typing
+				}
+			}
+
+			const prevUser = chatUsers.get(userId);
+
 			// Update the current user's heartbeat - store encrypted user name
 			chatUsers.set(userId, {
 				lastHeartbeat: now,
-				encryptedUserName: encryptedUserName || 'Unknown'
+				encryptedUserName: encryptedUserName || 'Unknown',
+				isTyping: isTypingBool,
+				lastTypingTime: isTypingBool ? now : (prevUser?.lastTypingTime || 0),
+				lastReadId: lastReadId || prevUser?.lastReadId || ''
 			});
 
 			console.log(`Heartbeat from ${userId} (${encryptedUserName}) in chat ${chatHandle}`);
@@ -846,27 +862,41 @@ function handleHeartbeat(req, res, pathname) {
 			// Build online users header
 			// Format: encryptedUserName|status,encryptedUserName|status,...
 			const onlineUsersArray = Array.from(chatUsers.entries()).map(([uid, userData]) => {
-				let status = 'online';
 				const timeSinceHeartbeat = now - userData.lastHeartbeat;
+				const isOnline = timeSinceHeartbeat <= OFFLINE_THRESHOLD;
+				// Typing state expires after 5s of no typing signal
+				const typingActive = userData.isTyping && (now - (userData.lastTypingTime || 0)) < 5000;
 
-				if (timeSinceHeartbeat > OFFLINE_THRESHOLD) {
-					status = 'offline_recent';
-				}
+				// Encrypt status and typing flag with server key so they are opaque in transit
+				const encStatus = encryptTimestamp(isOnline ? 1 : 0);
+				const encTyping = encryptTimestamp(typingActive ? 1 : 0);
 
-				return `${userData.encryptedUserName}|${status}`;
+				return `${userData.encryptedUserName}|${encStatus}|${encTyping}`;
 			});
 
 			const onlineUsersHeader = onlineUsersArray.join(',');
 
 			console.log(`Online users in ${chatHandle}: ${onlineUsersHeader}`);
 
-			// Encode header to handle Persian/non-ASCII characters
-			const encodedOnlineUsersHeader = encodeURIComponent(onlineUsersHeader);
+			// Build read receipts for all users except the requesting user
+			// Format: encryptedUserName|lastReadId (both already encrypted)
+			const readReceiptsArray = Array.from(chatUsers.entries())
+				.filter(([uid, userData]) => uid !== userId && userData.lastReadId)
+				.map(([uid, userData]) => `${userData.encryptedUserName}|${userData.lastReadId}`);
 
-			res.writeHead(200, {
+			// Encode headers to handle non-ASCII characters
+			const encodedOnlineUsersHeader = encodeURIComponent(onlineUsersHeader);
+			const encodedReadReceiptsHeader = encodeURIComponent(readReceiptsArray.join(','));
+
+			const responseHeaders = {
 				'Content-Type': 'application/json',
 				'X-Online-Users': encodedOnlineUsersHeader
-			});
+			};
+			if (readReceiptsArray.length > 0) {
+				responseHeaders['X-Read-Receipts'] = encodedReadReceiptsHeader;
+			}
+
+			res.writeHead(200, responseHeaders);
 			res.end(JSON.stringify({ success: true }));
 		} catch (error) {
 			console.error('Error processing heartbeat:', error);

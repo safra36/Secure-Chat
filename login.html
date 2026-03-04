@@ -1108,6 +1108,52 @@
             background-color: var(--text-muted);
         }
 
+        .typing-indicator {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 16px 4px;
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+        }
+
+        .typing-indicator.visible {
+            display: flex;
+        }
+
+        .typing-dots {
+            display: flex;
+            gap: 3px;
+            align-items: center;
+        }
+
+        .typing-dots span {
+            width: 5px;
+            height: 5px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            animation: typingBounce 1.2s infinite ease-in-out;
+        }
+
+        .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+        @keyframes typingBounce {
+            0%, 60%, 100% { transform: translateY(0); }
+            30% { transform: translateY(-4px); }
+        }
+
+        .read-status {
+            font-size: 11px;
+            margin-left: 4px;
+            opacity: 0.7;
+        }
+
+        .read-status.read {
+            opacity: 1;
+            color: #60a5fa;
+        }
+
         .message-time {
             font-size: var(--font-size-xs);
             font-weight: 500;
@@ -3829,6 +3875,11 @@
 
         <div id="messages" class="messages"></div>
 
+        <div id="typing-indicator" class="typing-indicator">
+            <div class="typing-dots"><span></span><span></span><span></span></div>
+            <span id="typing-text"></span>
+        </div>
+
         <!-- Scroll to Bottom Button -->
         <button id="scroll-to-bottom-btn" class="scroll-to-bottom-btn" style="display: none;" title="Scroll to bottom">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width: 18px; height: 18px;">
@@ -4861,6 +4912,14 @@
         let connectionStatus = 'disconnected'; // 'connected', 'connecting', 'disconnected'
         const messageDeliveryStatus = new Map(); // Store delivery status by message ID
 
+        // Typing indicator state
+        let isTyping = false;
+        let typingTimeout = null;
+
+        // Read receipt state
+        let lastReadId = ''; // encrypted timestamp of last rendered message (for outgoing heartbeat)
+        const messageOrder = []; // all rendered message IDs in chronological order
+
         // Authentication failure tracking
         let failedAuthAttempts = 0;
         const AUTH_FAILURE_THRESHOLD = 3; // Redirect to login after 3 consecutive 401s
@@ -5485,6 +5544,12 @@
             renderedMessageIds.clear();
             messagesContainer.innerHTML = '';
             messageDeliveryStatus.clear();
+            messageOrder.length = 0;
+            lastReadId = '';
+            isTyping = false;
+            clearTimeout(typingTimeout);
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingIndicator) typingIndicator.classList.remove('visible');
 
             // Clear unread count when opening the chat
             currentChat.unreadCount = 0;
@@ -5558,10 +5623,13 @@
                 // Encrypt the userName before sending
                 const encryptedUserName = await encryptMessage(userName, currentChat.encryptionKey);
 
+                // Encrypt typing state with server key so it's opaque in transit
+                const encryptedTyping = await encryptTimestampWithServerKey(isTyping ? 1 : 0);
+
                 const response = await authenticatedFetch(`/heartbeat/${currentChat.handle}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ encryptedUserName: encryptedUserName })
+                    body: JSON.stringify({ encryptedUserName, encryptedTyping, lastReadId })
                 });
 
                 // Check for authentication failure
@@ -5583,10 +5651,16 @@
                     throw new Error(`Heartbeat failed: ${response.status}`);
                 }
 
-                // Parse X-Online-Users header
+                // Parse X-Online-Users header (includes typing flags)
                 const onlineUsersHeader = response.headers.get('X-Online-Users');
                 if (onlineUsersHeader) {
                     parseOnlineUsers(onlineUsersHeader);
+                }
+
+                // Parse X-Read-Receipts header (encrypted names + encrypted lastReadIds from other users)
+                const readReceiptsHeader = response.headers.get('X-Read-Receipts');
+                if (readReceiptsHeader) {
+                    updateReadReceipts(readReceiptsHeader);
                 }
 
                 connectionStatus = 'connected';
@@ -5607,27 +5681,45 @@
             // Decode header value since it was URL-encoded on the server for non-ASCII characters
             const decodedHeaderValue = decodeURIComponent(headerValue);
 
-            // Parse header: encryptedUserName|status,encryptedUserName|status,...
+            // Parse header: encryptedUserName|encryptedStatus|encryptedTyping,...
+            // All three fields are encrypted — name with chat key, status/typing with server key
             const users = await Promise.all(decodedHeaderValue.split(',').map(async (userStr) => {
-                const [encryptedUserName, status] = userStr.split('|');
+                const [encryptedUserName, encryptedStatus, encryptedTyping] = userStr.split('|');
+                let decryptedName = null;
+                let isOnline = false;
+                let isTypingActive = false;
                 try {
-                    // Decrypt the user name using the chat's encryption key
-                    const userName = await decryptMessage(encryptedUserName, currentChat.encryptionKey);
-                    return { userName, status };
+                    decryptedName = await decryptMessage(encryptedUserName, currentChat.encryptionKey);
                 } catch (err) {
                     window.reportClientError(err, 'decrypt heartbeat username');
-                    // If decryption fails, return the encrypted value as fallback
                     console.warn('Failed to decrypt user name:', err);
-                    return { userName: encryptedUserName, status };
                 }
+                try {
+                    const statusVal = await decryptServerTimestamp(encryptedStatus);
+                    isOnline = statusVal === 1;
+                } catch (err) {
+                    window.reportClientError(err, 'decrypt heartbeat status');
+                }
+                try {
+                    const typingVal = await decryptServerTimestamp(encryptedTyping);
+                    isTypingActive = typingVal === 1;
+                } catch (err) {
+                    window.reportClientError(err, 'decrypt heartbeat typing');
+                }
+                return { userName: decryptedName, status: isOnline ? 'online' : 'offline_recent', isTyping: isTypingActive };
             }));
 
             console.log('Online users:', users);
-            // Store for future use and update indicators
             currentChat.onlineUsers = users;
-            
+
             // Update message status indicators without re-rendering
             updateMessageStatusIndicators(users);
+
+            // Update typing indicator: show names of others who are typing
+            const typingUsers = users
+                .filter(u => u.isTyping && u.userName && u.userName !== userName)
+                .map(u => u.userName);
+            updateTypingIndicator(typingUsers);
         }
 
         function updateConnectionStatus() {
@@ -5661,13 +5753,64 @@
                 if (status) {
                     // Remove existing status classes
                     indicator.classList.remove('online', 'offline');
-                    
+
                     // Add appropriate class based on status
                     if (status === 'online') {
                         indicator.classList.add('online');
                     } else {
                         indicator.classList.add('offline');
                     }
+                }
+            });
+        }
+
+        function updateTypingIndicator(typingUsers) {
+            const indicator = document.getElementById('typing-indicator');
+            const typingText = document.getElementById('typing-text');
+            if (!indicator || !typingText) return;
+
+            if (typingUsers.length === 0) {
+                indicator.classList.remove('visible');
+                return;
+            }
+
+            const names = typingUsers.join(', ');
+            const suffix = typingUsers.length === 1 ? ' is typing' : ' are typing';
+            typingText.textContent = names + suffix;
+            indicator.classList.add('visible');
+        }
+
+        // Read receipts: X-Read-Receipts = "encryptedName|lastReadId,..."
+        // Both fields are encrypted (name with chat key, lastReadId is the server-encrypted timestamp).
+        // We don't need to decrypt names here — we only need to check if any remote user's lastReadId
+        // matches a position in messageOrder to mark own messages as read.
+        function updateReadReceipts(headerValue) {
+            if (!headerValue || !currentChat) return;
+
+            const decoded = decodeURIComponent(headerValue);
+            const remoteReadIds = decoded.split(',').map(entry => {
+                const pipeIdx = entry.lastIndexOf('|');
+                return pipeIdx !== -1 ? entry.slice(pipeIdx + 1) : '';
+            }).filter(Boolean);
+
+            if (remoteReadIds.length === 0) return;
+
+            // Find the furthest read position across all remote users
+            let furthestReadIdx = -1;
+            for (const remoteId of remoteReadIds) {
+                const idx = messageOrder.indexOf(remoteId);
+                if (idx > furthestReadIdx) furthestReadIdx = idx;
+            }
+
+            if (furthestReadIdx === -1) return;
+
+            // Mark all own messages up to (and including) that position as read
+            const readSet = new Set(messageOrder.slice(0, furthestReadIdx + 1));
+            document.querySelectorAll('.read-status').forEach(span => {
+                const msgId = span.getAttribute('data-msg-id');
+                if (msgId && readSet.has(msgId)) {
+                    span.textContent = '✓✓';
+                    span.classList.add('read');
                 }
             });
         }
@@ -5910,13 +6053,20 @@
                     messageBubble.appendChild(headerDiv);
                 }
                 
-                // Add time
+                // Add time (and read-status for own messages)
                 const timeHeaderDiv = document.createElement('div');
                 timeHeaderDiv.className = 'message-header';
                 const timeSpan = document.createElement('span');
                 timeSpan.className = 'message-time';
                 timeSpan.textContent = timeStr;
                 timeHeaderDiv.appendChild(timeSpan);
+                if (isOwn) {
+                    const readStatus = document.createElement('span');
+                    readStatus.className = 'read-status';
+                    readStatus.setAttribute('data-msg-id', message.id);
+                    readStatus.textContent = '✓';
+                    timeHeaderDiv.appendChild(readStatus);
+                }
                 messageBubble.appendChild(timeHeaderDiv);
                 
                 // Add content (voice player or other content)
@@ -5934,6 +6084,8 @@
 
                 messagesContainer.appendChild(messageElement);
                 renderedMessageIds.add(message.id);
+                messageOrder.push(message.id);
+                lastReadId = message.id; // track latest seen for outgoing heartbeat
 
                 // Update last message in chat list
                 const tempDiv = document.createElement('div');
@@ -6024,6 +6176,10 @@
             const hasText = messageInput.value.trim().length > 0;
             const hasImage = selectedImage !== null;
             sendBtn.disabled = !hasText && !hasImage;
+            // Update typing state (piggybacked on next heartbeat)
+            isTyping = hasText;
+            clearTimeout(typingTimeout);
+            if (isTyping) typingTimeout = setTimeout(() => { isTyping = false; }, 4000);
         }
 
         function handleImageSelect(e) {
