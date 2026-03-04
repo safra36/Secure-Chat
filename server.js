@@ -1259,7 +1259,9 @@ function handleUploadComplete(req, res, pathname) {
 				encryptedContent: null, // Content is stored separately, not in message
 				encryptedTimestamp: encryptedTimestamp, // Encrypted timestamp for consistency
 				type: messageType || 'file',
-				id: encryptedTimestamp // Use encrypted timestamp as ID
+				id: encryptedTimestamp, // Use encrypted timestamp as ID
+				reactions: {},
+				edits: []
 			};
 
 			// Store message
