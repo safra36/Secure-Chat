@@ -4390,18 +4390,35 @@
             return count;
         }
         
-        // Helper to evict oldest message cache
+        // Evict largest message cache to free space
         function evictOldestMessageCache() {
-            const messageKeys = [];
+            let largestKey = null, largestSize = 0;
             for (let key in localStorage) {
                 if (key.startsWith('messages_')) {
-                    messageKeys.push(key);
+                    const size = (localStorage.getItem(key) || '').length;
+                    if (size > largestSize) { largestSize = size; largestKey = key; }
                 }
             }
-            if (messageKeys.length > 0) {
-                localStorage.removeItem(messageKeys[0]);
-                console.log(`Evicted message cache: ${messageKeys[0]}`);
+            if (largestKey) {
+                localStorage.removeItem(largestKey);
+                console.warn(`Evicted message cache: ${largestKey} (${largestSize} chars)`);
                 return true;
+            }
+            return false;
+        }
+
+        // Retry a localStorage setItem, evicting message caches on QuotaExceededError
+        function setItemWithEviction(key, value) {
+            for (let i = 0; i < 5; i++) {
+                try {
+                    localStorage.setItem(key, value);
+                    return true;
+                } catch (e) {
+                    if (e.name === 'QuotaExceededError' && evictOldestMessageCache()) {
+                        continue;
+                    }
+                    throw e;
+                }
             }
             return false;
         }
@@ -4849,7 +4866,7 @@
         const AUTH_FAILURE_THRESHOLD = 3; // Redirect to login after 3 consecutive 401s
 
         // Message caching with localStorage
-        const MAX_CACHED_MESSAGES_PER_CHAT = 1000;
+        const MAX_CACHED_MESSAGES_PER_CHAT = 50;
         let lastFetchTime = 0; // Track last successful fetch timestamp for incremental updates
 
         // Global polling cursors - maps chatHandle to last polled message timestamp
@@ -4864,7 +4881,7 @@
         // Function to persist polling cursors to localStorage
         function savePollingCursors() {
             try {
-                localStorage.setItem('pollingCursors', JSON.stringify(pollingCursors));
+                setItemWithEviction('pollingCursors', JSON.stringify(pollingCursors));
             } catch (error) {
                 window.reportClientError(error, 'save polling cursors');
                 console.warn('Failed to save polling cursors:', error);
@@ -6956,7 +6973,12 @@
 
 
         function saveChats() {
-            localStorage.setItem('chats', JSON.stringify(chats));
+            try {
+                setItemWithEviction('chats', JSON.stringify(chats));
+            } catch (error) {
+                window.reportClientError(error, 'save chats');
+                console.error('Failed to save chats:', error);
+            }
         }
 
         // Logout function - clears credentials and redirects to login
@@ -7018,20 +7040,19 @@
             const cacheKey = `messages_${chatHandle}`;
             const lastFetchKey = `lastFetch_${chatHandle}`;
 
-            // FIFO eviction: keep only latest N, halving on quota error until it fits
+            // FIFO: keep only latest N messages, shrink if quota still exceeded
             let messagesToCache = messages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
             while (messagesToCache.length > 0) {
                 try {
-                    localStorage.setItem(cacheKey, JSON.stringify(messagesToCache));
+                    setItemWithEviction(cacheKey, JSON.stringify(messagesToCache));
                     if (messages.length > 0) {
-                        localStorage.setItem(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
+                        setItemWithEviction(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
                     }
                     return;
                 } catch (error) {
                     if (error.name === 'QuotaExceededError' && messagesToCache.length > 10) {
-                        // Drop oldest half (FIFO)
                         messagesToCache = messagesToCache.slice(Math.floor(messagesToCache.length / 2));
-                        console.warn(`localStorage quota exceeded, trimmed to ${messagesToCache.length} messages`);
+                        console.warn(`Trimmed message cache to ${messagesToCache.length}`);
                     } else {
                         window.reportClientError(error, 'save cached messages');
                         console.error('Error saving cached messages:', error);
