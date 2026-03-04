@@ -1226,8 +1226,8 @@
         /* Align reaction bar to same side as its bubble */
         .message-group:has(.message.own) .reaction-bar {
             align-self: flex-end;
-            max-width: calc(80% - 20px);
-            margin-right: 12px;
+            max-width: calc(80% - 16px);
+            margin-right: 4px;
         }
 
         .message-group:has(.message.received) .reaction-bar {
@@ -6277,8 +6277,31 @@
             emojiPickerTarget = messageId;
             const picker = document.getElementById('emoji-picker');
             const rect = anchorEl.getBoundingClientRect();
+            
+            // Show picker temporarily to get its dimensions
+            picker.style.visibility = 'hidden';
+            picker.classList.add('visible');
+            const pickerWidth = picker.offsetWidth;
+            picker.classList.remove('visible');
+            picker.style.visibility = '';
+            
+            // Calculate position
+            let left = rect.left;
+            const padding = 8; // Screen edge padding
+            
+            // Check if picker would go off the right edge of the screen
+            if (left + pickerWidth > window.innerWidth - padding) {
+                // Align right edge of picker with right edge of anchor element
+                left = rect.right - pickerWidth;
+            }
+            
+            // Ensure we don't go off the left edge either
+            if (left < padding) {
+                left = padding;
+            }
+            
             picker.style.top = (rect.top - 60) + 'px';
-            picker.style.left = rect.left + 'px';
+            picker.style.left = left + 'px';
             picker.classList.add('visible');
         }
 
