@@ -685,8 +685,8 @@ function handleGetMessages(req, res, pathname) {
 			filteredMessages = allMessages.filter((msg) => {
 				try {
 					const msgTimestamp = decryptTimestamp(msg.encryptedTimestamp);
-					// Always include messages with reactions so reaction updates propagate
-					return msgTimestamp > afterTimestamp || Object.keys(msg.reactions || {}).length > 0;
+					// Always include messages with reactions or edits so updates propagate
+					return msgTimestamp > afterTimestamp || Object.keys(msg.reactions || {}).length > 0 || (msg.edits || []).length > 0;
 				} catch (err) {
 					console.warn('Skipping message with invalid timestamp:', err);
 					return false;

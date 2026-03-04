@@ -6148,12 +6148,15 @@
             }
         }
 
-        function patchRenderedMessage(messageId, plaintext, isEdited) {
+        function patchRenderedMessage(messageId, plaintext, isEdited, newEncryptedContent) {
             const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(messageId)}"]`);
             if (!msgGroup) return;
             const contentEl = msgGroup.querySelector('.message-content');
             if (contentEl && plaintext !== undefined) {
                 contentEl.innerHTML = escapeHtml(plaintext);
+            }
+            if (newEncryptedContent) {
+                msgGroup.dataset.encryptedContent = newEncryptedContent;
             }
             if (isEdited) {
                 const header = msgGroup.querySelector('.message-header');
@@ -6333,7 +6336,7 @@
                     // Sync edited content if edit state changed
                     if (message.isEdited && !renderedEditedState.get(message.id)) {
                         decryptMessage(message.encryptedContent, currentChat.encryptionKey)
-                            .then(plaintext => patchRenderedMessage(message.id, plaintext, true))
+                            .then(plaintext => patchRenderedMessage(message.id, plaintext, true, message.encryptedContent))
                             .catch(() => {});
                     }
                     continue;
@@ -6344,6 +6347,7 @@
                 const messageElement = document.createElement('div');
                 messageElement.className = 'message-group';
                 messageElement.dataset.messageId = message.id;
+                messageElement.dataset.encryptedContent = message.encryptedContent;
 
                 let senderName;
                 try {
@@ -6600,7 +6604,8 @@
                     editBtn.textContent = '✏';
                     editBtn.addEventListener('click', async () => {
                         try {
-                            const decrypted = await decryptMessage(message.encryptedContent, currentChat.encryptionKey);
+                            const enc = messageElement.dataset.encryptedContent;
+                            const decrypted = await decryptMessage(enc, currentChat.encryptionKey);
                             startEditing(message.id, decrypted);
                         } catch (e) { window.reportClientError(e, 'start editing'); }
                     });
@@ -7332,7 +7337,7 @@
                     }
 
                     // Patch in-place — no DOM reset (avoids losing client-cached messages)
-                    patchRenderedMessage(messageId, message, true);
+                    patchRenderedMessage(messageId, message, true, encryptedContent);
                 } catch (error) {
                     window.reportClientError(error, 'edit message');
                     showToast('Failed to edit message', 'error');
