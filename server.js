@@ -127,6 +127,12 @@ const OFFLINE_THRESHOLD = 15000; // 15 seconds before grace period
 // Upload session timeout (5 minutes)
 const UPLOAD_SESSION_TIMEOUT = 5 * 60 * 1000;
 
+// Persistent message storage on disk
+const DATA_DIR = path.join(__dirname, 'data');
+const MAX_DISK_BYTES = 1024 * 1024 * 1024; // 1 GB
+const EVICT_BATCH = 200;
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
 // Cleanup old upload sessions periodically
 setInterval(() => {
 	const now = Date.now();
@@ -407,6 +413,11 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	if (req.method === 'GET' && pathname.startsWith('/history/')) {
+		handleGetHistory(req, res, pathname);
+		return;
+	}
+
 	if (req.method === 'POST' && pathname.startsWith('/react/')) {
 		handleReaction(req, res, pathname);
 		return;
@@ -574,6 +585,98 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		}
 	}
 });
+
+// ==================== DISK PERSISTENCE ====================
+
+function chatToFilePath(chatHandle) {
+	const hash = crypto.createHash('sha256').update(chatHandle).digest('hex');
+	return path.join(DATA_DIR, hash + '.ndjson');
+}
+
+function appendMessageToDisk(chatHandle, message, content, isCompressed) {
+	const entry = { h: chatHandle, msg: message, content: content || null, isCompressed: isCompressed || false };
+	fs.appendFileSync(chatToFilePath(chatHandle), JSON.stringify(entry) + '\n');
+	evictOldestIfOverQuota();
+}
+
+function getTotalDataSizeBytes() {
+	let total = 0;
+	try {
+		for (const f of fs.readdirSync(DATA_DIR)) {
+			try { total += fs.statSync(path.join(DATA_DIR, f)).size; } catch (e) {}
+		}
+	} catch (e) {}
+	return total;
+}
+
+function evictOldestIfOverQuota() {
+	if (getTotalDataSizeBytes() <= MAX_DISK_BYTES) return;
+
+	let oldestFile = null, oldestTs = Infinity;
+	for (const f of fs.readdirSync(DATA_DIR)) {
+		if (!f.endsWith('.ndjson')) continue;
+		const fp = path.join(DATA_DIR, f);
+		try {
+			const fd = fs.openSync(fp, 'r');
+			const buf = Buffer.alloc(8192);
+			const n = fs.readSync(fd, buf, 0, 8192, 0);
+			fs.closeSync(fd);
+			const firstLine = buf.slice(0, n).toString('utf8').split('\n')[0];
+			const entry = JSON.parse(firstLine);
+			const ts = decryptTimestamp(entry.msg.encryptedTimestamp);
+			if (ts < oldestTs) { oldestTs = ts; oldestFile = fp; }
+		} catch (e) {}
+	}
+
+	if (!oldestFile) return;
+	const lines = fs.readFileSync(oldestFile, 'utf8').split('\n').filter(l => l.trim());
+	const trimmed = lines.slice(EVICT_BATCH);
+	if (trimmed.length === 0) {
+		fs.unlinkSync(oldestFile);
+	} else {
+		fs.writeFileSync(oldestFile, trimmed.join('\n') + '\n');
+	}
+}
+
+function loadPersistentStorage() {
+	try {
+		const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.ndjson'));
+		for (const file of files) {
+			const fp = path.join(DATA_DIR, file);
+			const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+			if (rawLines.length === 0) continue;
+
+			// Read chatHandle from first valid line
+			let chatHandle;
+			for (const line of rawLines) {
+				try { chatHandle = JSON.parse(line).h; break; } catch (e) {}
+			}
+			if (!chatHandle) continue;
+
+			// Load last 100 into memory
+			const last100 = rawLines.slice(-100);
+			const messages = [];
+			for (const line of last100) {
+				try {
+					const entry = JSON.parse(line);
+					messages.push(entry.msg);
+					if (entry.content) {
+						messageContentStorage.set(`${chatHandle}:${entry.msg.id}`, entry.content);
+					}
+					if (entry.msg.id) {
+						messageMetadata.set(entry.msg.id, { isCompressed: entry.isCompressed || false });
+					}
+				} catch (e) {}
+			}
+			messagesStorage.set(chatHandle, messages);
+		}
+		originalLog(`[Persistence] Loaded ${messagesStorage.size} chat(s) from disk`);
+	} catch (e) {
+		originalError('[Persistence] Failed to load from disk:', e);
+	}
+}
+
+loadPersistentStorage();
 
 function handleVerify(req) {
 	const authorization = req.headers.authorization;
@@ -800,6 +903,9 @@ function handleSendMessage(req, res, pathname) {
 			}
 			messagesStorage.get(chatHandle).push(message);
 			console.log(`Stored message for chat handle: ${chatHandle} with ID: ${messageId}`);
+
+			// Persist to disk
+			appendMessageToDisk(chatHandle, message, messageData.content, false);
 
 			// Store encrypted content for deferred downloads
 			const contentKey = `${chatHandle}:${messageId}`;
@@ -1271,6 +1377,9 @@ function handleUploadComplete(req, res, pathname) {
 			messagesStorage.get(chatHandle).push(message);
 			console.log(`Stored message for chat handle: ${chatHandle} with encrypted ID: ${encryptedTimestamp}`);
 
+			// Persist to disk (include binary content for images/voice)
+			appendMessageToDisk(chatHandle, message, encryptedContent, isCompressed || false);
+
 			// Keep only last 100 messages
 			const chatMessages = messagesStorage.get(chatHandle);
 			if (chatMessages.length > 100) {
@@ -1371,6 +1480,24 @@ function handleDownloadContent(req, res, pathname) {
 	const contentData = messageContentStorage.get(contentKey);
 
 	if (!contentData) {
+		// Fallback: scan disk (e.g. after server restart or for history messages)
+		const fp = chatToFilePath(chatHandle);
+		if (fs.existsSync(fp)) {
+			const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+			for (const line of rawLines) {
+				try {
+					const entry = JSON.parse(line);
+					if (entry.msg.id === messageId && entry.content) {
+						messageContentStorage.set(contentKey, entry.content);
+						messageMetadata.set(messageId, { isCompressed: entry.isCompressed || false });
+						const meta = messageMetadata.get(messageId);
+						res.writeHead(200, { 'Content-Type': 'application/json' });
+						res.end(JSON.stringify({ encryptedContent: entry.content, isCompressed: meta.isCompressed }));
+						return;
+					}
+				} catch (e) {}
+			}
+		}
 		console.log(`Content not found for key: ${contentKey}`);
 		res.writeHead(404, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Content not found' }));
@@ -1387,6 +1514,63 @@ function handleDownloadContent(req, res, pathname) {
 		encryptedContent: contentData,
 		isCompressed: metadata.isCompressed
 	}));
+}
+
+// Handle GET /history/:chatHandle?before=<messageId>&limit=50
+function handleGetHistory(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[2];
+	if (!chatHandle) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	const query = url.parse(req.url, true).query;
+	const beforeId = query.before;
+	const limit = Math.min(parseInt(query.limit || '50', 10), 100);
+
+	const authorization = req.headers.authorization || '';
+	const [requestingUserId] = authorization.split(':');
+
+	const fp = chatToFilePath(chatHandle);
+	if (!fs.existsSync(fp)) {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end('[]');
+		return;
+	}
+
+	const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+	const entries = [];
+	for (const line of rawLines) {
+		try { entries.push(JSON.parse(line)); } catch (e) {}
+	}
+
+	// Find the index of the message with beforeId; default to end of array
+	let beforeIndex = entries.length;
+	if (beforeId) {
+		const idx = entries.findIndex(e => e.msg.id === beforeId);
+		if (idx >= 0) beforeIndex = idx;
+	}
+
+	const slice = entries.slice(Math.max(0, beforeIndex - limit), beforeIndex);
+
+	// Eagerly load content into memory so /download-content/ works for these messages
+	for (const entry of slice) {
+		if (entry.content) {
+			const contentKey = `${chatHandle}:${entry.msg.id}`;
+			if (!messageContentStorage.has(contentKey)) {
+				messageContentStorage.set(contentKey, entry.content);
+			}
+			if (entry.msg.id) {
+				messageMetadata.set(entry.msg.id, { isCompressed: entry.isCompressed || false });
+			}
+		}
+	}
+
+	const messages = slice.map(e => e.msg);
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify(messages.map(m => serializeMessageForClient(m, requestingUserId))));
 }
 
 // ==================== P2P TRANSFER HANDLERS ====================

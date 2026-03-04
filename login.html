@@ -915,6 +915,19 @@
             background: var(--error);
         }
 
+        .load-more-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            border-radius: 16px;
+            padding: 5px 16px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .load-more-btn:hover { background: var(--bg-primary); color: var(--text-primary); }
+        .load-more-btn:disabled { opacity: 0.5; cursor: default; }
+
         /* Modern Messages Area */
         .messages {
             flex: 1;
@@ -4080,6 +4093,10 @@
             </button>
         </div>
 
+        <div id="load-more-bar" style="display:none;text-align:center;padding:6px 0;flex-shrink:0">
+            <button id="load-more-btn" class="load-more-btn" onclick="loadMoreHistory()">↑ Load earlier messages</button>
+        </div>
+
         <div id="messages" class="messages"></div>
 
         <div id="typing-indicator" class="typing-indicator">
@@ -5161,6 +5178,10 @@
         let emojiPickerTarget = null; // messageId for pending emoji pick
         const emojiDecryptCache = new Map(); // encryptedEmoji → plaintext emoji
 
+        // History (load-more) state — session only, not persisted
+        let historyOldestId = null;  // oldest message ID currently in view (for ?before= param)
+        let isLoadingHistory = false;
+
         // Authentication failure tracking
         let failedAuthAttempts = 0;
         const AUTH_FAILURE_THRESHOLD = 3; // Redirect to login after 3 consecutive 401s
@@ -5811,6 +5832,8 @@
             messageDeliveryStatus.clear();
             messageOrder.length = 0;
             lastReadId = '';
+            historyOldestId = null;
+            isLoadingHistory = false;
             isTyping = false;
             clearTimeout(typingTimeout);
             const typingIndicator = document.getElementById('typing-indicator');
@@ -5830,6 +5853,14 @@
             // Load cached messages from localStorage
             loadCachedMessages(handle);
 
+            // Show load-more bar; set oldest ID from cache so first request knows where to start
+            const cachedForHistory = (() => {
+                try { return JSON.parse(localStorage.getItem(`messages_${handle}`) || '[]'); } catch (e) { return []; }
+            })();
+            historyOldestId = cachedForHistory.length > 0 ? cachedForHistory[0].id : null;
+            const loadMoreBar = document.getElementById('load-more-bar');
+            if (loadMoreBar) loadMoreBar.style.display = '';
+
             // Track the last fetch time for incremental updates
             lastFetchTime = 0;
 
@@ -5843,6 +5874,8 @@
         function backToChatList() {
             stopPolling();
             stopHeartbeat();
+            const loadMoreBar = document.getElementById('load-more-bar');
+            if (loadMoreBar) loadMoreBar.style.display = 'none';
             
             // Cleanup audio players
             for (const [player, { audio }] of activeAudioPlayers.entries()) {
@@ -6323,12 +6356,48 @@
             }
         }
 
-        async function appendMessages(messages) {
+        async function loadMoreHistory() {
+            if (!currentChat || isLoadingHistory) return;
+            const btn = document.getElementById('load-more-btn');
+            if (!historyOldestId) {
+                if (btn) btn.disabled = true;
+                return;
+            }
+            isLoadingHistory = true;
+            if (btn) { btn.textContent = 'Loading...'; btn.disabled = true; }
+            try {
+                const response = await authenticatedFetch(
+                    `/history/${currentChat.handle}?before=${encodeURIComponent(historyOldestId)}&limit=50`
+                );
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                const messages = await response.json();
+                if (messages.length === 0) {
+                    // No more history
+                    const bar = document.getElementById('load-more-bar');
+                    if (bar) bar.style.display = 'none';
+                } else {
+                    await appendMessages(messages, { prepend: true });
+                    historyOldestId = messages[0].id;
+                }
+            } catch (e) {
+                window.reportClientError(e, 'load history');
+            } finally {
+                isLoadingHistory = false;
+                if (btn) { btn.textContent = '↑ Load earlier messages'; btn.disabled = false; }
+            }
+        }
+
+        async function appendMessages(messages, { prepend = false } = {}) {
+            // For prepend: save scrollHeight to restore scroll after insertion
+            const prevScrollHeight = prepend ? messagesContainer.scrollHeight : 0;
             // Capture scroll position BEFORE adding messages
             const wasAtBottom = isAtBottom;
             // Collect all messages (both cached and new) for caching
             let allMessages = [];
             let hasNewMessages = false;
+            // For prepend: collect rendered elements to insert as a batch
+            const prependFragment = prepend ? document.createDocumentFragment() : null;
+            const prependIds = [];
             
             for (const message of messages) {
                 if (renderedMessageIds.has(message.id)) {
@@ -6629,10 +6698,15 @@
                 }
                 messageElement.appendChild(reactionBar);
 
-                messagesContainer.appendChild(messageElement);
+                if (prepend) {
+                    prependFragment.appendChild(messageElement);
+                    prependIds.push(message.id);
+                } else {
+                    messagesContainer.appendChild(messageElement);
+                }
                 renderedMessageIds.add(message.id);
-                messageOrder.push(message.id);
-                lastReadId = message.id; // track latest seen for outgoing heartbeat
+                if (!prepend) messageOrder.push(message.id);
+                if (!prepend) lastReadId = message.id; // track latest seen for outgoing heartbeat
 
                 // Update last message in chat list
                 const tempDiv = document.createElement('div');
@@ -6653,8 +6727,23 @@
                     updateLastMessage(currentChat.handle, textContent, new Date().toISOString());
                 }
                 
-                // Add to all messages for caching
-                allMessages.push(message);
+                // Add to all messages for caching (skip for history prepend)
+                if (!prepend) allMessages.push(message);
+            }
+
+            // For prepend: insert fragment before existing messages and restore scroll position
+            if (prepend && prependFragment.childElementCount > 0) {
+                const firstMsg = messagesContainer.querySelector('.message-group');
+                if (firstMsg) {
+                    messagesContainer.insertBefore(prependFragment, firstMsg);
+                } else {
+                    messagesContainer.appendChild(prependFragment);
+                }
+                // Insert IDs at front of messageOrder in chronological order
+                messageOrder.unshift(...prependIds);
+                // Preserve scroll position (new content added above)
+                messagesContainer.scrollTop += messagesContainer.scrollHeight - prevScrollHeight;
+                return; // history messages: no cache update, no cursor update
             }
 
             // Auto-scroll handling for new messages
