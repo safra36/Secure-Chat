@@ -9574,12 +9574,14 @@
         }
 
         async function leaveCall() {
+            let leaveData = null;
             if (activeCallSession) {
                 try {
-                    await authenticatedFetch(
+                    const resp = await authenticatedFetch(
                         `/call/leave/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' } }
                     );
+                    if (resp && resp.ok) leaveData = await resp.json();
                 } catch (e) {
                     window.reportClientError(e, 'leave call');
                     /* ignore */
@@ -9595,6 +9597,10 @@
             dismissedCallIds.clear();
             updateCallUI();
 
+            // If call is still active with other participants, show banner immediately
+            if (leaveData && leaveData.status === 'ACTIVE' && leaveData.participants && leaveData.participants.length > 0) {
+                showActiveCallBanner(leaveData);
+            }
             if (currentChat) startIncomingCallPoll();
         }
 
@@ -9804,7 +9810,7 @@
                             return;
                         }
 
-                        if (data.seq !== undefined && data.audioData && data.seq === currentSeq + 1) {
+                        if (data.seq !== undefined && data.audioData && data.seq > currentSeq) {
                             pipeline.lastSeq = data.seq;
                             try {
                                 const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);

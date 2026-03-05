@@ -2799,7 +2799,20 @@ function handleCallReceiveAudio(req, res, pathname) {
 	const chunks = senderBuffer.chunks;
 	const nextExpectedSeq = afterSeq + 1;
 
-	// Find the EXACT chunk with the next expected sequence (in order!)
+	// Helper: return oldest available chunk if seq is too old (late joiner catch-up)
+	function serveOldestChunk(chunkArr, currentCall) {
+		const chunk = chunkArr.shift();
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ seq: chunk.seq, audioData: chunk.audioData, callStatus: currentCall.status }));
+	}
+
+	// If requested seq is behind the buffer, skip ahead to oldest available chunk
+	if (chunks.length > 0 && chunks[0].seq > nextExpectedSeq) {
+		serveOldestChunk(chunks, call);
+		return;
+	}
+
+	// Find the EXACT chunk with the next expected sequence
 	const chunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
 
 	if (chunkIndex !== -1) {
@@ -2813,7 +2826,7 @@ function handleCallReceiveAudio(req, res, pathname) {
 		return;
 	}
 
-	// Long-poll: wait for the exact next chunk in sequence
+	// Long-poll: wait for the next chunk in sequence
 	const startTime = Date.now();
 	const checkInterval = setInterval(() => {
 		const elapsed = Date.now() - startTime;
@@ -2824,6 +2837,13 @@ function handleCallReceiveAudio(req, res, pathname) {
 			clearInterval(checkInterval);
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ callStatus: 'ENDED' }));
+			return;
+		}
+
+		// Skip ahead if buffer has newer chunks (late joiner)
+		if (chunks.length > 0 && chunks[0].seq > nextExpectedSeq) {
+			clearInterval(checkInterval);
+			serveOldestChunk(chunks, currentCall);
 			return;
 		}
 
