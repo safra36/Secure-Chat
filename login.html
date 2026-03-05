@@ -9592,6 +9592,7 @@
             callState = 'IDLE';
             activeCallSession = null;
             isMuted = false;
+            dismissedCallIds.clear();
             updateCallUI();
 
             if (currentChat) startIncomingCallPoll();
