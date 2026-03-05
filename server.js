@@ -104,7 +104,7 @@ const transferInvitations = new Map();
 
 // ==================== VOICE CALL STORAGE ====================
 const activeCalls = new Map();       // callSessionId -> CallSession
-const callAudioBuffers = new Map();  // callSessionId -> Map<userId, { chunks: [], seq: 0 }>
+const callAudioBuffers = new Map();  // callSessionId -> Map<userId, { chunks: [], seq: 0, initChunk: null }>
 const pendingCalls = new Map();      // chatHandle -> callSessionId
 
 // Voice call constants
@@ -2551,7 +2551,7 @@ function handleCallInitiate(req, res, pathname) {
 	};
 
 	// Initialize audio buffer for initiator
-	callAudioBuffers.set(callSessionId, new Map([[callerId, { chunks: [], seq: 0 }]]));
+	callAudioBuffers.set(callSessionId, new Map([[callerId, { chunks: [], seq: 0, initChunk: null }]]));
 
 	activeCalls.set(callSessionId, callSession);
 	pendingCalls.set(chatHandle, callSessionId);
@@ -2639,7 +2639,7 @@ function handleCallJoin(req, res, pathname) {
 
 	// Initialize audio buffer for this participant
 	const buffers = callAudioBuffers.get(callId);
-	if (buffers) buffers.set(userId, { chunks: [], seq: 0 });
+	if (buffers) buffers.set(userId, { chunks: [], seq: 0, initChunk: null });
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
 	res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
@@ -2744,6 +2744,9 @@ function handleCallSendAudio(req, res, pathname) {
 			const seq = userBuffer.seq++;
 			userBuffer.chunks.push({ seq, audioData, timestamp: Date.now() });
 
+			// Persist the first chunk as the MSE init segment for late joiners
+			if (seq === 0) userBuffer.initChunk = { seq, audioData };
+
 			// Circular buffer - keep last N chunks
 			while (userBuffer.chunks.length > CALL_AUDIO_BUFFER_SIZE) {
 				userBuffer.chunks.shift();
@@ -2806,6 +2809,13 @@ function handleCallReceiveAudio(req, res, pathname) {
 		res.end(JSON.stringify({ seq: chunk.seq, audioData: chunk.audioData, callStatus: currentCall.status }));
 	}
 
+	// Late joiner: serve init chunk when seq 0 is needed but not in circular buffer
+	if (nextExpectedSeq === 0 && senderBuffer.initChunk && chunks.findIndex(c => c.seq === 0) === -1) {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ seq: 0, audioData: senderBuffer.initChunk.audioData, callStatus: call.status }));
+		return;
+	}
+
 	// If requested seq is behind the buffer, skip ahead to oldest available chunk
 	if (chunks.length > 0 && chunks[0].seq > nextExpectedSeq) {
 		serveOldestChunk(chunks, call);
@@ -2837,6 +2847,14 @@ function handleCallReceiveAudio(req, res, pathname) {
 			clearInterval(checkInterval);
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ callStatus: 'ENDED' }));
+			return;
+		}
+
+		// Late joiner: serve init chunk when seq 0 is needed but not in circular buffer
+		if (nextExpectedSeq === 0 && senderBuffer.initChunk && chunks.findIndex(c => c.seq === 0) === -1) {
+			clearInterval(checkInterval);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ seq: 0, audioData: senderBuffer.initChunk.audioData, callStatus: currentCall.status }));
 			return;
 		}
 
