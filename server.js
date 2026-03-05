@@ -104,13 +104,14 @@ const transferInvitations = new Map();
 
 // ==================== VOICE CALL STORAGE ====================
 const activeCalls = new Map();       // callSessionId -> CallSession
-const callAudioBuffers = new Map();  // callSessionId -> { callerChunks: [], calleeChunks: [], callerSeq: 0, calleeSeq: 0 }
+const callAudioBuffers = new Map();  // callSessionId -> Map<userId, { chunks: [], seq: 0 }>
 const pendingCalls = new Map();      // chatHandle -> callSessionId
 
 // Voice call constants
 const CALL_RING_TIMEOUT = 30000;     // 30s to answer
 const CALL_MAX_DURATION = 7200000;   // 2h max
-const CALL_AUDIO_BUFFER_SIZE = 20;    // Keep last 20 chunks per side (circular)
+const CALL_AUDIO_BUFFER_SIZE = 20;   // Keep last 20 chunks per user (circular)
+const CALL_MAX_PARTICIPANTS = 10;    // Max participants per call
 
 // P2P Transfer constants
 const P2P_CHUNK_SIZE = 256 * 1024; // 256KB
@@ -188,7 +189,7 @@ setInterval(() => {
 			call.status = 'ENDED';
 			call.endedAt = now;
 			pendingCalls.delete(call.chatHandle);
-		} else if (call.status === 'ACTIVE' && now - call.acceptedAt > CALL_MAX_DURATION) {
+		} else if (call.status === 'ACTIVE' && now - call.startedAt > CALL_MAX_DURATION) {
 			call.status = 'ENDED';
 			call.endedAt = now;
 			pendingCalls.delete(call.chatHandle);
@@ -543,9 +544,9 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
-	// POST /call/accept/{chatHandle}/{callId}
-	if (req.method === 'POST' && pathname.startsWith('/call/accept/')) {
-		handleCallAccept(req, res, pathname);
+	// POST /call/join/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/join/')) {
+		handleCallJoin(req, res, pathname);
 		return;
 	}
 
@@ -555,9 +556,9 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
-	// POST /call/end/{chatHandle}/{callId}
-	if (req.method === 'POST' && pathname.startsWith('/call/end/')) {
-		handleCallEnd(req, res, pathname);
+	// POST /call/leave/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/leave/')) {
+		handleCallLeave(req, res, pathname);
 		return;
 	}
 
@@ -2541,13 +2542,16 @@ function handleCallInitiate(req, res, pathname) {
 	const callSession = {
 		id: callSessionId,
 		chatHandle,
-		callerId,
-		calleeId: null,
+		initiatorId: callerId,
+		participants: [callerId],
 		status: 'RINGING',
 		createdAt: Date.now(),
-		acceptedAt: null,
+		startedAt: null,
 		endedAt: null
 	};
+
+	// Initialize audio buffer for initiator
+	callAudioBuffers.set(callSessionId, new Map([[callerId, { chunks: [], seq: 0 }]]));
 
 	activeCalls.set(callSessionId, callSession);
 	pendingCalls.set(chatHandle, callSessionId);
@@ -2576,43 +2580,23 @@ function handleCallPoll(req, res, pathname) {
 	}
 
 	const call = activeCalls.get(callId);
-	if (!call) {
+	if (!call || call.status === 'ENDED') {
 		res.writeHead(204);
 		res.end();
 		return;
 	}
 
-	const isCaller = call.callerId === userId;
-
-	// Caller can check status of their own call
-	if (isCaller) {
-		res.writeHead(200, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({
-			callSessionId: call.id,
-			status: call.status,
-			calleeId: call.calleeId || null,
-			isCaller: true
-		}));
-		return;
-	}
-
-	// Callee gets notified of incoming calls
-	if (call.status === 'RINGING') {
-		res.writeHead(200, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({
-			callSessionId: call.id,
-			callerId: call.callerId,
-			status: call.status
-		}));
-		return;
-	}
-
-	// Callee doesn't have access to this call yet
-	res.writeHead(204);
-	res.end();
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({
+		callSessionId: call.id,
+		status: call.status,
+		initiatorId: call.initiatorId,
+		participants: call.participants,
+		isParticipant: call.participants.includes(userId)
+	}));
 }
 
-function handleCallAccept(req, res, pathname) {
+function handleCallJoin(req, res, pathname) {
 	const parts = pathname.split('/');
 	const chatHandle = parts[3];
 	const callId = parts[4];
@@ -2632,32 +2616,39 @@ function handleCallAccept(req, res, pathname) {
 		return;
 	}
 
-	if (call.status !== 'RINGING') {
+	if (call.status === 'ENDED') {
 		res.writeHead(400, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({ error: 'Call is not ringing' }));
+		res.end(JSON.stringify({ error: 'Call has ended' }));
 		return;
 	}
 
-	if (call.callerId === userId) {
-		res.writeHead(400, { 'Content-Type': 'application/json' });
-		res.end(JSON.stringify({ error: 'Cannot accept your own call' }));
+	// Already a participant - idempotent
+	if (call.participants.includes(userId)) {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
 		return;
 	}
 
-	call.status = 'ACTIVE';
-	call.calleeId = userId;
-	call.acceptedAt = Date.now();
+	if (call.participants.length >= CALL_MAX_PARTICIPANTS) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call is full (max 10 participants)' }));
+		return;
+	}
 
-	// Initialize audio buffers
-	callAudioBuffers.set(callId, {
-		callerChunks: [],
-		calleeChunks: [],
-		callerSeq: 0,
-		calleeSeq: 0
-	});
+	call.participants.push(userId);
+
+	// Initialize audio buffer for this participant
+	const buffers = callAudioBuffers.get(callId);
+	if (buffers) buffers.set(userId, { chunks: [], seq: 0 });
+
+	// First non-initiator joining activates the call
+	if (call.status === 'RINGING') {
+		call.status = 'ACTIVE';
+		call.startedAt = Date.now();
+	}
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify({ callSessionId: callId, status: 'ACTIVE' }));
+	res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
 }
 
 function handleCallReject(req, res, pathname) {
@@ -2678,15 +2669,12 @@ function handleCallReject(req, res, pathname) {
 		return;
 	}
 
-	call.status = 'ENDED';
-	call.endedAt = Date.now();
-	pendingCalls.delete(chatHandle);
-
+	// Individual dismiss - does not end the call for other participants
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify({ callSessionId: callId, status: 'ENDED' }));
+	res.end(JSON.stringify({ callSessionId: callId, status: call.status }));
 }
 
-function handleCallEnd(req, res, pathname) {
+function handleCallLeave(req, res, pathname) {
 	const parts = pathname.split('/');
 	const chatHandle = parts[3];
 	const callId = parts[4];
@@ -2697,6 +2685,8 @@ function handleCallEnd(req, res, pathname) {
 		return;
 	}
 
+	const [userId] = req.headers.authorization.split(':');
+
 	const call = activeCalls.get(callId);
 	if (!call) {
 		res.writeHead(404, { 'Content-Type': 'application/json' });
@@ -2704,12 +2694,20 @@ function handleCallEnd(req, res, pathname) {
 		return;
 	}
 
-	call.status = 'ENDED';
-	call.endedAt = Date.now();
-	pendingCalls.delete(chatHandle);
+	call.participants = call.participants.filter(p => p !== userId);
+
+	// Clean up this user's audio buffer
+	const buffers = callAudioBuffers.get(callId);
+	if (buffers) buffers.delete(userId);
+
+	if (call.participants.length === 0) {
+		call.status = 'ENDED';
+		call.endedAt = Date.now();
+		pendingCalls.delete(chatHandle);
+	}
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify({ callSessionId: callId, status: 'ENDED' }));
+	res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
 }
 
 function handleCallSendAudio(req, res, pathname) {
@@ -2732,8 +2730,9 @@ function handleCallSendAudio(req, res, pathname) {
 		return;
 	}
 
-	const buffer = callAudioBuffers.get(callId);
-	if (!buffer) {
+	const buffers = callAudioBuffers.get(callId);
+	const userBuffer = buffers?.get(userId);
+	if (!userBuffer) {
 		res.writeHead(400, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Audio buffer not initialized' }));
 		return;
@@ -2748,17 +2747,12 @@ function handleCallSendAudio(req, res, pathname) {
 		try {
 			const { audioData } = JSON.parse(body);
 
-			const isCaller = userId === call.callerId;
-			const chunks = isCaller ? buffer.callerChunks : buffer.calleeChunks;
-			const seq = isCaller ? buffer.callerSeq++ : buffer.calleeSeq++;
-
-			console.log(`[AUDIO SEND] ${isCaller ? 'Caller' : 'Callee'} ${userId} sent chunk seq=${seq}, size=${audioData.length}, buffer=${chunks.length} chunks`);
-
-			chunks.push({ seq, audioData, timestamp: Date.now() });
+			const seq = userBuffer.seq++;
+			userBuffer.chunks.push({ seq, audioData, timestamp: Date.now() });
 
 			// Circular buffer - keep last N chunks
-			while (chunks.length > CALL_AUDIO_BUFFER_SIZE) {
-				chunks.shift();
+			while (userBuffer.chunks.length > CALL_AUDIO_BUFFER_SIZE) {
+				userBuffer.chunks.shift();
 			}
 
 			res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -2783,8 +2777,15 @@ function handleCallReceiveAudio(req, res, pathname) {
 
 	const [userId] = req.headers.authorization.split(':');
 	const parsedUrl = url.parse(req.url, true);
+	const fromUserId = parsedUrl.query.fromUserId;
 	const afterSeq = parseInt(parsedUrl.query.afterSeq || '-1', 10);
 	const maxWaitMs = parseInt(parsedUrl.query.maxWaitMs || '500', 10);
+
+	if (!fromUserId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'fromUserId is required' }));
+		return;
+	}
 
 	const call = activeCalls.get(callId);
 	if (!call) {
@@ -2793,27 +2794,22 @@ function handleCallReceiveAudio(req, res, pathname) {
 		return;
 	}
 
-	const buffer = callAudioBuffers.get(callId);
-	if (!buffer) {
+	const buffers = callAudioBuffers.get(callId);
+	const senderBuffer = buffers?.get(fromUserId);
+	if (!senderBuffer) {
 		res.writeHead(204);
 		res.end();
 		return;
 	}
 
-	// Receiver gets the other side's chunks
-	const isCaller = userId === call.callerId;
-	const chunks = isCaller ? buffer.calleeChunks : buffer.callerChunks;
-	const nextExpectedSeq = afterSeq + 1; // We want the chunk WITH this sequence number
-
-	console.log(`[AUDIO RECV] ${isCaller ? 'Caller' : 'Callee'} ${userId} polling for seq=${nextExpectedSeq}, available chunks=${chunks.length}, seqs=[${chunks.map(c => c.seq).join(',')}]`);
+	const chunks = senderBuffer.chunks;
+	const nextExpectedSeq = afterSeq + 1;
 
 	// Find the EXACT chunk with the next expected sequence (in order!)
 	const chunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
-	
+
 	if (chunkIndex !== -1) {
-		// Found the exact next chunk - remove it from buffer after sending
 		const chunk = chunks.splice(chunkIndex, 1)[0];
-		console.log(`[AUDIO RECV] Returning chunk seq=${chunk.seq} to ${isCaller ? 'Caller' : 'Callee'}, remaining=${chunks.length}`);
 		res.writeHead(200, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({
 			seq: chunk.seq,
@@ -2842,7 +2838,6 @@ function handleCallReceiveAudio(req, res, pathname) {
 		if (newChunkIndex !== -1) {
 			clearInterval(checkInterval);
 			const newChunk = chunks.splice(newChunkIndex, 1)[0];
-			console.log(`[AUDIO RECV] Returning chunk seq=${newChunk.seq} (delayed) to ${isCaller ? 'Caller' : 'Callee'}, remaining=${chunks.length}`);
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({
 				seq: newChunk.seq,
@@ -2854,7 +2849,6 @@ function handleCallReceiveAudio(req, res, pathname) {
 
 		if (elapsed >= maxWaitMs) {
 			clearInterval(checkInterval);
-			console.log(`[AUDIO RECV] Long-poll timeout for ${isCaller ? 'Caller' : 'Callee'} ${userId}, waiting for seq=${nextExpectedSeq}`);
 			res.writeHead(204);
 			res.end();
 		}

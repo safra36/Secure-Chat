@@ -3174,13 +3174,13 @@
             top: 0;
             left: 0;
             right: 0;
-            height: 48px;
+            height: 56px;
             background: linear-gradient(135deg, var(--success), #00a854);
             z-index: 150;
             align-items: center;
-            justify-content: center;
-            gap: 16px;
-            padding: 0 16px;
+            justify-content: flex-start;
+            gap: 10px;
+            padding: 0 12px;
             animation: callSlideDown 0.3s ease;
         }
 
@@ -3206,13 +3206,48 @@
             50% { opacity: 0.5; transform: scale(0.8); }
         }
 
-        .call-overlay-info {
+        .call-timer-badge {
+            font-size: 13px;
+            font-weight: 600;
+            color: #fff;
+            font-variant-numeric: tabular-nums;
+            min-width: 42px;
+            flex-shrink: 0;
+        }
+
+        .call-participants-strip {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+            flex: 1;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        .call-avatar {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.25);
             display: flex;
             align-items: center;
-            gap: 8px;
+            justify-content: center;
+            font-size: 11px;
+            font-weight: 700;
             color: #fff;
-            font-size: 14px;
-            font-weight: 500;
+            border: 2px solid transparent;
+            transition: border-color 0.15s;
+            flex-shrink: 0;
+            cursor: default;
+            box-sizing: border-box;
+        }
+
+        .call-avatar.speaking {
+            border-color: #fff;
+        }
+
+        .call-avatar.self {
+            background: rgba(255,255,255,0.4);
         }
 
         .call-timer {
@@ -3259,7 +3294,7 @@
         /* Push chat content down when call active */
         .call-overlay.active ~ .chat-container,
         body.call-active .chat-container {
-            margin-top: 48px;
+            margin-top: 56px;
         }
 
         /* P2P Transfer Indicator */
@@ -4457,14 +4492,11 @@
 
     <!-- Active Call Overlay -->
     <div id="call-overlay" class="call-overlay">
-        <div class="call-overlay-pulse"></div>
-        <div class="call-overlay-info">
-            <span id="call-peer-name">Call</span>
-            <span class="call-timer" id="call-timer">00:00</span>
-        </div>
+        <div class="call-timer-badge" id="call-timer">00:00</div>
+        <div class="call-participants-strip" id="call-participants-strip"></div>
         <div class="call-overlay-actions">
             <button class="call-overlay-btn call-mute-btn" id="call-mute-btn" title="Mute"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
-            <button class="call-overlay-btn call-end-btn" id="call-end-btn" title="End Call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            <button class="call-overlay-btn call-end-btn" id="call-end-btn" title="Leave Call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
     </div>
 
@@ -5205,23 +5237,16 @@
 
         // Voice call state
         let callState = 'IDLE';
-        let activeCallSession = null;   // { callSessionId, chatHandle, role, startTime }
+        let activeCallSession = null;   // { callSessionId, chatHandle, myUserId, role, startTime, participants }
         let callMediaRecorder = null;
         let callMediaStream = null;
-        let callAudioPollInterval = null;
         let callTimerInterval = null;
         let callPollInterval = null;
-        let lastReceivedAudioSeq = -1;
-        let callAudioSeq = 0;
         let isMuted = false;
         let callRingInterval = null;
 
-        // Call audio playback (MSE-based)
-        let callMediaSource = null;
-        let callSourceBuffer = null;
-        let callAudioElement = null;
-        let callAudioQueue = [];     // Pending buffers to append
-        let callSourceBufferReady = true;
+        // Per-remote participant audio pipelines: Map<userId, { mediaSource, sourceBuffer, audioElement, audioQueue, lastSeq, pollInterval, pollInFlight, sourceBufferReady }>
+        let remoteAudioPipelines = new Map();
 
         // Time synchronization
         let timeOffset = 0; // Offset between client and server time (client_time - server_time)
@@ -9251,9 +9276,9 @@
             initiateCall();
         });
 
-        // Accept/Reject buttons
+        // Join/Decline buttons
         document.getElementById('accept-call-btn').addEventListener('click', () => {
-            if (activeCallSession) acceptCall(activeCallSession.callSessionId);
+            if (activeCallSession) joinCall(activeCallSession.callSessionId);
         });
 
         document.getElementById('reject-call-btn').addEventListener('click', () => {
@@ -9272,9 +9297,9 @@
             }
         });
 
-        // End call button
+        // Leave call button
         document.getElementById('call-end-btn').addEventListener('click', () => {
-            endCall();
+            leaveCall();
         });
 
         async function initiateCall() {
@@ -9297,14 +9322,16 @@
                 }
 
                 const { callSessionId } = await response.json();
+                const myUserId = localStorage.getItem('userId');
                 activeCallSession = {
                     callSessionId,
                     chatHandle: currentChat.handle,
-                    role: 'caller',
-                    startTime: null
+                    myUserId,
+                    role: 'initiator',
+                    startTime: null,
+                    participants: [myUserId]
                 };
 
-                // Poll for call acceptance
                 startCallSignalingPoll();
                 showToast('Calling...', 'info');
 
@@ -9312,7 +9339,7 @@
                 setTimeout(() => {
                     if (callState === 'RINGING_OUT') {
                         showToast('No answer', 'error');
-                        endCall();
+                        leaveCall();
                     }
                 }, 30000);
             } catch (err) {
@@ -9325,41 +9352,38 @@
         }
 
         function startCallSignalingPoll() {
-            // Caller polls for acceptance; callee polls for incoming
             if (callPollInterval) clearInterval(callPollInterval);
 
             callPollInterval = setInterval(async () => {
-                if (!currentChat) return;
+                if (!currentChat || !activeCallSession) return;
 
-                if (callState === 'RINGING_OUT' && activeCallSession) {
-                    // Caller: check if call was accepted/rejected
-                    try {
-                        const resp = await authenticatedFetch(`/call/poll/${currentChat.handle}`, {
-                            method: 'GET'
-                        });
+                try {
+                    const resp = await authenticatedFetch(`/call/poll/${activeCallSession.chatHandle}`, { method: 'GET' });
 
-                        console.log('[CALLER POLL] Status:', resp.status);
+                    if (resp.status === 200) {
+                        const data = await resp.json();
 
-                        if (resp.status === 200) {
-                            const data = await resp.json();
-                            console.log('[CALLER POLL] Data:', data);
-
-                            if (data.status === 'ACTIVE') {
-                                console.log('[CALLER POLL] Call accepted! Starting audio...');
-                                callState = 'ACTIVE';
-                                activeCallSession.startTime = Date.now();
-                                updateCallUI();
-                                startCallAudio();
-                                showToast('Call connected', 'success');
-                            } else if (data.status === 'ENDED' || data.status === 'REJECTED') {
+                        if (callState === 'RINGING_OUT' && data.status === 'ACTIVE') {
+                            callState = 'ACTIVE';
+                            activeCallSession.startTime = Date.now();
+                            activeCallSession.participants = data.participants;
+                            updateCallUI();
+                            startCallAudio(data.participants);
+                            showToast('Call connected', 'success');
+                        } else if (callState === 'ACTIVE') {
+                            if (data.status === 'ENDED') {
                                 showToast('Call ended', 'info');
-                                endCall();
+                                leaveCall();
+                            } else {
+                                updateCallParticipants(data.participants);
                             }
                         }
-                    } catch (e) {
-                        window.reportClientError(e, 'caller poll');
-                        console.error('[CALLER POLL] Error:', e);
+                    } else if (resp.status === 204 && callState === 'ACTIVE') {
+                        showToast('Call ended', 'info');
+                        leaveCall();
                     }
+                } catch (e) {
+                    window.reportClientError(e, 'call signaling poll');
                 }
             }, 2000);
         }
@@ -9371,22 +9395,23 @@
                 if (!currentChat || callState !== 'IDLE') return;
 
                 try {
-                    const resp = await authenticatedFetch(`/call/poll/${currentChat.handle}`, {
-                        method: 'GET'
-                    });
+                    const resp = await authenticatedFetch(`/call/poll/${currentChat.handle}`, { method: 'GET' });
 
                     if (resp.status === 200) {
                         const data = await resp.json();
-                        if (data.status === 'RINGING') {
+                        if (!data.isParticipant && (data.status === 'RINGING' || data.status === 'ACTIVE')) {
+                            const myUserId = localStorage.getItem('userId');
                             callState = 'RINGING_IN';
                             activeCallSession = {
                                 callSessionId: data.callSessionId,
                                 chatHandle: currentChat.handle,
-                                role: 'callee',
-                                startTime: null
+                                myUserId,
+                                role: 'participant',
+                                startTime: null,
+                                participants: data.participants
                             };
-                            showIncomingCallModal(data.callerId);
-                            playCallRingSound();
+                            showIncomingCallModal(data.initiatorId, data.status);
+                            if (data.status === 'RINGING') playCallRingSound();
                         }
                     }
                 } catch (e) {
@@ -9396,8 +9421,10 @@
             }, 2000);
         }
 
-        function showIncomingCallModal(callerId) {
+        function showIncomingCallModal(callerId, callStatus) {
             document.getElementById('incoming-call-name').textContent = callerId;
+            document.getElementById('incoming-call-modal').querySelector('.incoming-call-label').textContent =
+                callStatus === 'ACTIVE' ? 'Ongoing call – tap to join' : 'Incoming voice call...';
             document.getElementById('incoming-call-modal').classList.add('active');
         }
 
@@ -9428,33 +9455,35 @@
             }
         }
 
-        async function acceptCall(callSessionId) {
+        async function joinCall(callSessionId) {
             if (!currentChat || !activeCallSession) return;
             hideIncomingCallModal();
 
             try {
                 const resp = await authenticatedFetch(
-                    `/call/accept/${currentChat.handle}/${callSessionId}`,
+                    `/call/join/${currentChat.handle}/${callSessionId}`,
                     { method: 'POST', headers: { 'Content-Type': 'application/json' } }
                 );
 
                 if (!resp.ok) {
                     const err = await resp.json();
-                    showToast(err.error || 'Failed to accept call', 'error');
+                    showToast(err.error || 'Failed to join call', 'error');
                     callState = 'IDLE';
                     activeCallSession = null;
                     updateCallUI();
                     return;
                 }
 
+                const data = await resp.json();
                 callState = 'ACTIVE';
                 activeCallSession.startTime = Date.now();
+                activeCallSession.participants = data.participants;
                 updateCallUI();
-                startCallAudio();
-                showToast('Call connected', 'success');
+                startCallAudio(data.participants);
+                startCallSignalingPoll();
+                showToast('Joined call', 'success');
             } catch (err) {
-                window.reportClientError(err, 'accept call');
-                console.error('Accept call error:', err);
+                window.reportClientError(err, 'join call');
                 callState = 'IDLE';
                 activeCallSession = null;
                 updateCallUI();
@@ -9478,44 +9507,40 @@
             callState = 'IDLE';
             activeCallSession = null;
             updateCallUI();
-            showToast('Call rejected', 'info');
+            showToast('Call dismissed', 'info');
         }
 
-        async function endCall() {
+        async function leaveCall() {
             if (activeCallSession) {
                 try {
                     await authenticatedFetch(
-                        `/call/end/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
+                        `/call/leave/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
                         { method: 'POST', headers: { 'Content-Type': 'application/json' } }
                     );
                 } catch (e) {
-                    window.reportClientError(e, 'end call');
+                    window.reportClientError(e, 'leave call');
                     /* ignore */
                 }
             }
 
             stopCallAudio();
             hideIncomingCallModal();
-            cleanupCallPlayback();
+            cleanupAllRemotePipelines();
             callState = 'IDLE';
             activeCallSession = null;
-            lastReceivedAudioSeq = -1;
-            callAudioSeq = 0;
             isMuted = false;
             updateCallUI();
 
-            // Restart incoming call poll so we can receive new calls
             if (currentChat) startIncomingCallPoll();
         }
 
-        async function startCallAudio() {
-            console.log('[CALL AUDIO] Starting audio for role:', activeCallSession?.role);
-            try {
-                // Get mic
-                callMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                console.log('[CALL AUDIO] Microphone access granted');
+        // Keep endCall as alias for backwards-compat with patched code below
+        const endCall = leaveCall;
 
-                // Determine supported mimeType
+        async function startCallAudio(participants) {
+            try {
+                callMediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+
                 let mimeType = 'audio/webm;codecs=opus';
                 if (!MediaRecorder.isTypeSupported(mimeType)) {
                     mimeType = 'audio/webm';
@@ -9533,7 +9558,6 @@
                 callMediaRecorder = new MediaRecorder(callMediaStream, recorderOptions);
 
                 callMediaRecorder.ondataavailable = async (event) => {
-                    console.log('[DATA AVAILABLE] Size:', event.data.size, 'callState:', callState, 'isMuted:', isMuted);
                     if (event.data.size > 0 && callState === 'ACTIVE' && !isMuted) {
                         try {
                             const arrayBuffer = await event.data.arrayBuffer();
@@ -9541,33 +9565,33 @@
                             await sendCallAudioChunk(encrypted);
                         } catch (e) {
                             window.reportClientError(e, 'send call audio chunk');
-                            console.error('[DATA AVAILABLE] Error:', e);
                         }
                     }
                 };
 
-                callMediaRecorder.start(1000); // 1s timeslice
-                console.log('[CALL AUDIO] MediaRecorder started');
+                callMediaRecorder.start(1000);
 
-                // Init MSE playback for receiving audio
-                initCallPlayback();
+                // Start receiving audio from each remote participant
+                const myUserId = activeCallSession?.myUserId;
+                for (const participantId of (participants || [])) {
+                    if (participantId !== myUserId) {
+                        initRemoteAudioPipeline(participantId);
+                    }
+                }
 
-                // Start polling for incoming audio
-                startCallAudioPoll();
+                // Add self tile to UI
+                renderCallParticipantStrip(participants || []);
 
-                // Start call timer
                 startCallTimer();
 
-                // Slow down message polling during call
                 if (pollingInterval) {
                     clearInterval(pollingInterval);
                     pollingInterval = setInterval(fetchMessages, 5000);
                 }
             } catch (err) {
                 window.reportClientError(err, 'start call audio capture');
-                console.error('Failed to start call audio:', err);
                 showToast('Failed to access microphone', 'error');
-                endCall();
+                leaveCall();
             }
         }
 
@@ -9580,11 +9604,6 @@
             if (callMediaStream) {
                 callMediaStream.getTracks().forEach(t => t.stop());
                 callMediaStream = null;
-            }
-
-            if (callAudioPollInterval) {
-                clearInterval(callAudioPollInterval);
-                callAudioPollInterval = null;
             }
 
             if (callTimerInterval) {
@@ -9634,151 +9653,184 @@
             }
         }
 
-        let callAudioPollInFlight = false; // Prevent concurrent polls
+        function initRemoteAudioPipeline(userId) {
+            if (remoteAudioPipelines.has(userId)) return;
 
-        function startCallAudioPoll() {
-            if (callAudioPollInterval) clearInterval(callAudioPollInterval);
-            callAudioPollInFlight = false;
+            const mimeType = 'audio/webm;codecs=opus';
+            if (!MediaSource.isTypeSupported(mimeType)) return;
 
-            const pollAudio = async () => {
-                // Prevent concurrent requests - wait for previous to complete
-                if (callAudioPollInFlight || !activeCallSession || callState !== 'ACTIVE') return;
-                
-                callAudioPollInFlight = true;
-                const currentSeq = lastReceivedAudioSeq; // Capture current seq for this request
-
-                try {
-                    const resp = await authenticatedFetch(
-                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?afterSeq=${currentSeq}&maxWaitMs=500`,
-                        { method: 'GET' }
-                    );
-
-                    console.log('[RECEIVE AUDIO] Poll response status:', resp.status, 'afterSeq:', currentSeq);
-
-                    if (resp.status === 200) {
-                        const data = await resp.json();
-                        console.log('[RECEIVE AUDIO] Got data, seq:', data.seq, 'audioData size:', data.audioData?.length);
-
-                        if (data.callStatus === 'ENDED') {
-                            showToast('Call ended', 'info');
-                            endCall();
-                            return;
-                        }
-
-                        if (data.seq !== undefined && data.audioData) {
-                            // Only accept if this is the expected next sequence
-                            if (data.seq === currentSeq + 1) {
-                                lastReceivedAudioSeq = data.seq;
-                                try {
-                                    const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
-                                    console.log('[RECEIVE AUDIO] Decrypted, enqueueing audio');
-                                    enqueueCallAudio(decrypted);
-                                } catch (e) {
-                                    window.reportClientError(e, 'decrypt received audio');
-                                    console.error('[RECEIVE AUDIO] Error decrypting:', e);
-                                }
-                            } else {
-                                console.log('[RECEIVE AUDIO] Got unexpected seq:', data.seq, 'expected:', currentSeq + 1, '- ignoring');
-                            }
-                        }
-                    } else if (resp.status === 204) {
-                        console.log('[RECEIVE AUDIO] No new audio (204)');
-                    }
-                } catch (e) {
-                    window.reportClientError(e, 'receive audio poll');
-                    console.error('[RECEIVE AUDIO] Poll error:', e);
-                } finally {
-                    callAudioPollInFlight = false;
-                }
+            const pipeline = {
+                mediaSource: new MediaSource(),
+                sourceBuffer: null,
+                audioElement: new Audio(),
+                audioQueue: [],
+                lastSeq: -1,
+                pollInterval: null,
+                pollInFlight: false,
+                sourceBufferReady: true
             };
 
-            // Initial poll immediately
-            pollAudio();
-            callAudioPollInterval = setInterval(pollAudio, 500);
-        }
+            pipeline.audioElement.src = URL.createObjectURL(pipeline.mediaSource);
 
-        function initCallPlayback() {
-            // MSE-based streaming playback
-            const mimeType = 'audio/webm;codecs=opus';
-            if (!MediaSource.isTypeSupported(mimeType)) {
-                console.error('MSE does not support', mimeType);
-                return;
-            }
-
-            callMediaSource = new MediaSource();
-            callAudioElement = new Audio();
-            callAudioElement.src = URL.createObjectURL(callMediaSource);
-            callAudioQueue = [];
-            callSourceBufferReady = true;
-
-            callMediaSource.addEventListener('sourceopen', () => {
+            pipeline.mediaSource.addEventListener('sourceopen', () => {
                 try {
-                    callSourceBuffer = callMediaSource.addSourceBuffer(mimeType);
-                    callSourceBuffer.mode = 'sequence';
-                    callSourceBuffer.addEventListener('updateend', () => {
-                        callSourceBufferReady = true;
-                        flushCallAudioQueue();
+                    pipeline.sourceBuffer = pipeline.mediaSource.addSourceBuffer(mimeType);
+                    pipeline.sourceBuffer.mode = 'sequence';
+                    pipeline.sourceBuffer.addEventListener('updateend', () => {
+                        pipeline.sourceBufferReady = true;
+                        flushRemoteAudioQueue(userId);
                     });
                 } catch (e) {
-                    window.reportClientError(e, 'create MediaSource SourceBuffer');
-                    console.error('Failed to create SourceBuffer:', e);
+                    window.reportClientError(e, 'create remote SourceBuffer');
                 }
             });
 
-            callAudioElement.play().catch(() => {});
+            pipeline.audioElement.play().catch(() => {});
+            remoteAudioPipelines.set(userId, pipeline);
+            startRemoteAudioPoll(userId);
         }
 
-        function enqueueCallAudio(decryptedArrayBuffer) {
-            if (!callMediaSource || !callSourceBuffer) return;
+        function cleanupRemoteAudioPipeline(userId) {
+            const pipeline = remoteAudioPipelines.get(userId);
+            if (!pipeline) return;
 
-            const data = new Uint8Array(decryptedArrayBuffer);
-            callAudioQueue.push(data);
+            if (pipeline.pollInterval) clearInterval(pipeline.pollInterval);
 
-            // Drop old queued chunks only if memory pressure (keep last 10)
-            if (callAudioQueue.length > 15) {
-                callAudioQueue = callAudioQueue.slice(-10);
+            if (pipeline.audioElement) {
+                pipeline.audioElement.pause();
+                if (pipeline.audioElement.src) URL.revokeObjectURL(pipeline.audioElement.src);
             }
 
-            flushCallAudioQueue();
+            if (pipeline.mediaSource && pipeline.mediaSource.readyState === 'open') {
+                try { pipeline.mediaSource.endOfStream(); } catch (e) { /* ignore */ }
+            }
+
+            remoteAudioPipelines.delete(userId);
         }
 
-        function flushCallAudioQueue() {
-            if (!callSourceBuffer || !callSourceBufferReady || callAudioQueue.length === 0) return;
-            if (callMediaSource.readyState !== 'open') return;
+        function cleanupAllRemotePipelines() {
+            for (const userId of [...remoteAudioPipelines.keys()]) {
+                cleanupRemoteAudioPipeline(userId);
+            }
+            document.getElementById('call-participants-strip').innerHTML = '';
+        }
 
-            callSourceBufferReady = false;
-            const chunk = callAudioQueue.shift();
+        function startRemoteAudioPoll(userId) {
+            const pipeline = remoteAudioPipelines.get(userId);
+            if (!pipeline) return;
+
+            const pollAudio = async () => {
+                if (pipeline.pollInFlight || !activeCallSession || callState !== 'ACTIVE') return;
+
+                pipeline.pollInFlight = true;
+                const currentSeq = pipeline.lastSeq;
+
+                try {
+                    const resp = await authenticatedFetch(
+                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?fromUserId=${encodeURIComponent(userId)}&afterSeq=${currentSeq}&maxWaitMs=500`,
+                        { method: 'GET' }
+                    );
+
+                    if (resp.status === 200) {
+                        const data = await resp.json();
+
+                        if (data.callStatus === 'ENDED') {
+                            showToast('Call ended', 'info');
+                            leaveCall();
+                            return;
+                        }
+
+                        if (data.seq !== undefined && data.audioData && data.seq === currentSeq + 1) {
+                            pipeline.lastSeq = data.seq;
+                            try {
+                                const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
+                                enqueueRemoteAudio(userId, decrypted);
+                            } catch (e) {
+                                window.reportClientError(e, 'decrypt remote audio');
+                            }
+                        }
+                    }
+                } catch (e) {
+                    window.reportClientError(e, 'remote audio poll');
+                } finally {
+                    pipeline.pollInFlight = false;
+                }
+            };
+
+            pollAudio();
+            pipeline.pollInterval = setInterval(pollAudio, 500);
+        }
+
+        function enqueueRemoteAudio(userId, decryptedArrayBuffer) {
+            const pipeline = remoteAudioPipelines.get(userId);
+            if (!pipeline || !pipeline.mediaSource || !pipeline.sourceBuffer) return;
+
+            pipeline.audioQueue.push(new Uint8Array(decryptedArrayBuffer));
+            if (pipeline.audioQueue.length > 15) pipeline.audioQueue = pipeline.audioQueue.slice(-10);
+            flushRemoteAudioQueue(userId);
+        }
+
+        function flushRemoteAudioQueue(userId) {
+            const pipeline = remoteAudioPipelines.get(userId);
+            if (!pipeline || !pipeline.sourceBuffer || !pipeline.sourceBufferReady || pipeline.audioQueue.length === 0) return;
+            if (pipeline.mediaSource.readyState !== 'open') return;
+
+            pipeline.sourceBufferReady = false;
+            const chunk = pipeline.audioQueue.shift();
             try {
-                callSourceBuffer.appendBuffer(chunk);
+                pipeline.sourceBuffer.appendBuffer(chunk);
             } catch (e) {
-                window.reportClientError(e, 'append audio buffer');
-                console.error('appendBuffer error:', e);
-                callSourceBufferReady = true;
+                window.reportClientError(e, 'append remote audio buffer');
+                pipeline.sourceBufferReady = true;
             }
 
-            // Keep playback near live edge — if buffered ahead > 5s, gently catch up
-            if (callAudioElement && callSourceBuffer.buffered.length > 0) {
-                const end = callSourceBuffer.buffered.end(callSourceBuffer.buffered.length - 1);
-                const lag = end - callAudioElement.currentTime;
-                if (lag > 5) {
-                    callAudioElement.currentTime = end - 1.5;
+            if (pipeline.audioElement && pipeline.sourceBuffer.buffered.length > 0) {
+                const end = pipeline.sourceBuffer.buffered.end(pipeline.sourceBuffer.buffered.length - 1);
+                if (end - pipeline.audioElement.currentTime > 5) {
+                    pipeline.audioElement.currentTime = end - 1.5;
                 }
             }
         }
 
-        function cleanupCallPlayback() {
-            if (callAudioElement) {
-                callAudioElement.pause();
-                if (callAudioElement.src) URL.revokeObjectURL(callAudioElement.src);
-                callAudioElement = null;
+        function updateCallParticipants(participants) {
+            if (!activeCallSession) return;
+            const myUserId = activeCallSession.myUserId;
+            const currentRemotes = new Set(remoteAudioPipelines.keys());
+            const newRemotes = new Set((participants || []).filter(p => p !== myUserId));
+
+            for (const userId of newRemotes) {
+                if (!currentRemotes.has(userId)) {
+                    initRemoteAudioPipeline(userId);
+                    showToast(`${userId} joined`, 'info');
+                }
             }
-            if (callMediaSource && callMediaSource.readyState === 'open') {
-                try { callMediaSource.endOfStream(); } catch (e) { window.reportClientError(e, 'end media stream'); }
+
+            for (const userId of currentRemotes) {
+                if (!newRemotes.has(userId)) {
+                    cleanupRemoteAudioPipeline(userId);
+                    showToast(`${userId} left`, 'info');
+                }
             }
-            callMediaSource = null;
-            callSourceBuffer = null;
-            callAudioQueue = [];
-            callSourceBufferReady = true;
+
+            activeCallSession.participants = participants;
+            renderCallParticipantStrip(participants);
+        }
+
+        function renderCallParticipantStrip(participants) {
+            const strip = document.getElementById('call-participants-strip');
+            if (!strip) return;
+            const myUserId = activeCallSession?.myUserId;
+            strip.innerHTML = '';
+            for (const userId of (participants || [])) {
+                const isSelf = userId === myUserId;
+                const initials = userId.slice(0, 2).toUpperCase();
+                const div = document.createElement('div');
+                div.className = 'call-avatar' + (isSelf ? ' self' : '');
+                div.id = 'call-avatar-' + CSS.escape(userId);
+                div.title = isSelf ? userId + ' (You)' : userId;
+                div.textContent = initials;
+                strip.appendChild(div);
+            }
         }
 
         function startCallTimer() {
@@ -9804,73 +9856,22 @@
                 overlay.classList.remove('active');
                 document.body.classList.remove('call-active');
                 muteBtn.classList.remove('muted');
+                document.getElementById('call-participants-strip').innerHTML = '';
             } else if (callState === 'RINGING_OUT') {
                 callBtn.disabled = true;
                 overlay.classList.add('active');
                 document.body.classList.add('call-active');
-                document.getElementById('call-peer-name').textContent = currentChat?.handle || 'Calling...';
-                document.getElementById('call-timer').textContent = 'Ringing...';
+                document.getElementById('call-timer').textContent = 'Calling...';
+                renderCallParticipantStrip(activeCallSession?.participants || []);
             } else if (callState === 'RINGING_IN') {
                 callBtn.disabled = true;
             } else if (callState === 'ACTIVE') {
                 callBtn.disabled = true;
                 overlay.classList.add('active');
                 document.body.classList.add('call-active');
-                document.getElementById('call-peer-name').textContent = currentChat?.handle || 'Call';
                 document.getElementById('call-timer').textContent = '00:00';
             }
         }
-
-        // Caller needs to detect when call is accepted
-        // Override the signaling poll to also check call status for the caller
-        function startCallerStatusPoll() {
-            if (callPollInterval) clearInterval(callPollInterval);
-
-            callPollInterval = setInterval(async () => {
-                if (callState !== 'RINGING_OUT' || !activeCallSession) return;
-
-                try {
-                    // Poll call status endpoint to check if call is active
-                    const resp = await authenticatedFetch(
-                        `/call/poll/${activeCallSession.chatHandle}`,
-                        { method: 'GET' }
-                    );
-
-                    if (resp.status === 200) {
-                        const data = await resp.json();
-                        if (data.callStatus === 'ENDED') {
-                            showToast('Call ended', 'info');
-                            endCall();
-                            return;
-                        }
-                        if (data.status === 'ACTIVE') {
-                            // Call is active, start audio
-                            callState = 'ACTIVE';
-                            activeCallSession.startTime = Date.now();
-                            updateCallUI();
-                            startCallAudio();
-                            showToast('Call connected', 'success');
-                            clearInterval(callPollInterval);
-                            callPollInterval = null;
-                        }
-                    } else if (resp.status === 400) {
-                        // Call might have been rejected/ended
-                        const data = await resp.json().catch(() => ({}));
-                        if (data.error === 'Call is not active') {
-                            // Check if it was ended
-                            showToast('Call ended', 'info');
-                            endCall();
-                        }
-                    }
-                } catch (e) {
-                    window.reportClientError(e, 'call polling');
-                    /* ignore */
-                }
-            }, 1500);
-        }
-
-        // Patch initiateCall to use caller status poll
-        const _origInitiateCall = initiateCall;
 
         // Integration: start incoming call poll when opening chat
         const _origOpenChat = openChat;
@@ -9881,31 +9882,20 @@
             seenInvitationIds.clear();
         };
 
-        // Integration: stop call polling when leaving chat
+        // Integration: stop call when leaving chat
         const _origBackToChatList = backToChatList;
         backToChatList = function() {
             if (callState === 'ACTIVE') {
-                if (!confirm('You have an active call. End call and leave?')) return;
-                endCall();
+                if (!confirm('You have an active call. Leave call and go back?')) return;
+                leaveCall();
             }
             if (callRingInterval) {
                 clearInterval(callRingInterval);
                 callRingInterval = null;
             }
-            if (callState !== 'IDLE') endCall();
+            if (callState !== 'IDLE') leaveCall();
             _origBackToChatList();
         };
-
-        // Patch initiateCall to start caller status poll
-        const _origInitiateCallRef = document.getElementById('call-btn').onclick;
-        document.getElementById('call-btn').addEventListener('click', () => {
-            // After the main click handler runs, start caller poll
-            setTimeout(() => {
-                if (callState === 'RINGING_OUT') {
-                    startCallerStatusPoll();
-                }
-            }, 500);
-        });
 
     </script>
     <script>
