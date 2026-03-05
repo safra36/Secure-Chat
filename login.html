@@ -3328,6 +3328,27 @@
             background: var(--error);
         }
 
+        .call-ptt-toggle-btn {
+            background: rgba(255, 255, 255, 0.2);
+            color: #fff;
+        }
+
+        .call-ptt-toggle-btn.ptt-active {
+            background: #00b894;
+        }
+
+        .call-ptt-btn {
+            background: rgba(255, 255, 255, 0.15);
+            color: #fff;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+        }
+
+        .call-ptt-btn.talking {
+            background: #00b894;
+            border-color: #00b894;
+            box-shadow: 0 0 0 3px rgba(0, 184, 148, 0.4);
+        }
+
         .call-end-btn {
             background: var(--error);
             color: #fff;
@@ -4549,6 +4570,8 @@
         <div class="call-timer-badge" id="call-timer">00:00</div>
         <div class="call-participants-strip" id="call-participants-strip"></div>
         <div class="call-overlay-actions">
+            <button class="call-overlay-btn call-ptt-toggle-btn" id="call-ptt-toggle-btn" title="Push-to-Talk mode"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><rect x="8" y="6" width="8" height="13" rx="2"/><line x1="12" y1="2" x2="12" y2="6"/><line x1="9" y1="10" x2="15" y2="10"/><line x1="9" y1="13" x2="15" y2="13"/></svg></button>
+            <button class="call-overlay-btn call-ptt-btn" id="call-ptt-btn" title="Hold to Talk (Space)" style="display:none"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
             <button class="call-overlay-btn call-mute-btn" id="call-mute-btn" title="Mute"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg></button>
             <button class="call-overlay-btn call-end-btn" id="call-end-btn" title="Leave Call"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         </div>
@@ -5296,7 +5319,10 @@
         let callMediaStream = null;
         let callTimerInterval = null;
         let callPollInterval = null;
+        let callHeartbeatInterval = null;
         let isMuted = false;
+        let isPushToTalk = localStorage.getItem('callPttMode') === 'true';
+        let isPttTalking = false;
         let callRingInterval = null;
 
         // Per-remote participant audio pipelines: Map<userId, { mediaSource, sourceBuffer, audioElement, audioQueue, lastSeq, pollInterval, pollInFlight, sourceBufferReady }>
@@ -9353,15 +9379,70 @@
             hideActiveCallBanner();
         });
 
+        function applyMicState() {
+            if (callMediaStream) {
+                const transmit = !isMuted && (!isPushToTalk || isPttTalking);
+                callMediaStream.getAudioTracks().forEach(t => t.enabled = transmit);
+            }
+        }
+
+        function setPttTalking(active) {
+            isPttTalking = active;
+            const pttBtn = document.getElementById('call-ptt-btn');
+            pttBtn.classList.toggle('talking', active);
+            applyMicState();
+        }
+
+        function applyPttToggleUI() {
+            const toggleBtn = document.getElementById('call-ptt-toggle-btn');
+            const pttBtn = document.getElementById('call-ptt-btn');
+            toggleBtn.classList.toggle('ptt-active', isPushToTalk);
+            toggleBtn.title = isPushToTalk ? 'Push-to-Talk: ON' : 'Push-to-Talk: OFF';
+            pttBtn.style.display = isPushToTalk ? '' : 'none';
+        }
+
+        // Init PTT toggle UI on load
+        applyPttToggleUI();
+
         // Mute button
         document.getElementById('call-mute-btn').addEventListener('click', () => {
             isMuted = !isMuted;
             const muteBtn = document.getElementById('call-mute-btn');
             muteBtn.classList.toggle('muted', isMuted);
             muteBtn.title = isMuted ? 'Unmute' : 'Mute';
-            // Mute/unmute mic track
-            if (callMediaStream) {
-                callMediaStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
+            applyMicState();
+        });
+
+        // PTT toggle button
+        document.getElementById('call-ptt-toggle-btn').addEventListener('click', () => {
+            isPushToTalk = !isPushToTalk;
+            isPttTalking = false;
+            localStorage.setItem('callPttMode', isPushToTalk);
+            applyPttToggleUI();
+            applyMicState();
+        });
+
+        // PTT hold button (mouse + touch)
+        const _pttBtn = document.getElementById('call-ptt-btn');
+        _pttBtn.addEventListener('mousedown', (e) => { e.preventDefault(); setPttTalking(true); });
+        _pttBtn.addEventListener('mouseup', () => setPttTalking(false));
+        _pttBtn.addEventListener('mouseleave', () => { if (isPttTalking) setPttTalking(false); });
+        _pttBtn.addEventListener('touchstart', (e) => { e.preventDefault(); setPttTalking(true); }, { passive: false });
+        _pttBtn.addEventListener('touchend', () => setPttTalking(false));
+        _pttBtn.addEventListener('touchcancel', () => setPttTalking(false));
+
+        // Spacebar PTT (desktop only)
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && isPushToTalk && callState === 'ACTIVE' && !isPttTalking) {
+                const tag = document.activeElement?.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+                e.preventDefault();
+                setPttTalking(true);
+            }
+        });
+        document.addEventListener('keyup', (e) => {
+            if (e.code === 'Space' && isPttTalking) {
+                setPttTalking(false);
             }
         });
 
@@ -9400,12 +9481,30 @@
                 updateCallUI();
                 await startCallAudio(data.participants);
                 startCallSignalingPoll();
+                startCallHeartbeat();
             } catch (err) {
                 window.reportClientError(err, 'initiate call');
                 callState = 'IDLE';
                 updateCallUI();
                 showToast('Failed to start call', 'error');
             }
+        }
+
+        function startCallHeartbeat() {
+            if (callHeartbeatInterval) clearInterval(callHeartbeatInterval);
+            callHeartbeatInterval = setInterval(async () => {
+                if (!activeCallSession || callState !== 'ACTIVE') return;
+                try {
+                    const resp = await authenticatedFetch(
+                        `/call/heartbeat/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}`,
+                        { method: 'POST' }
+                    );
+                    if (resp.ok) {
+                        const data = await resp.json();
+                        if (data.callStatus === 'ENDED') leaveCall();
+                    }
+                } catch (e) { /* ignore network errors — server will evict on timeout */ }
+            }, 10000);
         }
 
         function startCallSignalingPoll() {
@@ -9544,6 +9643,7 @@
                 updateCallUI();
                 startCallAudio(data.participants);
                 startCallSignalingPoll();
+                startCallHeartbeat();
                 showToast('Joined call', 'success');
             } catch (err) {
                 window.reportClientError(err, 'join call');
@@ -9595,6 +9695,7 @@
             callState = 'IDLE';
             activeCallSession = null;
             isMuted = false;
+            isPttTalking = false;
             dismissedCallIds.clear();
             updateCallUI();
 
@@ -9641,6 +9742,7 @@
                 };
 
                 callMediaRecorder.start(1000);
+                applyMicState();
 
                 // Start receiving audio from each remote participant
                 const myUserId = activeCallSession?.myUserId;
@@ -9685,6 +9787,11 @@
             if (callPollInterval) {
                 clearInterval(callPollInterval);
                 callPollInterval = null;
+            }
+
+            if (callHeartbeatInterval) {
+                clearInterval(callHeartbeatInterval);
+                callHeartbeatInterval = null;
             }
 
             if (callRingInterval) {
@@ -9936,6 +10043,7 @@
                 overlay.classList.remove('active');
                 document.body.classList.remove('call-active');
                 muteBtn.classList.remove('muted');
+                document.getElementById('call-ptt-btn').classList.remove('talking');
                 document.getElementById('call-participants-strip').innerHTML = '';
             } else if (callState === 'ACTIVE') {
                 callBtn.disabled = true;

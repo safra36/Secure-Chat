@@ -102,6 +102,8 @@ const p2pTransfers = new Map();
 // Structure: chatHandle -> [Invitation] (simplified - all transfers in a chat are accessible)
 const transferInvitations = new Map();
 
+const SERVER_BUILD_ID = Date.now().toString();
+
 // ==================== VOICE CALL STORAGE ====================
 const activeCalls = new Map();       // callSessionId -> CallSession
 const callAudioBuffers = new Map();  // callSessionId -> Map<userId, { chunks: [], seq: 0, initChunk: null }>
@@ -112,6 +114,7 @@ const CALL_RING_TIMEOUT = 30000;     // 30s to answer
 const CALL_MAX_DURATION = 7200000;   // 2h max
 const CALL_AUDIO_BUFFER_SIZE = 20;   // Keep last 20 chunks per user (circular)
 const CALL_MAX_PARTICIPANTS = 10;    // Max participants per call
+const CALL_HEARTBEAT_TIMEOUT = 30000; // Evict participant after 30s without heartbeat
 
 // P2P Transfer constants
 const P2P_CHUNK_SIZE = 256 * 1024; // 256KB
@@ -189,10 +192,30 @@ setInterval(() => {
 			call.status = 'ENDED';
 			call.endedAt = now;
 			pendingCalls.delete(call.chatHandle);
-		} else if (call.status === 'ACTIVE' && now - call.startedAt > CALL_MAX_DURATION) {
-			call.status = 'ENDED';
-			call.endedAt = now;
-			pendingCalls.delete(call.chatHandle);
+		} else if (call.status === 'ACTIVE') {
+			if (now - call.startedAt > CALL_MAX_DURATION) {
+				call.status = 'ENDED';
+				call.endedAt = now;
+				pendingCalls.delete(call.chatHandle);
+			} else {
+				// Evict participants with stale heartbeats
+				const stale = call.participants.filter(uid => {
+					const last = call.lastHeartbeat.get(uid);
+					return last === undefined || (now - last) > CALL_HEARTBEAT_TIMEOUT;
+				});
+				for (const uid of stale) {
+					call.participants = call.participants.filter(p => p !== uid);
+					call.lastHeartbeat.delete(uid);
+					const buffers = callAudioBuffers.get(callId);
+					if (buffers) buffers.delete(uid);
+					console.log(`[CALL] Evicted stale participant ${uid} from call ${callId}`);
+				}
+				if (call.participants.length === 0) {
+					call.status = 'ENDED';
+					call.endedAt = now;
+					pendingCalls.delete(call.chatHandle);
+				}
+			}
 		} else if (call.status === 'ENDED' && now - call.endedAt > 30000) {
 			activeCalls.delete(callId);
 			callAudioBuffers.delete(callId);
@@ -250,6 +273,10 @@ if (!SERVER_PASSWRD) {
 
 console.log('✅ Password loaded successfully from external file');
 
+// HMAC-signed build ID: clients verify this to prevent forged reload headers
+const _buildHmac = crypto.createHmac('sha256', SERVER_PASSWRD).update(SERVER_BUILD_ID).digest('base64');
+const SERVER_BUILD_HEADER = `${SERVER_BUILD_ID}.${_buildHmac}`;
+
 // Load TLS certificates from assets directory (for binary) or cert directory (for development)
 let certDir = path.join(__dirname, 'assets', 'cert');
 if (!fs.existsSync(certDir)) {
@@ -266,6 +293,10 @@ const encryption = new Encryption();
 // Create HTTP server
 const server = https.createServer(tlsOptions, (req, res) => {
 	try {
+	// Inject build ID into every response for client-side reload detection
+	const _wh = res.writeHead.bind(res);
+	res.writeHead = (code, headers = {}) => _wh(code, { 'X-Server-Build': SERVER_BUILD_HEADER, ...headers });
+
 	// Log all requests
 	console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
 
@@ -559,6 +590,12 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	// POST /call/leave/{chatHandle}/{callId}
 	if (req.method === 'POST' && pathname.startsWith('/call/leave/')) {
 		handleCallLeave(req, res, pathname);
+		return;
+	}
+
+	// POST /call/heartbeat/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/heartbeat/')) {
+		handleCallHeartbeat(req, res, pathname);
 		return;
 	}
 
@@ -2537,7 +2574,8 @@ function handleCallInitiate(req, res, pathname) {
 		status: 'ACTIVE',
 		createdAt: Date.now(),
 		startedAt: Date.now(),
-		endedAt: null
+		endedAt: null,
+		lastHeartbeat: new Map([[callerId, Date.now()]])
 	};
 
 	// Initialize audio buffer for initiator
@@ -2626,6 +2664,7 @@ function handleCallJoin(req, res, pathname) {
 	}
 
 	call.participants.push(userId);
+	call.lastHeartbeat.set(userId, Date.now());
 
 	// Initialize audio buffer for this participant
 	const buffers = callAudioBuffers.get(callId);
@@ -2692,6 +2731,38 @@ function handleCallLeave(req, res, pathname) {
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
 	res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
+}
+
+function handleCallHeartbeat(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+	const call = activeCalls.get(callId);
+
+	if (!call || call.status === 'ENDED') {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ callStatus: 'ENDED' }));
+		return;
+	}
+
+	if (!call.participants.includes(userId)) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Not a participant' }));
+		return;
+	}
+
+	call.lastHeartbeat.set(userId, Date.now());
+
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ callStatus: call.status }));
 }
 
 function handleCallSendAudio(req, res, pathname) {
