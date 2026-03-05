@@ -1478,6 +1478,14 @@
             transform: scale(1.02);
         }
 
+        .message-video {
+            max-width: 280px;
+            max-height: 200px;
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-sm);
+            display: block;
+        }
+
         .message-audio {
             width: 200px;
             height: 32px;
@@ -2567,12 +2575,17 @@
                 cursor: pointer;
                 transition: opacity 0.2s;
             }
-            
+
             .message-image:hover {
                 opacity: 0.9;
                 transform: none;
             }
-            
+
+            .message-video {
+                max-width: 280px;
+                max-height: 200px;
+            }
+
             /* Input Area - Telegram Style */
             .input-area {
                 background: var(--tg-bg-secondary);
@@ -3106,7 +3119,12 @@
                 max-width: 200px;
                 max-height: 200px;
             }
-            
+
+            .message-video {
+                max-width: 220px;
+                max-height: 160px;
+            }
+
             .chat-header .chat-avatar {
                 width: 38px;
                 height: 38px;
@@ -4416,7 +4434,7 @@
 
             <!-- Attachment Menu (Expandable) -->
             <div id="attachment-menu" class="attachment-menu">
-                <button class="attachment-menu-item" id="menu-image-btn" title="Send Image">
+                <button class="attachment-menu-item" id="menu-image-btn" title="Send Media">
                     <span class="menu-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
@@ -4424,7 +4442,7 @@
                             <polyline points="21 15 16 10 5 21"/>
                         </svg>
                     </span>
-                    <span class="menu-label">Image</span>
+                    <span class="menu-label">Media</span>
                 </button>
                 <button class="attachment-menu-item" id="menu-file-btn" title="P2P Transfer (requires both users online)">
                     <span class="menu-icon">
@@ -4817,7 +4835,7 @@
     <div id="toast" class="toast"></div>
 
     <!-- Hidden file inputs -->
-    <input type="file" accept="image/*" id="image-input" style="display: none;">
+    <input type="file" accept="image/*,video/*" id="image-input" style="display: none;">
     <input type="file" id="p2p-file-input" style="display: none;">
     <input type="file" id="offline-file-input" style="display: none;">
 
@@ -5657,7 +5675,9 @@
         let isPolling = false;
         let pollingInterval = null;
         let isFetchingMessages = false;
-        let selectedImage = null;
+        let selectedMedia = null;      // image: dataUrl; video: objectUrl
+        let selectedMediaType = null;  // 'image' | 'video'
+        let selectedMediaFile = null;  // video: File object
 
         let mediaRecorder = null;
         let audioChunks = [];
@@ -6189,7 +6209,7 @@
             document.getElementById('cancel-reply-btn').addEventListener('click', clearReplyContext);
             document.getElementById('cancel-edit-btn').addEventListener('click', cancelEdit);
 
-            imageInput.addEventListener('change', handleImageSelect);
+            imageInput.addEventListener('change', handleMediaSelect);
             messageInput.addEventListener('input', handleInputChange);
             messageInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -7155,8 +7175,9 @@
 
                 const isVoice = message.type === 'voice';
                 const isImage = message.type === 'image';
+                const isVideo = message.type === 'video';
                 const isFile = message.type === 'file';
-                const isMedia = isVoice || isImage || isFile;
+                const isMedia = isVoice || isImage || isVideo || isFile;
 
                 let contentHtml = '';
 
@@ -7241,6 +7262,26 @@
                                 contentHtml = createDeferredContentButton(message.id, 'image');
                             }
                         }
+                    } else if (isVideo) {
+                        const cachedContent = await getCachedContent(message.id);
+                        if (cachedContent && cachedContent !== 'PLACEHOLDER') {
+                            const decryptedVideoBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
+                            const videoBlob = new Blob([decryptedVideoBuffer], { type: 'video/*' });
+                            const videoUrl = createTrackedBlobUrl(videoBlob);
+                            contentHtml = `<video class="message-video" src="${videoUrl}" controls playsinline></video>`;
+                        } else if (message.encryptedContent === null) {
+                            contentHtml = createDeferredContentButton(message.id, 'video');
+                        } else {
+                            if (message.encryptedContent) {
+                                await cacheContentWithQuota(message.id, message.encryptedContent);
+                                const decryptedVideoBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                                const videoBlob = new Blob([decryptedVideoBuffer], { type: 'video/*' });
+                                const videoUrl = createTrackedBlobUrl(videoBlob);
+                                contentHtml = `<video class="message-video" src="${videoUrl}" controls playsinline></video>`;
+                            } else {
+                                contentHtml = createDeferredContentButton(message.id, 'video');
+                            }
+                        }
                     } else if (isFile) {
                         let fileMeta = null;
                         if (message.encryptedMeta) {
@@ -7256,8 +7297,8 @@
                 } catch (err) {
                     window.reportClientError(err, 'decrypt message content');
                     // For deferred content, just show the download button
-                    if (isVoice || isImage) {
-                        const contentType = isVoice ? 'voice' : 'image';
+                    if (isVoice || isImage || isVideo) {
+                        const contentType = isVoice ? 'voice' : isVideo ? 'video' : 'image';
                         contentHtml = createDeferredContentButton(message.id, contentType);
                     } else if (isFile) {
                         contentHtml = createFileMessageCard(message.id, null);
@@ -7530,40 +7571,60 @@
 
         function handleInputChange() {
             const hasText = messageInput.value.trim().length > 0;
-            const hasImage = selectedImage !== null;
-            sendBtn.disabled = !hasText && !hasImage;
+            const hasMedia = selectedMedia !== null;
+            sendBtn.disabled = !hasText && !hasMedia;
             // Update typing state (piggybacked on next heartbeat)
             isTyping = hasText;
             clearTimeout(typingTimeout);
             if (isTyping) typingTimeout = setTimeout(() => { isTyping = false; }, 4000);
         }
 
-        function handleImageSelect(e) {
+        function handleMediaSelect(e) {
             const file = e.target.files[0];
             if (!file) return;
 
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                selectedImage = event.target.result;
-                
-                const previewItem = document.createElement('div');
-                previewItem.className = 'preview-item';
+            const isVideo = file.type.startsWith('video/');
+            selectedMediaType = isVideo ? 'video' : 'image';
+
+            const previewItem = document.createElement('div');
+            previewItem.className = 'preview-item';
+
+            if (isVideo) {
+                selectedMediaFile = file;
+                selectedMedia = URL.createObjectURL(file);
                 previewItem.innerHTML = `
-                    <img src="${selectedImage}" alt="Preview">
-                    <button class="preview-remove" onclick="removeImage()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    <video src="${selectedMedia}" style="max-width:100%;max-height:120px;border-radius:8px;" muted playsinline></video>
+                    <button class="preview-remove" onclick="removeMedia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 `;
-                
                 imagePreview.innerHTML = '';
                 imagePreview.appendChild(previewItem);
                 imagePreview.classList.add('active');
-                
                 handleInputChange();
-            };
-            reader.readAsDataURL(file);
+            } else {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    selectedMedia = event.target.result;
+                    selectedMediaFile = null;
+                    previewItem.innerHTML = `
+                        <img src="${selectedMedia}" alt="Preview">
+                        <button class="preview-remove" onclick="removeMedia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    `;
+                    imagePreview.innerHTML = '';
+                    imagePreview.appendChild(previewItem);
+                    imagePreview.classList.add('active');
+                    handleInputChange();
+                };
+                reader.readAsDataURL(file);
+            }
         }
 
-        window.removeImage = function() {
-            selectedImage = null;
+        window.removeMedia = function() {
+            if (selectedMediaType === 'video' && selectedMedia) {
+                URL.revokeObjectURL(selectedMedia);
+            }
+            selectedMedia = null;
+            selectedMediaType = null;
+            selectedMediaFile = null;
             imagePreview.innerHTML = '';
             imagePreview.classList.remove('active');
             imageInput.value = '';
@@ -8112,9 +8173,9 @@
 
         async function sendMessage() {
             const message = messageInput.value.trim();
-            const hasImage = selectedImage !== null;
+            const hasMedia = selectedMedia !== null;
 
-            if (!message && !hasImage) return;
+            if (!message && !hasMedia) return;
 
             // ── Edit mode: submit as an edit, not a new message ──
             if (editContext && message) {
@@ -8169,9 +8230,9 @@
                 return;
             }
 
-            if (hasImage) {
-                // Use chunked upload for images
-                await sendImageChunked();
+            if (hasMedia) {
+                // Use chunked upload for images/videos
+                await sendMediaChunked();
             } else {
                 // Send text message directly
                 await ensureTimeSynced();
@@ -8242,13 +8303,14 @@
         let currentUploadSessionId = null;
 
         // Constants for file size limits
-        const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB limit
-        const MAX_VOICE_SIZE = 2 * 1024 * 1024; // 2MB limit
+        const MAX_IMAGE_SIZE = 5 * 1024 * 1024;   // 5MB limit
+        const MAX_VIDEO_SIZE = 30 * 1024 * 1024;  // 30MB limit
+        const MAX_VOICE_SIZE = 2 * 1024 * 1024;   // 2MB limit
         const MAX_OFFLINE_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit
 
-        async function sendImageChunked() {
-            if (!selectedImage || !currentChat) {
-                showToast('No image selected', 'error');
+        async function sendMediaChunked() {
+            if (!selectedMedia || !currentChat) {
+                showToast('No media selected', 'error');
                 return;
             }
 
@@ -8257,19 +8319,39 @@
                 return;
             }
 
+            const isVideo = selectedMediaType === 'video';
+            const MAX_SIZE = isVideo ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
+            const msgType = selectedMediaType; // 'image' or 'video'
+
             // Check storage health before attempting upload
             const stats = await getStorageStats();
             if (stats.localStorage.usagePercent > 95) {
                 showToast('Storage nearly full! Upload may not cache locally.', 'warning');
             }
 
-            // Validate file size
-            const base64Data = selectedImage.split(',')[1];
-            const fileSizeBytes = base64Data.length * 0.75; // base64 is ~75% efficient
-            if (fileSizeBytes > MAX_IMAGE_SIZE) {
-                showToast(`Image too large. Maximum size is ${MAX_IMAGE_SIZE / 1024 / 1024}MB`, 'error');
-                window.removeImage();
-                return;
+            // Validate file size and get ArrayBuffer
+            let mediaData;
+            if (isVideo) {
+                if (selectedMediaFile.size > MAX_SIZE) {
+                    showToast(`Video too large. Maximum size is ${MAX_SIZE / 1024 / 1024}MB`, 'error');
+                    window.removeMedia();
+                    return;
+                }
+                mediaData = await selectedMediaFile.arrayBuffer();
+            } else {
+                const base64Data = selectedMedia.split(',')[1];
+                const fileSizeBytes = base64Data.length * 0.75;
+                if (fileSizeBytes > MAX_SIZE) {
+                    showToast(`Image too large. Maximum size is ${MAX_SIZE / 1024 / 1024}MB`, 'error');
+                    window.removeMedia();
+                    return;
+                }
+                const binaryString = atob(base64Data);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+                mediaData = bytes.buffer;
             }
 
             isUploading = true;
@@ -8283,25 +8365,17 @@
 
             let uploadSucceeded = false;
             let finalResult = null;
-            let encryptedImage = null;
+            let encryptedMedia = null;
 
             try {
-                showToast('Uploading image...', 'info');
+                showToast(`Uploading ${msgType}...`, 'info');
                 showUploadProgress(true);
 
-                // Convert base64 to binary
-                const binaryString = atob(base64Data);
-                const bytes = new Uint8Array(binaryString.length);
-                for (let i = 0; i < binaryString.length; i++) {
-                    bytes[i] = binaryString.charCodeAt(i);
-                }
-                const imageData = bytes.buffer;
-
-                // 1. Encrypt the image
-                encryptedImage = await encryptBinary(imageData, currentChat.encryptionKey);
+                // 1. Encrypt the media
+                encryptedMedia = await encryptBinary(mediaData, currentChat.encryptionKey);
 
                 // Convert encrypted data back to binary
-                const encryptedBinaryString = atob(encryptedImage);
+                const encryptedBinaryString = atob(encryptedMedia);
                 const encryptedBytes = new Uint8Array(encryptedBinaryString.length);
                 for (let i = 0; i < encryptedBinaryString.length; i++) {
                     encryptedBytes[i] = encryptedBinaryString.charCodeAt(i);
@@ -8329,7 +8403,7 @@
                 await uploader.uploadChunked(
                     currentChat.handle,
                     finalData,
-                    'image',
+                    msgType,
                     (progress) => {
                         if (isUploadCancelled) return;
                         console.log(`Upload progress: ${progress.toFixed(0)}%`);
@@ -8353,25 +8427,25 @@
                     currentChat.handle,
                     encryptedName,
                     encryptedTimestamp,
-                    'image',
+                    msgType,
                     isCompressed
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
                 uploadSucceeded = true;
                 finalResult = result;
-                
-                showToast('Image sent successfully!', 'success');
+
+                showToast(`${msgType.charAt(0).toUpperCase() + msgType.slice(1)} sent successfully!`, 'success');
                 showUploadProgress(false);
-                window.removeImage();
-                
+                window.removeMedia();
+
             } catch (error) {
-                window.reportClientError(error, 'image upload');
-                console.error('Image upload error:', error);
+                window.reportClientError(error, `${msgType} upload`);
+                console.error(`${msgType} upload error:`, error);
                 showUploadProgress(false);
 
                 if (!isUploadCancelled) {
-                    showToast('Failed to send image', 'error');
+                    showToast(`Failed to send ${msgType}`, 'error');
                 }
 
                 // Try to cancel the upload if it's still active
@@ -8379,7 +8453,7 @@
                     try {
                         await uploader.cancel(currentChat.handle);
                     } catch (cancelError) {
-                        window.reportClientError(cancelError, 'cancel image upload');
+                        window.reportClientError(cancelError, `cancel ${msgType} upload`);
                         console.error('Failed to cancel upload:', cancelError);
                     }
                 }
@@ -8391,26 +8465,25 @@
                 currentUploadSessionId = null;
                 currentUploader = null;
             }
-            
+
             // SEPARATE CACHING STEP - Non-blocking, non-fatal
             if (uploadSucceeded && finalResult) {
                 try {
                     const actualMessageId = finalResult.messageId;
-                    const cached = await cacheContentWithQuota(actualMessageId, encryptedImage);
-                    
+                    const cached = await cacheContentWithQuota(actualMessageId, encryptedMedia);
+
                     if (!cached) {
-                        // Cache failed but upload succeeded - inform user
-                        showToast('Image sent but not cached locally (storage full)', 'info');
-                        console.warn('Failed to cache image locally due to storage limitations');
+                        showToast(`${msgType.charAt(0).toUpperCase() + msgType.slice(1)} sent but not cached locally (storage full)`, 'info');
+                        console.warn(`Failed to cache ${msgType} locally due to storage limitations`);
                     } else {
-                        console.log(`Image cached locally: ${actualMessageId}`);
+                        console.log(`${msgType} cached locally: ${actualMessageId}`);
                     }
                 } catch (cacheError) {
-                    window.reportClientError(cacheError, 'cache image locally');
+                    window.reportClientError(cacheError, `cache ${msgType} locally`);
                     console.error('Cache error (non-fatal):', cacheError);
-                    showToast('Image sent successfully (cache unavailable)', 'info');
+                    showToast(`${msgType.charAt(0).toUpperCase() + msgType.slice(1)} sent successfully (cache unavailable)`, 'info');
                 }
-                
+
                 // Refresh messages regardless of cache status
                 fetchMessages();
             }
@@ -9252,11 +9325,22 @@
                                 const imageUrl = createTrackedBlobUrl(imageBlob);
 
                                 const imgHtml = `<img class="message-image" src="${imageUrl}" alt="Image" onclick="openLightbox('${imageUrl}')">`;
-                                
+
                                 // Replace the deferred element with new image content
                                 const newContentDiv = document.createElement('div');
                                 newContentDiv.innerHTML = imgHtml;
-                                
+
+                                if (deferredElement.parentElement) {
+                                    deferredElement.parentElement.replaceChild(newContentDiv, deferredElement);
+                                }
+                            } else if (contentType === 'video') {
+                                const decryptedVideoBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const videoBlob = new Blob([decryptedVideoBuffer], { type: 'video/*' });
+                                const videoUrl = createTrackedBlobUrl(videoBlob);
+
+                                const newContentDiv = document.createElement('div');
+                                newContentDiv.innerHTML = `<video class="message-video" src="${videoUrl}" controls playsinline></video>`;
+
                                 if (deferredElement.parentElement) {
                                     deferredElement.parentElement.replaceChild(newContentDiv, deferredElement);
                                 }
@@ -9308,8 +9392,8 @@
         // Cleanup function for failed uploads
         function cleanupFailedUpload(uploader) {
             try {
-                // Clean up image selection on failure
-                window.removeImage();
+                // Clean up media selection on failure
+                window.removeMedia();
 
                 // Clear any upload state
                 localStorage.removeItem(`upload_session_${uploader?.sessionId}`);
@@ -9605,12 +9689,13 @@
             const file = e.target.files[0];
             if (!file) return;
 
-            // Check if file is image or audio (should use existing upload)
+            // Check if file is image, video or audio (should use existing upload)
             const isImage = file.type.startsWith('image/');
+            const isVideo = file.type.startsWith('video/');
             const isAudio = file.type.startsWith('audio/');
 
-            if (isImage || isAudio) {
-                showToast(`Please use the attachment button for ${isImage ? 'images' : 'audio'} files`, 'info');
+            if (isImage || isVideo || isAudio) {
+                showToast(`Please use the attachment button for ${isAudio ? 'audio' : 'media'} files`, 'info');
                 p2pFileInput.value = '';
                 return;
             }
