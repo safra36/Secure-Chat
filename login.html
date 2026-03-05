@@ -3096,6 +3096,52 @@
             transform: none;
         }
 
+        /* Active call banner */
+        .active-call-banner {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            background: rgba(0, 184, 148, 0.12);
+            border-bottom: 1px solid rgba(0, 184, 148, 0.25);
+            font-size: 13px;
+            color: var(--text-primary);
+            flex-shrink: 0;
+        }
+
+        .active-call-count {
+            color: var(--text-secondary);
+            font-size: 12px;
+        }
+
+        .active-call-join-btn {
+            margin-left: auto;
+            padding: 4px 14px;
+            background: var(--success);
+            color: #fff;
+            border: none;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: opacity 0.15s;
+        }
+
+        .active-call-join-btn:hover { opacity: 0.85; }
+
+        .active-call-dismiss-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 14px;
+            padding: 2px 4px;
+            line-height: 1;
+            transition: color 0.15s;
+        }
+
+        .active-call-dismiss-btn:hover { color: var(--text-primary); }
+
         /* Incoming call modal */
         .incoming-call-content {
             text-align: center;
@@ -4150,6 +4196,14 @@
                     <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
                 </svg>
             </button>
+        </div>
+
+        <div id="active-call-banner" class="active-call-banner" style="display:none">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            <span>Call in progress</span>
+            <span id="active-call-count" class="active-call-count"></span>
+            <button id="active-call-join-btn" class="active-call-join-btn">Join</button>
+            <button id="active-call-dismiss-btn" class="active-call-dismiss-btn" title="Dismiss">✕</button>
         </div>
 
         <div id="load-more-bar" style="display:none;text-align:center;padding:6px 0;flex-shrink:0">
@@ -5247,6 +5301,14 @@
 
         // Per-remote participant audio pipelines: Map<userId, { mediaSource, sourceBuffer, audioElement, audioQueue, lastSeq, pollInterval, pollInFlight, sourceBufferReady }>
         let remoteAudioPipelines = new Map();
+
+        // Call IDs the user has dismissed — don't re-show banner for these
+        let dismissedCallIds = new Set();
+
+        // Info about an active call in current chat that we haven't joined
+        let activeChatCallInfo = null;
+        // Track which call we last played ring for (ring at most once per call)
+        let lastRingCallId = null;
 
         // Time synchronization
         let timeOffset = 0; // Offset between client and server time (client_time - server_time)
@@ -9270,19 +9332,24 @@
 
         // ==================== VOICE CALL FUNCTIONS ====================
 
-        // Call button click
+        // Call button — join existing call or start a new one
         document.getElementById('call-btn').addEventListener('click', () => {
             if (!currentChat || callState !== 'IDLE') return;
-            initiateCall();
+            if (activeChatCallInfo) {
+                joinCall(activeChatCallInfo.callSessionId);
+            } else {
+                initiateCall();
+            }
         });
 
-        // Join/Decline buttons
-        document.getElementById('accept-call-btn').addEventListener('click', () => {
-            if (activeCallSession) joinCall(activeCallSession.callSessionId);
+        // Active call banner buttons
+        document.getElementById('active-call-join-btn').addEventListener('click', () => {
+            if (activeChatCallInfo) joinCall(activeChatCallInfo.callSessionId);
         });
 
-        document.getElementById('reject-call-btn').addEventListener('click', () => {
-            if (activeCallSession) rejectCall(activeCallSession.callSessionId);
+        document.getElementById('active-call-dismiss-btn').addEventListener('click', () => {
+            if (activeChatCallInfo) dismissedCallIds.add(activeChatCallInfo.callSessionId);
+            hideActiveCallBanner();
         });
 
         // Mute button
@@ -9305,9 +9372,6 @@
         async function initiateCall() {
             if (!currentChat) return;
             try {
-                callState = 'RINGING_OUT';
-                updateCallUI();
-
                 const response = await authenticatedFetch(`/call/initiate/${currentChat.handle}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' }
@@ -9315,36 +9379,28 @@
 
                 if (!response.ok) {
                     const err = await response.json();
-                    showToast(err.error || 'Failed to initiate call', 'error');
-                    callState = 'IDLE';
-                    updateCallUI();
+                    showToast(err.error || 'Failed to start call', 'error');
                     return;
                 }
 
-                const { callSessionId } = await response.json();
+                const data = await response.json();
                 const myUserId = localStorage.getItem('userId');
                 activeCallSession = {
-                    callSessionId,
+                    callSessionId: data.callSessionId,
                     chatHandle: currentChat.handle,
                     myUserId,
                     role: 'initiator',
-                    startTime: null,
-                    participants: [myUserId]
+                    startTime: Date.now(),
+                    participants: data.participants
                 };
 
+                callState = 'ACTIVE';
+                hideActiveCallBanner();
+                updateCallUI();
+                await startCallAudio(data.participants);
                 startCallSignalingPoll();
-                showToast('Calling...', 'info');
-
-                // Auto-timeout after 30s
-                setTimeout(() => {
-                    if (callState === 'RINGING_OUT') {
-                        showToast('No answer', 'error');
-                        leaveCall();
-                    }
-                }, 30000);
             } catch (err) {
                 window.reportClientError(err, 'initiate call');
-                console.error('Call initiation error:', err);
                 callState = 'IDLE';
                 updateCallUI();
                 showToast('Failed to start call', 'error');
@@ -9355,30 +9411,20 @@
             if (callPollInterval) clearInterval(callPollInterval);
 
             callPollInterval = setInterval(async () => {
-                if (!currentChat || !activeCallSession) return;
+                if (!currentChat || !activeCallSession || callState !== 'ACTIVE') return;
 
                 try {
                     const resp = await authenticatedFetch(`/call/poll/${activeCallSession.chatHandle}`, { method: 'GET' });
 
                     if (resp.status === 200) {
                         const data = await resp.json();
-
-                        if (callState === 'RINGING_OUT' && data.status === 'ACTIVE') {
-                            callState = 'ACTIVE';
-                            activeCallSession.startTime = Date.now();
-                            activeCallSession.participants = data.participants;
-                            updateCallUI();
-                            startCallAudio(data.participants);
-                            showToast('Call connected', 'success');
-                        } else if (callState === 'ACTIVE') {
-                            if (data.status === 'ENDED') {
-                                showToast('Call ended', 'info');
-                                leaveCall();
-                            } else {
-                                updateCallParticipants(data.participants);
-                            }
+                        if (data.status === 'ENDED') {
+                            showToast('Call ended', 'info');
+                            leaveCall();
+                        } else {
+                            updateCallParticipants(data.participants);
                         }
-                    } else if (resp.status === 204 && callState === 'ACTIVE') {
+                    } else if (resp.status === 204) {
                         showToast('Call ended', 'info');
                         leaveCall();
                     }
@@ -9399,26 +9445,39 @@
 
                     if (resp.status === 200) {
                         const data = await resp.json();
-                        if (!data.isParticipant && (data.status === 'RINGING' || data.status === 'ACTIVE')) {
-                            const myUserId = localStorage.getItem('userId');
-                            callState = 'RINGING_IN';
-                            activeCallSession = {
-                                callSessionId: data.callSessionId,
-                                chatHandle: currentChat.handle,
-                                myUserId,
-                                role: 'participant',
-                                startTime: null,
-                                participants: data.participants
-                            };
-                            showIncomingCallModal(data.initiatorId, data.status);
-                            if (data.status === 'RINGING') playCallRingSound();
+                        if (data.status === 'ACTIVE' && !data.isParticipant && !dismissedCallIds.has(data.callSessionId)) {
+                            if (data.callSessionId !== lastRingCallId) {
+                                lastRingCallId = data.callSessionId;
+                                playCallRingSound();
+                            }
+                            showActiveCallBanner(data);
+                        } else if (!data.isParticipant && (data.status === 'ENDED' || resp.status === 204)) {
+                            hideActiveCallBanner();
                         }
+                    } else if (resp.status === 204) {
+                        hideActiveCallBanner();
                     }
                 } catch (e) {
-                    window.reportClientError(e, 'ring sound polling');
+                    window.reportClientError(e, 'call status polling');
                     /* ignore */
                 }
             }, 2000);
+        }
+
+        function showActiveCallBanner(data) {
+            activeChatCallInfo = data;
+            const banner = document.getElementById('active-call-banner');
+            const countEl = document.getElementById('active-call-count');
+            if (!banner) return;
+            const n = data.participants?.length || 0;
+            countEl.textContent = `· ${n} participant${n !== 1 ? 's' : ''}`;
+            banner.style.display = 'flex';
+        }
+
+        function hideActiveCallBanner() {
+            activeChatCallInfo = null;
+            const banner = document.getElementById('active-call-banner');
+            if (banner) banner.style.display = 'none';
         }
 
         function showIncomingCallModal(callerId, callStatus) {
@@ -9456,8 +9515,11 @@
         }
 
         async function joinCall(callSessionId) {
-            if (!currentChat || !activeCallSession) return;
-            hideIncomingCallModal();
+            if (!currentChat) return;
+            hideActiveCallBanner();
+            if (!activeCallSession) {
+                activeCallSession = { callSessionId, chatHandle: currentChat.handle, myUserId: localStorage.getItem('userId'), role: 'callee' };
+            }
 
             try {
                 const resp = await authenticatedFetch(
@@ -9504,6 +9566,7 @@
                 /* ignore */
             }
 
+            if (callSessionId) dismissedCallIds.add(callSessionId);
             callState = 'IDLE';
             activeCallSession = null;
             updateCallUI();
@@ -9853,18 +9916,11 @@
 
             if (callState === 'IDLE') {
                 callBtn.disabled = false;
+                callBtn.title = activeChatCallInfo ? 'Join call' : 'Start call';
                 overlay.classList.remove('active');
                 document.body.classList.remove('call-active');
                 muteBtn.classList.remove('muted');
                 document.getElementById('call-participants-strip').innerHTML = '';
-            } else if (callState === 'RINGING_OUT') {
-                callBtn.disabled = true;
-                overlay.classList.add('active');
-                document.body.classList.add('call-active');
-                document.getElementById('call-timer').textContent = 'Calling...';
-                renderCallParticipantStrip(activeCallSession?.participants || []);
-            } else if (callState === 'RINGING_IN') {
-                callBtn.disabled = true;
             } else if (callState === 'ACTIVE') {
                 callBtn.disabled = true;
                 overlay.classList.add('active');
@@ -9878,8 +9934,12 @@
         openChat = function(handle) {
             _origOpenChat(handle);
             startIncomingCallPoll();
-            // Clear seen invitations for new chat
+            // Clear seen invitations and dismissed calls for new chat
             seenInvitationIds.clear();
+            dismissedCallIds.clear();
+            activeChatCallInfo = null;
+            lastRingCallId = null;
+            hideActiveCallBanner();
         };
 
         // Integration: stop call when leaving chat

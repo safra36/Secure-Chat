@@ -2544,9 +2544,9 @@ function handleCallInitiate(req, res, pathname) {
 		chatHandle,
 		initiatorId: callerId,
 		participants: [callerId],
-		status: 'RINGING',
+		status: 'ACTIVE',
 		createdAt: Date.now(),
-		startedAt: null,
+		startedAt: Date.now(),
 		endedAt: null
 	};
 
@@ -2557,7 +2557,7 @@ function handleCallInitiate(req, res, pathname) {
 	pendingCalls.set(chatHandle, callSessionId);
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify({ callSessionId, status: 'RINGING' }));
+	res.end(JSON.stringify({ callSessionId, status: 'ACTIVE', participants: [callerId] }));
 }
 
 function handleCallPoll(req, res, pathname) {
@@ -2640,12 +2640,6 @@ function handleCallJoin(req, res, pathname) {
 	// Initialize audio buffer for this participant
 	const buffers = callAudioBuffers.get(callId);
 	if (buffers) buffers.set(userId, { chunks: [], seq: 0 });
-
-	// First non-initiator joining activates the call
-	if (call.status === 'RINGING') {
-		call.status = 'ACTIVE';
-		call.startedAt = Date.now();
-	}
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
 	res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
