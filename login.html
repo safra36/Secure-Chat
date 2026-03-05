@@ -9737,7 +9737,8 @@
                 lastSeq: -1,
                 pollInterval: null,
                 pollInFlight: false,
-                sourceBufferReady: true
+                sourceBufferReady: true,
+                abortController: new AbortController()
             };
 
             pipeline.audioElement.src = URL.createObjectURL(pipeline.mediaSource);
@@ -9765,6 +9766,7 @@
             if (!pipeline) return;
 
             if (pipeline.pollInterval) clearInterval(pipeline.pollInterval);
+            if (pipeline.abortController) pipeline.abortController.abort();
 
             if (pipeline.audioElement) {
                 pipeline.audioElement.pause();
@@ -9798,8 +9800,11 @@
                 try {
                     const resp = await authenticatedFetch(
                         `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?fromUserId=${encodeURIComponent(userId)}&afterSeq=${currentSeq}&maxWaitMs=500`,
-                        { method: 'GET' }
+                        { method: 'GET', signal: pipeline.abortController.signal }
                     );
+
+                    // Discard if this pipeline was replaced while request was in-flight
+                    if (remoteAudioPipelines.get(userId) !== pipeline) return;
 
                     if (resp.status === 200) {
                         const data = await resp.json();
@@ -9814,14 +9819,17 @@
                             pipeline.lastSeq = data.seq;
                             try {
                                 const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
-                                enqueueRemoteAudio(userId, decrypted);
+                                // Guard again after async decrypt
+                                if (remoteAudioPipelines.get(userId) === pipeline) {
+                                    enqueueRemoteAudio(userId, decrypted);
+                                }
                             } catch (e) {
-                                window.reportClientError(e, 'decrypt remote audio');
+                                if (e.name !== 'AbortError') window.reportClientError(e, 'decrypt remote audio');
                             }
                         }
                     }
                 } catch (e) {
-                    window.reportClientError(e, 'remote audio poll');
+                    if (e.name !== 'AbortError') window.reportClientError(e, 'remote audio poll');
                 } finally {
                     pipeline.pollInFlight = false;
                 }
