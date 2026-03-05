@@ -1398,6 +1398,63 @@
             transform: scale(1.2);
         }
 
+        /* Input emoji picker */
+        .emoji-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 18px;
+            padding: 0 4px;
+            opacity: 0.45;
+            transition: opacity 0.15s;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        .emoji-btn:hover, .emoji-btn.active { opacity: 1; }
+        .input-emoji-panel {
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            padding: 8px;
+            display: none;
+            flex-direction: column;
+            box-shadow: 0 -4px 24px rgba(0,0,0,0.3);
+            z-index: 1001;
+            width: min(320px, 94vw);
+        }
+        .input-emoji-panel.visible { display: flex; }
+        .input-emoji-panel-grid {
+            display: flex;
+            flex-wrap: wrap;
+            max-height: 200px;
+            overflow-y: auto;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) transparent;
+        }
+        .input-emoji-panel .emoji-option { font-size: 22px; padding: 5px; }
+
+        /* Swipe-to-reply */
+        .message-group { position: relative; }
+        .swipe-reply-icon {
+            position: absolute;
+            left: -2px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--accent);
+            color: white;
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 5;
+        }
+
         .message-time {
             font-size: var(--font-size-xs);
             font-weight: 500;
@@ -4360,6 +4417,7 @@
                         placeholder="Message..."
                         rows="1"
                     ></textarea>
+                    <button id="emoji-btn" class="emoji-btn" title="Emoji" type="button">😊</button>
                 </div>
                 <button id="voice-btn" class="voice-btn" title="Record voice">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 22px; height: 22px;">
@@ -4490,6 +4548,193 @@
         <button class="emoji-option" data-emoji="🍦">🍦</button>
         <button class="emoji-option" data-emoji="🍩">🍩</button>
         <button class="emoji-option" data-emoji="🍪">🍪</button>
+    </div>
+
+    <!-- Input emoji panel -->
+    <div id="input-emoji-panel" class="input-emoji-panel">
+        <div class="input-emoji-panel-grid">
+            <button class="emoji-option" data-emoji="😀">😀</button>
+            <button class="emoji-option" data-emoji="😃">😃</button>
+            <button class="emoji-option" data-emoji="😄">😄</button>
+            <button class="emoji-option" data-emoji="😁">😁</button>
+            <button class="emoji-option" data-emoji="😆">😆</button>
+            <button class="emoji-option" data-emoji="😅">😅</button>
+            <button class="emoji-option" data-emoji="🤣">🤣</button>
+            <button class="emoji-option" data-emoji="😂">😂</button>
+            <button class="emoji-option" data-emoji="🙂">🙂</button>
+            <button class="emoji-option" data-emoji="😉">😉</button>
+            <button class="emoji-option" data-emoji="😊">😊</button>
+            <button class="emoji-option" data-emoji="😇">😇</button>
+            <button class="emoji-option" data-emoji="🥰">🥰</button>
+            <button class="emoji-option" data-emoji="😍">😍</button>
+            <button class="emoji-option" data-emoji="🤩">🤩</button>
+            <button class="emoji-option" data-emoji="😘">😘</button>
+            <button class="emoji-option" data-emoji="😗">😗</button>
+            <button class="emoji-option" data-emoji="😚">😚</button>
+            <button class="emoji-option" data-emoji="😙">😙</button>
+            <button class="emoji-option" data-emoji="🥲">🥲</button>
+            <button class="emoji-option" data-emoji="😋">😋</button>
+            <button class="emoji-option" data-emoji="😛">😛</button>
+            <button class="emoji-option" data-emoji="😜">😜</button>
+            <button class="emoji-option" data-emoji="🤪">🤪</button>
+            <button class="emoji-option" data-emoji="😝">😝</button>
+            <button class="emoji-option" data-emoji="🤑">🤑</button>
+            <button class="emoji-option" data-emoji="🤗">🤗</button>
+            <button class="emoji-option" data-emoji="🤭">🤭</button>
+            <button class="emoji-option" data-emoji="🤫">🤫</button>
+            <button class="emoji-option" data-emoji="🤔">🤔</button>
+            <button class="emoji-option" data-emoji="🤐">🤐</button>
+            <button class="emoji-option" data-emoji="😐">😐</button>
+            <button class="emoji-option" data-emoji="😑">😑</button>
+            <button class="emoji-option" data-emoji="😶">😶</button>
+            <button class="emoji-option" data-emoji="😏">😏</button>
+            <button class="emoji-option" data-emoji="😒">😒</button>
+            <button class="emoji-option" data-emoji="🙄">🙄</button>
+            <button class="emoji-option" data-emoji="😬">😬</button>
+            <button class="emoji-option" data-emoji="🤥">🤥</button>
+            <button class="emoji-option" data-emoji="😌">😌</button>
+            <button class="emoji-option" data-emoji="😔">😔</button>
+            <button class="emoji-option" data-emoji="😪">😪</button>
+            <button class="emoji-option" data-emoji="😴">😴</button>
+            <button class="emoji-option" data-emoji="😷">😷</button>
+            <button class="emoji-option" data-emoji="🤒">🤒</button>
+            <button class="emoji-option" data-emoji="🤕">🤕</button>
+            <button class="emoji-option" data-emoji="🤢">🤢</button>
+            <button class="emoji-option" data-emoji="🤧">🤧</button>
+            <button class="emoji-option" data-emoji="🥵">🥵</button>
+            <button class="emoji-option" data-emoji="🥶">🥶</button>
+            <button class="emoji-option" data-emoji="😵">😵</button>
+            <button class="emoji-option" data-emoji="🤯">🤯</button>
+            <button class="emoji-option" data-emoji="🤠">🤠</button>
+            <button class="emoji-option" data-emoji="🥳">🥳</button>
+            <button class="emoji-option" data-emoji="😎">😎</button>
+            <button class="emoji-option" data-emoji="🤓">🤓</button>
+            <button class="emoji-option" data-emoji="🧐">🧐</button>
+            <button class="emoji-option" data-emoji="😕">😕</button>
+            <button class="emoji-option" data-emoji="😟">😟</button>
+            <button class="emoji-option" data-emoji="🙁">🙁</button>
+            <button class="emoji-option" data-emoji="☹️">☹️</button>
+            <button class="emoji-option" data-emoji="😮">😮</button>
+            <button class="emoji-option" data-emoji="😯">😯</button>
+            <button class="emoji-option" data-emoji="😲">😲</button>
+            <button class="emoji-option" data-emoji="😳">😳</button>
+            <button class="emoji-option" data-emoji="🥺">🥺</button>
+            <button class="emoji-option" data-emoji="😦">😦</button>
+            <button class="emoji-option" data-emoji="😧">😧</button>
+            <button class="emoji-option" data-emoji="😨">😨</button>
+            <button class="emoji-option" data-emoji="😰">😰</button>
+            <button class="emoji-option" data-emoji="😥">😥</button>
+            <button class="emoji-option" data-emoji="😢">😢</button>
+            <button class="emoji-option" data-emoji="😭">😭</button>
+            <button class="emoji-option" data-emoji="😱">😱</button>
+            <button class="emoji-option" data-emoji="😖">😖</button>
+            <button class="emoji-option" data-emoji="😣">😣</button>
+            <button class="emoji-option" data-emoji="😞">😞</button>
+            <button class="emoji-option" data-emoji="😓">😓</button>
+            <button class="emoji-option" data-emoji="😩">😩</button>
+            <button class="emoji-option" data-emoji="😫">😫</button>
+            <button class="emoji-option" data-emoji="🥱">🥱</button>
+            <button class="emoji-option" data-emoji="😤">😤</button>
+            <button class="emoji-option" data-emoji="😡">😡</button>
+            <button class="emoji-option" data-emoji="😠">😠</button>
+            <button class="emoji-option" data-emoji="🤬">🤬</button>
+            <button class="emoji-option" data-emoji="😈">😈</button>
+            <button class="emoji-option" data-emoji="👿">👿</button>
+            <button class="emoji-option" data-emoji="💀">💀</button>
+            <button class="emoji-option" data-emoji="☠️">☠️</button>
+            <button class="emoji-option" data-emoji="💩">💩</button>
+            <button class="emoji-option" data-emoji="🤡">🤡</button>
+            <button class="emoji-option" data-emoji="👻">👻</button>
+            <button class="emoji-option" data-emoji="👽">👽</button>
+            <button class="emoji-option" data-emoji="🤖">🤖</button>
+            <button class="emoji-option" data-emoji="👋">👋</button>
+            <button class="emoji-option" data-emoji="🤚">🤚</button>
+            <button class="emoji-option" data-emoji="🖐️">🖐️</button>
+            <button class="emoji-option" data-emoji="✋">✋</button>
+            <button class="emoji-option" data-emoji="🖖">🖖</button>
+            <button class="emoji-option" data-emoji="🤙">🤙</button>
+            <button class="emoji-option" data-emoji="👈">👈</button>
+            <button class="emoji-option" data-emoji="👉">👉</button>
+            <button class="emoji-option" data-emoji="👆">👆</button>
+            <button class="emoji-option" data-emoji="👇">👇</button>
+            <button class="emoji-option" data-emoji="☝️">☝️</button>
+            <button class="emoji-option" data-emoji="👍">👍</button>
+            <button class="emoji-option" data-emoji="👎">👎</button>
+            <button class="emoji-option" data-emoji="✊">✊</button>
+            <button class="emoji-option" data-emoji="👊">👊</button>
+            <button class="emoji-option" data-emoji="🤛">🤛</button>
+            <button class="emoji-option" data-emoji="🤜">🤜</button>
+            <button class="emoji-option" data-emoji="🤞">🤞</button>
+            <button class="emoji-option" data-emoji="✌️">✌️</button>
+            <button class="emoji-option" data-emoji="🤟">🤟</button>
+            <button class="emoji-option" data-emoji="🤘">🤘</button>
+            <button class="emoji-option" data-emoji="👌">👌</button>
+            <button class="emoji-option" data-emoji="🤌">🤌</button>
+            <button class="emoji-option" data-emoji="🤏">🤏</button>
+            <button class="emoji-option" data-emoji="👏">👏</button>
+            <button class="emoji-option" data-emoji="🙌">🙌</button>
+            <button class="emoji-option" data-emoji="🤝">🤝</button>
+            <button class="emoji-option" data-emoji="🙏">🙏</button>
+            <button class="emoji-option" data-emoji="💪">💪</button>
+            <button class="emoji-option" data-emoji="🦾">🦾</button>
+            <button class="emoji-option" data-emoji="✍️">✍️</button>
+            <button class="emoji-option" data-emoji="🫶">🫶</button>
+            <button class="emoji-option" data-emoji="❤️">❤️</button>
+            <button class="emoji-option" data-emoji="🧡">🧡</button>
+            <button class="emoji-option" data-emoji="💛">💛</button>
+            <button class="emoji-option" data-emoji="💚">💚</button>
+            <button class="emoji-option" data-emoji="💙">💙</button>
+            <button class="emoji-option" data-emoji="💜">💜</button>
+            <button class="emoji-option" data-emoji="🖤">🖤</button>
+            <button class="emoji-option" data-emoji="🤍">🤍</button>
+            <button class="emoji-option" data-emoji="🤎">🤎</button>
+            <button class="emoji-option" data-emoji="💔">💔</button>
+            <button class="emoji-option" data-emoji="❣️">❣️</button>
+            <button class="emoji-option" data-emoji="💕">💕</button>
+            <button class="emoji-option" data-emoji="💞">💞</button>
+            <button class="emoji-option" data-emoji="💓">💓</button>
+            <button class="emoji-option" data-emoji="💗">💗</button>
+            <button class="emoji-option" data-emoji="💖">💖</button>
+            <button class="emoji-option" data-emoji="💘">💘</button>
+            <button class="emoji-option" data-emoji="💝">💝</button>
+            <button class="emoji-option" data-emoji="💋">💋</button>
+            <button class="emoji-option" data-emoji="💯">💯</button>
+            <button class="emoji-option" data-emoji="🔥">🔥</button>
+            <button class="emoji-option" data-emoji="⭐">⭐</button>
+            <button class="emoji-option" data-emoji="🌟">🌟</button>
+            <button class="emoji-option" data-emoji="💫">💫</button>
+            <button class="emoji-option" data-emoji="✨">✨</button>
+            <button class="emoji-option" data-emoji="🎉">🎉</button>
+            <button class="emoji-option" data-emoji="🎊">🎊</button>
+            <button class="emoji-option" data-emoji="🎈">🎈</button>
+            <button class="emoji-option" data-emoji="🎁">🎁</button>
+            <button class="emoji-option" data-emoji="🏆">🏆</button>
+            <button class="emoji-option" data-emoji="🥇">🥇</button>
+            <button class="emoji-option" data-emoji="💎">💎</button>
+            <button class="emoji-option" data-emoji="💍">💍</button>
+            <button class="emoji-option" data-emoji="💰">💰</button>
+            <button class="emoji-option" data-emoji="🚀">🚀</button>
+            <button class="emoji-option" data-emoji="🌈">🌈</button>
+            <button class="emoji-option" data-emoji="🎵">🎵</button>
+            <button class="emoji-option" data-emoji="🎶">🎶</button>
+            <button class="emoji-option" data-emoji="💡">💡</button>
+            <button class="emoji-option" data-emoji="🎮">🎮</button>
+            <button class="emoji-option" data-emoji="🏀">🏀</button>
+            <button class="emoji-option" data-emoji="⚽">⚽</button>
+            <button class="emoji-option" data-emoji="🎭">🎭</button>
+            <button class="emoji-option" data-emoji="📱">📱</button>
+            <button class="emoji-option" data-emoji="💻">💻</button>
+            <button class="emoji-option" data-emoji="🐱">🐱</button>
+            <button class="emoji-option" data-emoji="🐶">🐶</button>
+            <button class="emoji-option" data-emoji="🐸">🐸</button>
+            <button class="emoji-option" data-emoji="🐙">🐙</button>
+            <button class="emoji-option" data-emoji="🦋">🦋</button>
+            <button class="emoji-option" data-emoji="🌸">🌸</button>
+            <button class="emoji-option" data-emoji="🌺">🌺</button>
+            <button class="emoji-option" data-emoji="🌻">🌻</button>
+            <button class="emoji-option" data-emoji="🌹">🌹</button>
+            <button class="emoji-option" data-emoji="🍀">🍀</button>
+        </div>
     </div>
 
     <!-- Toast -->
@@ -5709,6 +5954,103 @@
                     hideEmojiPicker();
                 }
             });
+
+            // Input emoji picker
+            (function() {
+                const emojiBtn = document.getElementById('emoji-btn');
+                const panel = document.getElementById('input-emoji-panel');
+                if (!emojiBtn || !panel) return;
+                emojiBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const visible = panel.classList.contains('visible');
+                    if (visible) {
+                        panel.classList.remove('visible');
+                        emojiBtn.classList.remove('active');
+                    } else {
+                        const rect = emojiBtn.getBoundingClientRect();
+                        const panelW = Math.min(320, window.innerWidth * 0.94);
+                        let left = rect.left + rect.width / 2 - panelW / 2;
+                        left = Math.max(8, Math.min(left, window.innerWidth - panelW - 8));
+                        panel.style.left = left + 'px';
+                        panel.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+                        panel.classList.add('visible');
+                        emojiBtn.classList.add('active');
+                    }
+                });
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#input-emoji-panel') && !e.target.closest('#emoji-btn')) {
+                        panel.classList.remove('visible');
+                        emojiBtn.classList.remove('active');
+                    }
+                });
+                panel.querySelectorAll('.emoji-option').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        const emoji = btn.dataset.emoji;
+                        const start = messageInput.selectionStart;
+                        const end = messageInput.selectionEnd;
+                        messageInput.value = messageInput.value.slice(0, start) + emoji + messageInput.value.slice(end);
+                        messageInput.selectionStart = messageInput.selectionEnd = start + emoji.length;
+                        messageInput.dispatchEvent(new Event('input'));
+                        messageInput.focus();
+                    });
+                });
+            })();
+
+            // Swipe-to-reply
+            (function() {
+                if (!messagesContainer) return;
+                let swipeMsgEl = null, swipeTarget = null, swipeIcon = null;
+                let startX = 0, startY = 0, lastDx = 0, swipeDir = 0;
+                const THRESHOLD = 80;
+                messagesContainer.addEventListener('touchstart', (e) => {
+                    const msgEl = e.target.closest('.message.received, .message.own');
+                    if (!msgEl) return;
+                    swipeMsgEl = msgEl;
+                    swipeTarget = msgEl.closest('.message-group');
+                    swipeDir = msgEl.classList.contains('received') ? 1 : -1;
+                    startX = e.touches[0].clientX;
+                    startY = e.touches[0].clientY;
+                    lastDx = 0;
+                    swipeIcon = null;
+                }, { passive: true });
+                messagesContainer.addEventListener('touchmove', (e) => {
+                    if (!swipeMsgEl) return;
+                    const dx = e.touches[0].clientX - startX;
+                    const absDy = Math.abs(e.touches[0].clientY - startY);
+                    const absDx = Math.abs(dx);
+                    if (absDx < 5 || absDy > absDx || dx * swipeDir < 0) {
+                        if (Math.abs(lastDx) > 0) _resetSwipe();
+                        return;
+                    }
+                    lastDx = dx;
+                    const translate = swipeDir * Math.min(absDx * 0.45, 70);
+                    swipeMsgEl.style.transition = 'none';
+                    swipeMsgEl.style.transform = `translateX(${translate}px)`;
+                    if (!swipeIcon) {
+                        swipeIcon = document.createElement('div');
+                        swipeIcon.className = 'swipe-reply-icon';
+                        swipeIcon.textContent = '↩';
+                        if (swipeDir === -1) { swipeIcon.style.left = 'auto'; swipeIcon.style.right = '-2px'; }
+                        swipeTarget.appendChild(swipeIcon);
+                    }
+                    swipeIcon.style.opacity = Math.min(absDx / THRESHOLD, 1);
+                }, { passive: true });
+                messagesContainer.addEventListener('touchend', () => {
+                    if (!swipeMsgEl) return;
+                    if (Math.abs(lastDx) >= THRESHOLD) {
+                        const replyBtn = swipeTarget.querySelector('.reply-btn');
+                        if (replyBtn) replyBtn.click();
+                    }
+                    _resetSwipe();
+                });
+                messagesContainer.addEventListener('touchcancel', _resetSwipe);
+                function _resetSwipe() {
+                    if (swipeMsgEl) { swipeMsgEl.style.transition = 'transform 0.25s ease'; swipeMsgEl.style.transform = ''; }
+                    if (swipeIcon) swipeIcon.remove();
+                    swipeTarget = null; swipeMsgEl = null; swipeIcon = null; lastDx = 0;
+                }
+            })();
 
             // Context bar cancel buttons
             document.getElementById('cancel-reply-btn').addEventListener('click', clearReplyContext);
