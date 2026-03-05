@@ -1,5 +1,5 @@
 // Service Worker for Secure Chat PWA
-const CACHE_NAME = 'secure-chat-v2';
+const CACHE_NAME = 'secure-chat-v3';
 const STATIC_ASSETS = [
   '/index.html',
   '/login.html',

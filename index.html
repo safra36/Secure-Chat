@@ -401,6 +401,7 @@
          */
         function clearCredentials() {
             localStorage.removeItem("privateKey");
+            localStorage.removeItem("publicKey");
             localStorage.removeItem("userId");
             localStorage.removeItem("serverPassword");
             localStorage.removeItem("sessionLoginTime");
@@ -550,43 +551,42 @@
 
             try {
                 const decrypted = await decryptMessage(keyData, userKey);
-                
-                // Parse the decrypted data (now contains userId, privateKey, and timestamp)
-                let variables;
+
+                // Extract server timestamp for time sync (credentials are client-generated)
+                let serverTime = null;
                 try {
-                    const parsed = JSON.parse(decrypted);
-                    variables = {
-                        userId: parsed.userId,
-                        privateKey: parsed.privateKey,
-                        serverTime: parsed.timestamp
-                    };
-                } catch (e) {
-                    // Fallback for old format: "userId:privateKey"
-                    const parts = decrypted.split(":");
-                    variables = {
-                        userId: parts[0],
-                        privateKey: parts[1],
-                        serverTime: null
-                    };
+                    serverTime = JSON.parse(decrypted).timestamp || null;
+                } catch (e) {}
+
+                // Generate Ed25519 keypair once; reuse on subsequent logins
+                if (!localStorage.getItem('userId') || !localStorage.getItem('privateKey') || !localStorage.getItem('publicKey')) {
+                    const keypair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+                    const rawPublicKey = await crypto.subtle.exportKey('raw', keypair.publicKey);
+                    const privateKeyJwk = await crypto.subtle.exportKey('jwk', keypair.privateKey);
+
+                    const hashBuffer = await crypto.subtle.digest('SHA-256', rawPublicKey);
+                    const userId = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+                    const publicKeyB64 = btoa(String.fromCharCode(...new Uint8Array(rawPublicKey)));
+
+                    localStorage.setItem('privateKey', JSON.stringify(privateKeyJwk));
+                    localStorage.setItem('publicKey', publicKeyB64);
+                    localStorage.setItem('userId', userId);
                 }
 
-                // Store credentials and time sync data
-                localStorage.setItem("privateKey", variables.privateKey);
-                localStorage.setItem("userId", variables.userId);
                 localStorage.setItem("serverPassword", userKey);
 
                 // Store session info based on "Remember Me" checkbox
                 const rememberMe = document.getElementById('remember-me').checked;
-                const sessionDuration = rememberMe 
-                    ? SESSION_CONFIG.REMEMBER_DURATION 
+                const sessionDuration = rememberMe
+                    ? SESSION_CONFIG.REMEMBER_DURATION
                     : SESSION_CONFIG.SHORT_SESSION_DURATION;
                 storeSessionInfo(rememberMe, sessionDuration);
 
                 // Store page load time and server time for accurate time offset calculation
-                if (variables.serverTime) {
+                if (serverTime) {
                     localStorage.setItem("pageLoadTime", window.pageLoadTime.toString());
-                    localStorage.setItem("serverTime", variables.serverTime.toString());
-                    console.log(`⏰ Time sync: Server=${variables.serverTime}, PageLoad=${window.pageLoadTime}, Offset=${variables.serverTime - window.pageLoadTime}ms`);
+                    localStorage.setItem("serverTime", serverTime.toString());
+                    console.log(`⏰ Time sync: Server=${serverTime}, PageLoad=${window.pageLoadTime}, Offset=${serverTime - window.pageLoadTime}ms`);
                 }
 
                 // Show success message
@@ -625,46 +625,21 @@
         `;
         document.head.appendChild(style);
 
-        document.addEventListener("DOMContentLoaded", async () => {
-            // Check if user already has valid credentials and session is not expired
+        document.addEventListener("DOMContentLoaded", () => {
             if (isSessionValid()) {
-                const savedPrivateKey = localStorage.getItem("privateKey");
-                const savedUserId = localStorage.getItem("userId");
-
-                // User is already authenticated, verify with server
-                // Use server time offset (same logic as auth.js getEffectiveServerTime)
-                const _pageLoadTime = localStorage.getItem('pageLoadTime');
-                const _serverTime = localStorage.getItem('serverTime');
-                let _effectiveTime = (_pageLoadTime && _serverTime)
-                    ? parseInt(_serverTime, 10) + (Date.now() - parseInt(_pageLoadTime, 10))
-                    : Date.now();
-                const _timeBucket = _effectiveTime - (_effectiveTime % 5000);
-                const hashBuffer = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${savedPrivateKey}:${_timeBucket}`));
-                const hashArray = Array.from(new Uint8Array(hashBuffer));
-                const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-                const response = await fetch("/verify", {
-                    method: 'GET',
-                    headers: { "authorization" : `${savedUserId}:${hashHex}` }
-                });
-
-                if (response.ok) {
-                    // Credentials are valid, start session checker and redirect to chat
+                if (localStorage.getItem('publicKey')) {
+                    // New-format Ed25519 credentials — session valid, redirect
                     console.log('[Session] Auto-login successful, starting session checker');
                     startSessionExpiryChecker();
                     window.location = "/chat/login";
                     return;
-                } else {
-                    // Server verification failed, clear credentials
-                    console.log('[Session] Server verification failed, clearing credentials');
-                    clearCredentials();
                 }
+                // Old-format credentials (no publicKey) — clear and force re-login
+                console.log('[Session] Old credential format detected, clearing for re-login');
+                clearCredentials();
             } else {
                 console.log('[Session] No valid session found, showing login form');
             }
-
-            // User needs to authenticate, show login form
-            // (no action needed, form is already visible)
         });
 
         // Register PWA service worker

@@ -7,15 +7,13 @@
 function getCredentials() {
 	const privateKey = localStorage.getItem('privateKey');
 	const userId = localStorage.getItem('userId');
+	const publicKey = localStorage.getItem('publicKey');
 
-	if (!privateKey || !userId) {
+	if (!privateKey || !userId || !publicKey) {
 		return null;
 	}
 
-	return {
-		userId: userId,
-		privateKey: privateKey
-	};
+	return { userId, privateKey, publicKey };
 }
 
 /**
@@ -56,42 +54,36 @@ function getEffectiveServerTime() {
  * 
  * @returns {string|null} Authorization header value, or null if no credentials
  */
-function getToken() {
+async function getToken() {
 	const credentials = getCredentials();
-	if (!credentials) {
+	if (!credentials) return null;
+
+	const { userId, privateKey: privateKeyStr, publicKey } = credentials;
+
+	let effectiveTime = getEffectiveServerTime();
+	if (effectiveTime === null) effectiveTime = Date.now();
+
+	const timeBucket = effectiveTime - (effectiveTime % 5000);
+
+	try {
+		const privateKey = await crypto.subtle.importKey(
+			'jwk',
+			JSON.parse(privateKeyStr),
+			{ name: 'Ed25519' },
+			false,
+			['sign']
+		);
+		const signatureBuffer = await crypto.subtle.sign(
+			{ name: 'Ed25519' },
+			privateKey,
+			new TextEncoder().encode(timeBucket.toString())
+		);
+		const signature = btoa(String.fromCharCode(...new Uint8Array(signatureBuffer)));
+		return `${userId}:${publicKey}:${signature}`;
+	} catch (error) {
+		console.error('Error generating token:', error);
 		return null;
 	}
-
-	const { userId, privateKey } = credentials;
-
-	return (async () => {
-		// Try to use stored server time offset (calculated at login)
-		let effectiveTime = getEffectiveServerTime();
-		
-		// If no stored server time, fall back to local time
-		if (effectiveTime === null) {
-			effectiveTime = Date.now();
-		}
-
-		// Calculate 5-second time bucket
-		const timeBucket = effectiveTime - (effectiveTime % 5000);
-
-		// Generate SHA-256 hash of privateKey:timeBucket
-		const message = `${privateKey}:${timeBucket}`;
-		
-		return window.crypto.subtle.digest('SHA-256', new TextEncoder().encode(message))
-			.then(hashBuffer => {
-				// Convert buffer to hex string
-				const hashArray = Array.from(new Uint8Array(hashBuffer));
-				const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-				
-				return `${userId}:${hashHex}`;
-			})
-			.catch(error => {
-				console.error('Error generating token:', error);
-				return null;
-			});
-	})();
 }
 
 
@@ -137,6 +129,7 @@ function logout(automatic = false) {
 	} else {
 		// Fallback if clearCredentials is not available
 		localStorage.removeItem('privateKey');
+		localStorage.removeItem('publicKey');
 		localStorage.removeItem('userId');
 		localStorage.removeItem('serverPassword');
 		localStorage.removeItem('sessionLoginTime');

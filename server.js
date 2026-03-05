@@ -681,55 +681,50 @@ loadPersistentStorage();
 
 function handleVerify(req) {
 	const authorization = req.headers.authorization;
-	if (!authorization) {
+	if (!authorization) return false;
+
+	// Header format: userId:base64(publicKey):base64(signature)
+	// userId = SHA256(rawPublicKey), signature = Ed25519(timeBucket, privateKey)
+	const parts = authorization.split(':');
+	if (parts.length !== 3) return false;
+
+	const [userId, publicKeyBase64, signatureBase64] = parts;
+
+	// Verify userId is SHA256 of the public key (self-certifying identity)
+	const rawPubKeyBytes = Buffer.from(publicKeyBase64, 'base64');
+	const expectedUserId = crypto.createHash('sha256').update(rawPubKeyBytes).digest('hex');
+	if (expectedUserId !== userId) {
+		console.log(`❌ Auth failed: userId mismatch for claimed ${userId}`);
 		return false;
 	}
 
-	// userId:sign
-	// sign = hash(privateKey + timeBucket)
-	// timeBucket = current time rounded down to nearest 5 seconds
-
-	const [userId, signature] = authorization.split(':');
-	const keys = encryption.keys.get(userId);
-
-	if(!keys) {
+	// Import Ed25519 public key (wrap raw 32 bytes in SPKI DER envelope)
+	const spkiHeader = Buffer.from('302a300506032b6570032100', 'hex');
+	const spkiDer = Buffer.concat([spkiHeader, rawPubKeyBytes]);
+	let publicKey;
+	try {
+		publicKey = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
+	} catch (e) {
+		console.log(`❌ Auth failed: invalid public key for ${userId}`);
 		return false;
 	}
 
-	const [publicKey, privateKey] = keys;
-
-	// Check multiple time buckets to tolerate clock skew and network latency
-	// With proper time sync, we only need to check current bucket
-	// But as a fallback for clients without time sync, check up to 60 seconds of buckets
-	// 12 buckets × 5 seconds = 60 seconds of tolerance
+	const signatureBytes = Buffer.from(signatureBase64, 'base64');
 	const now = Date.now();
-	const timeBuckets = [];
-	
-	// Generate 12 time buckets (0-60 seconds in the past)
+
+	// Check 12 time buckets (60 seconds tolerance)
 	for (let i = 0; i < 12; i++) {
-		timeBuckets.push(now - (i * 5000) - (now % 5000));
+		const timeBucket = now - (i * 5000) - (now % 5000);
+		try {
+			if (crypto.verify(null, Buffer.from(timeBucket.toString()), publicKey, signatureBytes)) {
+				console.log(`✅ Authentication successful for userId: ${userId} (offset: ${i * 5000}ms)`);
+				return true;
+			}
+		} catch (e) {}
 	}
 
-	// Try each time bucket
-	for (const timeBucket of timeBuckets) {
-		const expectedSign = crypto
-			.createHash('sha256')
-			.update(`${privateKey}:${timeBucket}`)
-			.digest("hex");
-		
-		if (signature === expectedSign) {
-			console.log(`✅ Authentication successful for userId: ${userId} (timeBucket: ${timeBucket}, offset: ${now - timeBucket}ms)`);
-			return true;
-		}
-	}
-
-	// If none matched, log for debugging
 	console.log(`❌ Authentication failed for userId: ${userId}`);
-	console.log(`   Received signature: ${signature.substring(0, 16)}...`);
-	console.log(`   Current time bucket: ${now - (now % 5000)}`);
-	console.log(`   Checked ${timeBuckets.length} time buckets (±60 seconds)`);
 	return false;
-
 }
 
 // Serialize a message for the wire: hides senderUserId, computes isMine for reactions
@@ -2415,13 +2410,8 @@ function serveFile(res, fileName, contentType) {
 		}
 	}
 
-	const userId = encryption.getKeyPairs();
-	const privateKey = encryption.keys.get(userId)[1];
-	
-	// Include server timestamp in the encrypted data
+	// Blob only carries server timestamp for time sync; credentials are client-generated
 	const serverData = {
-		userId: userId,
-		privateKey: privateKey,
 		timestamp: Date.now()
 	};
 	
