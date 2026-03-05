@@ -928,6 +928,34 @@
         .load-more-btn:hover { background: var(--bg-primary); color: var(--text-primary); }
         .load-more-btn:disabled { opacity: 0.5; cursor: default; }
 
+        /* Rearrange overlay */
+        .rearrange-overlay {
+            position: absolute;
+            inset: 0;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 14px;
+            z-index: 50;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .rearrange-spinner {
+            width: 26px;
+            height: 26px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: rearrange-spin 0.75s linear infinite;
+        }
+
+        @keyframes rearrange-spin {
+            to { transform: rotate(360deg); }
+        }
+
         /* Modern Messages Area */
         .messages {
             flex: 1;
@@ -4372,6 +4400,11 @@
             <button id="load-more-btn" class="load-more-btn" onclick="loadMoreHistory()">↑ Load earlier messages</button>
         </div>
 
+        <div id="rearrange-overlay" class="rearrange-overlay" style="display:none">
+            <div class="rearrange-spinner"></div>
+            <span>Chat history full, rearranging messages…</span>
+        </div>
+
         <div id="messages" class="messages"></div>
 
         <div id="typing-indicator" class="typing-indicator">
@@ -7064,6 +7097,17 @@
                 }
 
                 const messages = await response.json();
+
+                // Detect ordering problem: we fetched from the beginning (no cursor) but already
+                // have rendered messages — this happens when LRU eviction deleted the cursor while
+                // the chat was not active. Server may return old messages that would fall BEFORE
+                // already-rendered ones, causing them to appear in wrong DOM order.
+                const unseenMsgs = messages.filter(m => !renderedMessageIds.has(m.id));
+                if (!pollingCursor && renderedMessageIds.size > 0 && unseenMsgs.length > 0) {
+                    await rearrangeMessages(messages);
+                    return;
+                }
+
                 // Snapshot known IDs before append so we can identify truly new messages
                 const knownIdsBefore = new Set(renderedMessageIds);
                 await appendMessages(messages);
@@ -7080,6 +7124,40 @@
                 console.error('Fetch error:', error);
             } finally {
                 isFetchingMessages = false;
+            }
+        }
+
+        async function rearrangeMessages(freshMessages) {
+            const overlay = document.getElementById('rearrange-overlay');
+            if (overlay) overlay.style.display = '';
+            try {
+                // Merge existing cache (preserves messages outside server window) + fresh
+                const cacheKey = `messages_${currentChat.handle}`;
+                let existingMessages = [];
+                try { existingMessages = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch (e) {}
+
+                const messageMap = new Map();
+                existingMessages.forEach(m => messageMap.set(m.id, m));
+                freshMessages.forEach(m => messageMap.set(m.id, m));
+
+                // Sort the complete merged set — only time we pay this cost
+                const sortedMessages = await sortMessagesByDecryptedTimestamp(Array.from(messageMap.values()));
+
+                // Persist sorted cache BEFORE appendMessages reads it, so its own merge stays sorted
+                saveCachedMessages(currentChat.handle, sortedMessages);
+
+                // Clear rendered state and re-render from sorted set
+                renderedMessageIds.clear();
+                messageOrder.length = 0;
+                messagesContainer.innerHTML = '';
+
+                await appendMessages(sortedMessages);
+                savePollingCursors();
+            } catch (err) {
+                window.reportClientError(err, 'rearrange messages');
+                console.error('Rearrange error:', err);
+            } finally {
+                if (overlay) overlay.style.display = 'none';
             }
         }
 
@@ -7534,19 +7612,17 @@
                     }
                 }
 
-                // Merge: existing cache (sorted) first, new appended — Map preserves insertion order
+                // Merge: existing cache (sorted) first, new appended — Map preserves insertion order.
+                // Existing messages are already sorted; new messages from cursor are newer, so
+                // Map insertion order gives correct chronological sequence without re-sorting.
                 const messageMap = new Map();
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                 allMessages.forEach(msg => messageMap.set(msg.id, msg));
+                const mergedMessages = Array.from(messageMap.values());
 
-                // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
-                const unsortedMessages = Array.from(messageMap.values());
-                const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
-
-                // Update polling cursor to the latest message timestamp for this chat
+                // Update polling cursor to the latest message
                 if (mergedMessages.length > 0) {
-                    const latestMessage = mergedMessages[mergedMessages.length - 1];
-                    pollingCursors[currentChat.handle] = latestMessage.id;
+                    pollingCursors[currentChat.handle] = mergedMessages[mergedMessages.length - 1].id;
                 }
 
                 saveCachedMessages(currentChat.handle, mergedMessages);
@@ -8111,9 +8187,7 @@
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => messageMap.set(msg.id, msg));
 
-                        // Sort by DECRYPTED timestamp (use async function for proper numeric comparison)
-                        const unsortedMessages = Array.from(messageMap.values());
-                        const mergedMessages = await sortMessagesByDecryptedTimestamp(unsortedMessages);
+                        const mergedMessages = Array.from(messageMap.values());
 
                         saveCachedMessages(chat.handle, mergedMessages);
 
