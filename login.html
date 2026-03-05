@@ -5219,31 +5219,62 @@
             return count;
         }
         
-        // Evict largest message cache to free space
-        function evictOldestMessageCache() {
-            let largestKey = null, largestSize = 0;
+        // Evict the single oldest message across all chats (LRU chat first, oldest msg in that chat).
+        // Messages are stored sorted oldest→newest, so index 0 is always the oldest.
+        // Avoids calling savePollingCursors() to prevent re-entrant eviction.
+        function evictOldestMessage() {
+            // Pick the least-recently-fetched chat as proxy for having the globally oldest messages
+            let lruKey = null, lruTime = Infinity;
             for (let key in localStorage) {
                 if (key.startsWith('messages_')) {
-                    const size = (localStorage.getItem(key) || '').length;
-                    if (size > largestSize) { largestSize = size; largestKey = key; }
+                    const handle = key.slice('messages_'.length);
+                    const lastFetch = localStorage.getItem(`lastFetch_${handle}`);
+                    const time = lastFetch ? new Date(lastFetch).getTime() : 0;
+                    if (time < lruTime) { lruTime = time; lruKey = key; }
                 }
             }
-            if (largestKey) {
-                localStorage.removeItem(largestKey);
-                console.warn(`Evicted message cache: ${largestKey} (${largestSize} chars)`);
+            if (!lruKey) return false;
+
+            const handle = lruKey.slice('messages_'.length);
+            let messages;
+            try {
+                messages = JSON.parse(localStorage.getItem(lruKey) || '[]');
+            } catch (e) {
+                localStorage.removeItem(lruKey);
                 return true;
             }
-            return false;
+
+            const wipeChat = () => {
+                localStorage.removeItem(lruKey);
+                localStorage.removeItem(`lastFetch_${handle}`);
+                if (pollingCursors[handle] !== undefined) {
+                    delete pollingCursors[handle];
+                    // Don't call savePollingCursors() here — would cause re-entrant eviction;
+                    // the deletion will be persisted on the next natural savePollingCursors() call.
+                }
+            };
+
+            if (messages.length <= 1) {
+                wipeChat();
+            } else {
+                messages.shift(); // drop oldest message
+                try {
+                    localStorage.setItem(lruKey, JSON.stringify(messages));
+                } catch (e) {
+                    wipeChat(); // still no space — wipe the whole cache
+                }
+            }
+            return true;
         }
 
-        // Retry a localStorage setItem, evicting message caches on QuotaExceededError
+        // Retry a localStorage setItem, evicting one message at a time on QuotaExceededError
         function setItemWithEviction(key, value) {
-            for (let i = 0; i < 5; i++) {
+            for (let i = 0; i < 500; i++) {
                 try {
                     localStorage.setItem(key, value);
                     return true;
                 } catch (e) {
-                    if (e.name === 'QuotaExceededError' && evictOldestMessageCache()) {
+                    if (e.name === 'QuotaExceededError' && evictOldestMessage()) {
                         continue;
                     }
                     throw e;
@@ -8824,10 +8855,7 @@
             while (messagesToCache.length > 0) {
                 try {
                     setItemWithEviction(cacheKey, JSON.stringify(messagesToCache));
-                    if (messages.length > 0) {
-                        setItemWithEviction(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
-                    }
-                    return;
+                    break; // message cache saved successfully
                 } catch (error) {
                     if (error.name === 'QuotaExceededError' && messagesToCache.length > 10) {
                         messagesToCache = messagesToCache.slice(Math.floor(messagesToCache.length / 2));
@@ -8837,6 +8865,14 @@
                         console.error('Error saving cached messages:', error);
                         return;
                     }
+                }
+            }
+            // Save lastFetch separately — failure here must not retrigger message trimming
+            if (messages.length > 0) {
+                try {
+                    setItemWithEviction(lastFetchKey, new Date(Date.now() + timeOffset).toISOString());
+                } catch (error) {
+                    console.warn(`Could not save lastFetch for ${chatHandle}:`, error);
                 }
             }
         }
