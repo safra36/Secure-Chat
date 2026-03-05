@@ -1342,7 +1342,7 @@ function handleUploadComplete(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const completeData = JSON.parse(body);
-			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed } = completeData;
+			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta } = completeData;
 
 			const session = uploadSessions.get(sessionId);
 			if (!session) {
@@ -1399,6 +1399,7 @@ function handleUploadComplete(req, res, pathname) {
 				encryptedTimestamp: encryptedTimestamp, // Encrypted timestamp for consistency
 				type: messageType || 'file',
 				id: encryptedTimestamp, // Use encrypted timestamp as ID
+				encryptedMeta: encryptedMeta || null,
 				reactions: {},
 				edits: []
 			};

@@ -1863,6 +1863,71 @@
             color: var(--text-primary);
         }
 
+        .file-message-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 12px;
+            min-width: 200px;
+            max-width: 300px;
+        }
+
+        .file-card-icon {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .file-card-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .file-card-name {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .file-card-size {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+
+        .file-card-dl-btn {
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            padding: 6px 10px;
+            border: 1px solid rgba(255,255,255,0.15);
+            border-radius: 8px;
+            background: rgba(255,255,255,0.08);
+            color: var(--text-primary);
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.15s ease;
+            white-space: nowrap;
+        }
+
+        .file-card-dl-btn:hover {
+            background: rgba(255,255,255,0.15);
+        }
+
+        .file-card-dl-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .menu-badge {
             position: absolute;
             top: 8px;
@@ -4360,7 +4425,7 @@
                     </span>
                     <span class="menu-label">Image</span>
                 </button>
-                <button class="attachment-menu-item" id="menu-file-btn" title="Send File">
+                <button class="attachment-menu-item" id="menu-file-btn" title="P2P Transfer (requires both users online)">
                     <span class="menu-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -4370,7 +4435,17 @@
                             <polyline points="10 9 9 9 8 9"/>
                         </svg>
                     </span>
-                    <span class="menu-label">File</span>
+                    <span class="menu-label">P2P Transfer</span>
+                </button>
+                <button class="attachment-menu-item" id="menu-upload-btn" title="Upload file to chat (up to 50MB, stored on server)">
+                    <span class="menu-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="16 16 12 12 8 16"/>
+                            <line x1="12" y1="12" x2="12" y2="21"/>
+                            <path d="M20.39 18.39A5 5 0 0 0 18 9h-1.26A8 8 0 1 0 3 16.3"/>
+                        </svg>
+                    </span>
+                    <span class="menu-label">Upload File</span>
                 </button>
                 <button class="attachment-menu-item" id="menu-pending-btn" title="Pending Transfers">
                     <span class="menu-icon">
@@ -4743,6 +4818,7 @@
     <!-- Hidden file inputs -->
     <input type="file" accept="image/*" id="image-input" style="display: none;">
     <input type="file" id="p2p-file-input" style="display: none;">
+    <input type="file" id="offline-file-input" style="display: none;">
 
     <!-- P2P File Transfer Modal -->
     <div id="p2p-transfer-modal" class="modal-overlay">
@@ -5455,7 +5531,7 @@
                 }
             }
 
-            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false) {
+            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null) {
                 try {
                     const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
                         method: 'POST',
@@ -5465,7 +5541,8 @@
                             encryptedName: encryptedName,
                             encryptedTimestamp: encryptedTimestamp,
                             messageType: messageType,
-                            isCompressed: isCompressed
+                            isCompressed: isCompressed,
+                            encryptedMeta: encryptedMeta
                         })
                     });
 
@@ -5904,6 +5981,19 @@
                 });
             }
             
+            const menuUploadBtn = document.getElementById('menu-upload-btn');
+            if (menuUploadBtn) {
+                menuUploadBtn.addEventListener('click', () => {
+                    closeAttachmentMenu();
+                    if (!currentChat) {
+                        showToast('Please open a chat first', 'error');
+                        return;
+                    }
+                    const offlineFileInput = document.getElementById('offline-file-input');
+                    if (offlineFileInput) offlineFileInput.click();
+                });
+            }
+
             if (menuPendingBtn) {
                 menuPendingBtn.addEventListener('click', async () => {
                     closeAttachmentMenu();
@@ -5914,7 +6004,16 @@
                     await openP2PInvitationsModal();
                 });
             }
-            
+
+            const offlineFileInput = document.getElementById('offline-file-input');
+            if (offlineFileInput) {
+                offlineFileInput.addEventListener('change', (e) => {
+                    const file = e.target.files[0];
+                    if (file) sendOfflineFileChunked(file);
+                    offlineFileInput.value = '';
+                });
+            }
+
             voiceBtn.addEventListener('click', toggleVoiceRecording);
             sendBtn.addEventListener('click', sendMessage);
             stopRecording.addEventListener('click', stopVoiceRecording);
@@ -7022,7 +7121,8 @@
 
                 const isVoice = message.type === 'voice';
                 const isImage = message.type === 'image';
-                const isMedia = isVoice || isImage;
+                const isFile = message.type === 'file';
+                const isMedia = isVoice || isImage || isFile;
 
                 let contentHtml = '';
 
@@ -7107,6 +7207,14 @@
                                 contentHtml = createDeferredContentButton(message.id, 'image');
                             }
                         }
+                    } else if (isFile) {
+                        let fileMeta = null;
+                        if (message.encryptedMeta) {
+                            try {
+                                fileMeta = JSON.parse(await decryptMessage(message.encryptedMeta, currentChat.encryptionKey));
+                            } catch (e) { /* leave null */ }
+                        }
+                        contentHtml = createFileMessageCard(message.id, fileMeta);
                     } else {
                         const decrypted = await decryptMessage(message.encryptedContent, currentChat.encryptionKey);
                         contentHtml = `<div class="message-content">${escapeHtml(decrypted)}</div>`;
@@ -7117,6 +7225,8 @@
                     if (isVoice || isImage) {
                         const contentType = isVoice ? 'voice' : 'image';
                         contentHtml = createDeferredContentButton(message.id, contentType);
+                    } else if (isFile) {
+                        contentHtml = createFileMessageCard(message.id, null);
                     } else {
                         // Failed to decrypt message content - skip this message entirely
                         console.warn('Failed to decrypt message content for message:', message.id, err);
@@ -8100,6 +8210,7 @@
         // Constants for file size limits
         const MAX_IMAGE_SIZE = 5 * 1024 * 1024; // 5MB limit
         const MAX_VOICE_SIZE = 2 * 1024 * 1024; // 2MB limit
+        const MAX_OFFLINE_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit
 
         async function sendImageChunked() {
             if (!selectedImage || !currentChat) {
@@ -8402,6 +8513,242 @@
             }
         }
 
+
+        async function sendOfflineFileChunked(file) {
+            if (!currentChat) { showToast('Please open a chat first', 'error'); return; }
+            if (isUploading) { showToast('Upload already in progress', 'error'); return; }
+            if (file.size > MAX_OFFLINE_FILE_SIZE) {
+                showToast(`File too large. Maximum size is 50MB`, 'error');
+                return;
+            }
+
+            isUploading = true;
+            isUploadCancelled = false;
+            const uploader = new ChunkedUploader();
+            currentUploadSessionId = uploader.sessionId;
+            currentUploader = uploader;
+            setupUploadCancel(uploader);
+
+            let uploadSucceeded = false;
+            let finalResult = null;
+            let encryptedFile = null;
+
+            try {
+                showToast(`Uploading ${file.name}...`, 'info');
+                showUploadProgress(true);
+                updateUploadProgress(0);
+
+                const arrayBuffer = await file.arrayBuffer();
+
+                // Pack header: [4B LE: headerLen][JSON header][raw file bytes]
+                const header = JSON.stringify({ n: file.name, m: file.type || 'application/octet-stream', s: file.size });
+                const headerBytes = new TextEncoder().encode(header);
+                const packed = new Uint8Array(4 + headerBytes.length + arrayBuffer.byteLength);
+                const dv = new DataView(packed.buffer);
+                dv.setUint32(0, headerBytes.length, true);
+                packed.set(headerBytes, 4);
+                packed.set(new Uint8Array(arrayBuffer), 4 + headerBytes.length);
+
+                // Encrypt
+                encryptedFile = await encryptBinary(packed.buffer, currentChat.encryptionKey);
+
+                // Convert to binary for compression
+                const encryptedBinaryString = atob(encryptedFile);
+                const encryptedBytes = new Uint8Array(encryptedBinaryString.length);
+                for (let i = 0; i < encryptedBinaryString.length; i++) {
+                    encryptedBytes[i] = encryptedBinaryString.charCodeAt(i);
+                }
+
+                // Compress
+                const compressionResult = await compressData(encryptedBytes.buffer);
+                const compressedData = compressionResult.compressed;
+                const isCompressed = compressionResult.isCompressed;
+
+                let finalData = compressedData;
+                if (typeof compressedData === 'string') {
+                    const cb = atob(compressedData);
+                    const ca = new Uint8Array(cb.length);
+                    for (let i = 0; i < cb.length; i++) ca[i] = cb.charCodeAt(i);
+                    finalData = ca.buffer;
+                }
+
+                // Upload chunked
+                await uploader.uploadChunked(
+                    currentChat.handle,
+                    finalData,
+                    'file',
+                    (progress) => {
+                        if (isUploadCancelled) return;
+                        updateUploadProgress(progress);
+                    }
+                );
+
+                if (isUploadCancelled) {
+                    showUploadProgress(false);
+                    isUploading = false;
+                    return;
+                }
+
+                // Finalize — encrypt metadata separately so all chat members can see filename
+                const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
+                await ensureTimeSynced();
+                const currentTime = getSyncedServerTime();
+                const encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
+                const encryptedMeta = await encryptMessage(
+                    JSON.stringify({ n: file.name, m: file.type || 'application/octet-stream', s: file.size }),
+                    currentChat.encryptionKey
+                );
+
+                const result = await uploader.finalize(
+                    currentChat.handle,
+                    encryptedName,
+                    encryptedTimestamp,
+                    'file',
+                    isCompressed,
+                    encryptedMeta
+                );
+
+                uploadSucceeded = true;
+                finalResult = result;
+                showToast(`${file.name} uploaded!`, 'success');
+                showUploadProgress(false);
+            } catch (error) {
+                window.reportClientError(error, 'offline file upload');
+                showUploadProgress(false);
+                if (!uploadSucceeded && !isUploadCancelled) {
+                    showToast('Failed to upload file', 'error');
+                }
+            } finally {
+                isUploading = false;
+                currentUploader = null;
+            }
+
+            if (uploadSucceeded && finalResult) {
+                try {
+                    await cacheContentWithQuota(finalResult.messageId, encryptedFile);
+                } catch (cacheError) {
+                    window.reportClientError(cacheError, 'cache offline file');
+                }
+                fetchMessages();
+            }
+        }
+
+        async function downloadFileMessage(messageId, btn) {
+            if (!currentChat) return;
+            const originalHTML = btn ? btn.innerHTML : '';
+            const spinSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+
+            try {
+                if (btn) { btn.disabled = true; btn.innerHTML = spinSvg + ' Downloading…'; }
+
+                let encryptedBase64;
+                const cachedContent = await getCachedContent(messageId);
+
+                if (cachedContent && cachedContent !== 'PLACEHOLDER') {
+                    encryptedBase64 = cachedContent;
+                } else {
+                    // Stream download for progress
+                    showUploadProgress(true);
+                    updateUploadProgress(0);
+
+                    const encodedId = encodeURIComponent(messageId);
+                    const response = await authenticatedFetch(`/download-content/${currentChat.handle}/${encodedId}`, { method: 'GET' });
+                    if (!response.ok) throw new Error(`Download failed: ${response.status}`);
+
+                    const contentLength = parseInt(response.headers.get('content-length') || '0', 10);
+                    const reader = response.body.getReader();
+                    const rawChunks = [];
+                    let received = 0;
+
+                    while (true) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        rawChunks.push(value);
+                        received += value.length;
+                        if (contentLength > 0) updateUploadProgress((received / contentLength) * 100);
+                    }
+
+                    showUploadProgress(false);
+
+                    const fullBytes = new Uint8Array(rawChunks.reduce((a, c) => a + c.length, 0));
+                    let offset = 0;
+                    for (const c of rawChunks) { fullBytes.set(c, offset); offset += c.length; }
+                    const data = JSON.parse(new TextDecoder().decode(fullBytes));
+
+                    let content = data.encryptedContent;
+                    const isCompressed = data.isCompressed || false;
+
+                    if (isCompressed && typeof pako !== 'undefined') {
+                        try {
+                            const cb = atob(content);
+                            const ca = new Uint8Array(cb.length);
+                            for (let i = 0; i < cb.length; i++) ca[i] = cb.charCodeAt(i);
+                            const decompressed = pako.inflate(ca);
+                            content = uint8ArrayToBase64(decompressed);
+                        } catch (e) { window.reportClientError(e, 'decompress file download'); }
+                    }
+
+                    encryptedBase64 = content;
+                    await cacheContentWithQuota(messageId, content);
+                }
+
+                if (btn) { btn.innerHTML = spinSvg + ' Decrypting…'; }
+                const decryptedBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+
+                // Unpack header
+                const dv = new DataView(decryptedBuffer);
+                const headerLen = dv.getUint32(0, true);
+                let meta = { n: 'download', m: 'application/octet-stream', s: 0 };
+                try {
+                    meta = JSON.parse(new TextDecoder().decode(new Uint8Array(decryptedBuffer, 4, headerLen)));
+                } catch (e) { /* use defaults */ }
+                const fileBytes = new Uint8Array(decryptedBuffer, 4 + headerLen);
+
+                // Trigger browser download
+                const blob = new Blob([fileBytes], { type: meta.m });
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = blobUrl;
+                a.download = meta.n;
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+
+                showToast(`${meta.n} saved!`, 'success');
+            } catch (error) {
+                window.reportClientError(error, 'download file message');
+                showUploadProgress(false);
+                showToast('Failed to download file', 'error');
+            } finally {
+                if (btn) { btn.disabled = false; btn.innerHTML = originalHTML; }
+            }
+        }
+
+        function createFileMessageCard(messageId, meta) {
+            const el = document.createElement('div');
+            el.className = 'file-message-card';
+
+            const iconSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="width:28px;height:28px;color:var(--accent)"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>`;
+            const downloadSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+            const name = (meta && meta.n) ? meta.n : 'Encrypted File';
+            const size = (meta && meta.s) ? formatFileSize(meta.s) : '';
+
+            el.innerHTML = `
+                <div class="file-card-icon">${iconSvg}</div>
+                <div class="file-card-info">
+                    <div class="file-card-name" title="${escapeHtml(name)}">${escapeHtml(name)}</div>
+                    ${size ? `<div class="file-card-size">${size}</div>` : ''}
+                </div>
+                <button class="file-card-dl-btn" type="button" title="Save file">${downloadSvg} Save</button>
+            `;
+
+            el.querySelector('.file-card-dl-btn').addEventListener('click', (e) => {
+                e.stopPropagation();
+                downloadFileMessage(messageId, e.currentTarget);
+            });
+
+            return el;
+        }
 
         function saveChats() {
             try {
