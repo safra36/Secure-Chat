@@ -2794,7 +2794,7 @@ function handleCallReceiveAudio(req, res, pathname) {
 
 	// Helper: return oldest available chunk if seq is too old (late joiner catch-up)
 	function serveOldestChunk(chunkArr, currentCall) {
-		const chunk = chunkArr.shift();
+		const chunk = chunkArr[0];
 		res.writeHead(200, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ seq: chunk.seq, audioData: chunk.audioData, callStatus: currentCall.status }));
 	}
@@ -2816,7 +2816,7 @@ function handleCallReceiveAudio(req, res, pathname) {
 	const chunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
 
 	if (chunkIndex !== -1) {
-		const chunk = chunks.splice(chunkIndex, 1)[0];
+		const chunk = chunks[chunkIndex];
 		res.writeHead(200, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({
 			seq: chunk.seq,
@@ -2859,7 +2859,7 @@ function handleCallReceiveAudio(req, res, pathname) {
 		const newChunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
 		if (newChunkIndex !== -1) {
 			clearInterval(checkInterval);
-			const newChunk = chunks.splice(newChunkIndex, 1)[0];
+			const newChunk = chunks[newChunkIndex];
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({
 				seq: newChunk.seq,
