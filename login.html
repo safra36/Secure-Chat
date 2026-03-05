@@ -9395,7 +9395,7 @@
                 };
 
                 callState = 'ACTIVE';
-                hideActiveCallBanner();
+                hideActiveCallBanner(true);
                 updateCallUI();
                 await startCallAudio(data.participants);
                 startCallSignalingPoll();
@@ -9452,10 +9452,10 @@
                             }
                             showActiveCallBanner(data);
                         } else if (!data.isParticipant && (data.status === 'ENDED' || resp.status === 204)) {
-                            hideActiveCallBanner();
+                            hideActiveCallBanner(true);
                         }
                     } else if (resp.status === 204) {
-                        hideActiveCallBanner();
+                        hideActiveCallBanner(true);
                     }
                 } catch (e) {
                     window.reportClientError(e, 'call status polling');
@@ -9474,8 +9474,8 @@
             banner.style.display = 'flex';
         }
 
-        function hideActiveCallBanner() {
-            activeChatCallInfo = null;
+        function hideActiveCallBanner(clearInfo = false) {
+            if (clearInfo) activeChatCallInfo = null;
             const banner = document.getElementById('active-call-banner');
             if (banner) banner.style.display = 'none';
         }
@@ -9516,7 +9516,7 @@
 
         async function joinCall(callSessionId) {
             if (!currentChat) return;
-            hideActiveCallBanner();
+            hideActiveCallBanner(true);
             if (!activeCallSession) {
                 activeCallSession = { callSessionId, chatHandle: currentChat.handle, myUserId: localStorage.getItem('userId'), role: 'callee' };
             }
