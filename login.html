@@ -2728,6 +2728,7 @@
             
             .input-wrapper {
                 flex: 1;
+                min-width: 0;
                 background: var(--bg-tertiary);
                 border: 1px solid var(--border-color);
                 border-radius: var(--radius-full);
@@ -6122,6 +6123,8 @@
                         messageInput.value = messageInput.value.slice(0, start) + emoji + messageInput.value.slice(end);
                         messageInput.selectionStart = messageInput.selectionEnd = start + emoji.length;
                         messageInput.dispatchEvent(new Event('input'));
+                        panel.classList.remove('visible');
+                        emojiBtn.classList.remove('active');
                         messageInput.focus();
                     });
                 });
