@@ -7096,7 +7096,9 @@
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                const messages = await response.json();
+                const rawData = await response.json();
+                const messages = Array.isArray(rawData) ? rawData : (rawData.messages || []);
+                const serverNextCursor = Array.isArray(rawData) ? null : rawData.nextCursor;
 
                 // Detect ordering problem: we fetched from the beginning (no cursor) but already
                 // have rendered messages — this happens when LRU eviction deleted the cursor while
@@ -7105,6 +7107,10 @@
                 const unseenMsgs = messages.filter(m => !renderedMessageIds.has(m.id));
                 if (!pollingCursor && renderedMessageIds.size > 0 && unseenMsgs.length > 0) {
                     await rearrangeMessages(messages);
+                    if (serverNextCursor) {
+                        pollingCursors[currentChat.handle] = serverNextCursor;
+                        savePollingCursors();
+                    }
                     return;
                 }
 
@@ -7112,12 +7118,16 @@
                 const knownIdsBefore = new Set(renderedMessageIds);
                 await appendMessages(messages);
 
-                // Only advance cursor for truly new messages (not reaction/edit re-sends)
-                const trulyNew = messages.filter(m => !knownIdsBefore.has(m.id));
-                if (trulyNew.length > 0) {
-                    const latestNew = trulyNew[trulyNew.length - 1];
-                    pollingCursors[currentChat.handle] = latestNew.id;
+                // Advance cursor: server nextCursor covers both new messages and recent updates
+                if (serverNextCursor) {
+                    pollingCursors[currentChat.handle] = serverNextCursor;
                     savePollingCursors();
+                } else {
+                    const trulyNew = messages.filter(m => !m.isUpdate && !knownIdsBefore.has(m.id));
+                    if (trulyNew.length > 0) {
+                        pollingCursors[currentChat.handle] = trulyNew[trulyNew.length - 1].id;
+                        savePollingCursors();
+                    }
                 }
             } catch (error) {
                 window.reportClientError(error, 'fetch messages');
@@ -7219,6 +7229,9 @@
                     }
                     continue;
                 }
+
+                // Skip update messages for evicted (non-rendered) messages to prevent out-of-order insertion
+                if (message.isUpdate) continue;
 
                 hasNewMessages = true;
 
@@ -7615,9 +7628,14 @@
                 // Merge: existing cache (sorted) first, new appended — Map preserves insertion order.
                 // Existing messages are already sorted; new messages from cursor are newer, so
                 // Map insertion order gives correct chronological sequence without re-sorting.
+                // Skip isUpdate messages not in existing cache to prevent out-of-order entries.
+                const existingIds = new Set(existingMessages.map(m => m.id));
                 const messageMap = new Map();
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
-                allMessages.forEach(msg => messageMap.set(msg.id, msg));
+                allMessages.forEach(msg => {
+                    if (msg.isUpdate && !existingIds.has(msg.id)) return;
+                    messageMap.set(msg.id, msg);
+                });
                 const mergedMessages = Array.from(messageMap.values());
 
                 // Update polling cursor to the latest message
@@ -8129,27 +8147,12 @@
                 }
 
                 try {
-                    // Get the last message ID for this chat from cache
-                    const cacheKey = `messages_${chat.handle}`;
-                    const cachedMessagesJson = localStorage.getItem(cacheKey);
-                    let lastId = '';
-                    
-                    if (cachedMessagesJson) {
-                        try {
-                            const cachedMessages = JSON.parse(cachedMessagesJson);
-                            if (cachedMessages.length > 0) {
-                                const lastMessage = cachedMessages[cachedMessages.length - 1];
-                                lastId = lastMessage.id;
-                            }
-                        } catch (e) {
-                            window.reportClientError(e, 'parse polling cursor cache');
-                            console.error('Error parsing cache for polling:', e);
-                        }
-                    }
+                    // Use pollingCursors for consistent cursor tracking across active and background chats
+                    const cursorId = pollingCursors[chat.handle] || '';
 
                     // Fetch new messages
-                    const url = lastId 
-                        ? `/messages/${chat.handle}?after=${encodeURIComponent(lastId)}`
+                    const url = cursorId
+                        ? `/messages/${chat.handle}?after=${encodeURIComponent(cursorId)}`
                         : `/messages/${chat.handle}`;
 
                     const response = await authenticatedFetch(url, {
@@ -8161,7 +8164,9 @@
                         continue; // Skip this chat if fetch failed
                     }
 
-                    const messages = await response.json();
+                    const rawBgData = await response.json();
+                    const messages = Array.isArray(rawBgData) ? rawBgData : (rawBgData.messages || []);
+                    const bgNextCursor = Array.isArray(rawBgData) ? null : rawBgData.nextCursor;
 
                     if (messages.length > 0) {
                         // Cache new messages
@@ -8180,23 +8185,31 @@
 
                         // Identify truly new messages (not reaction/edit re-sends)
                         const existingIds = new Set(existingMessages.map(m => m.id));
-                        const trulyNew = messages.filter(m => !existingIds.has(m.id));
+                        const trulyNew = messages.filter(m => !m.isUpdate && !existingIds.has(m.id));
 
-                        // Merge all messages (updates reactions/edits on existing + adds new)
+                        // Merge: skip isUpdate messages not in cache to preserve sort order
                         const messageMap = new Map();
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
-                        messages.forEach(msg => messageMap.set(msg.id, msg));
+                        messages.forEach(msg => {
+                            if (msg.isUpdate && !existingIds.has(msg.id)) return;
+                            messageMap.set(msg.id, msg);
+                        });
 
                         const mergedMessages = Array.from(messageMap.values());
 
                         saveCachedMessages(chat.handle, mergedMessages);
 
-                        // Only notify and advance cursor for truly new messages
-                        if (trulyNew.length > 0) {
-                            const latestNew = trulyNew[trulyNew.length - 1];
-                            pollingCursors[chat.handle] = latestNew.id;
+                        // Advance cursor using server nextCursor or last truly new message
+                        if (bgNextCursor) {
+                            pollingCursors[chat.handle] = bgNextCursor;
                             savePollingCursors();
+                        } else if (trulyNew.length > 0) {
+                            pollingCursors[chat.handle] = trulyNew[trulyNew.length - 1].id;
+                            savePollingCursors();
+                        }
 
+                        // Only notify for truly new messages
+                        if (trulyNew.length > 0) {
                             chat.unreadCount = (chat.unreadCount || 0) + trulyNew.length;
                             chat.lastMessage = 'New message...';
                             chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();

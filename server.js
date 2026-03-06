@@ -815,14 +815,15 @@ function handleGetMessages(req, res, pathname) {
 
 	// If an "after" id is provided, filter out earlier messages using chronological comparison
 	let filteredMessages;
+	let afterTimestamp = null;
 	if (after) {
 		try {
-			const afterTimestamp = decryptTimestamp(after);
+			afterTimestamp = decryptTimestamp(after);
 			filteredMessages = allMessages.filter((msg) => {
 				try {
 					const msgTimestamp = decryptTimestamp(msg.encryptedTimestamp);
-					// Always include messages with reactions or edits so updates propagate
-					return msgTimestamp > afterTimestamp || Object.keys(msg.reactions || {}).length > 0 || (msg.edits || []).length > 0;
+					// Include new messages OR recently updated messages (reaction/edit after cursor)
+					return msgTimestamp > afterTimestamp || ((msg.lastUpdated || 0) > afterTimestamp);
 				} catch (err) {
 					console.warn('Skipping message with invalid timestamp:', err);
 					return false;
@@ -834,6 +835,7 @@ function handleGetMessages(req, res, pathname) {
 		} catch (err) {
 			console.warn('Failed to decrypt after parameter, returning all messages:', err);
 			filteredMessages = allMessages;
+			afterTimestamp = null;
 		}
 	} else {
 		filteredMessages = allMessages;
@@ -855,9 +857,38 @@ function handleGetMessages(req, res, pathname) {
 	const authorization = req.headers.authorization || '';
 	const [requestingUserId] = authorization.split(':');
 
+	// Serialize messages; mark as isUpdate if original timestamp <= afterTimestamp (reaction/edit re-sends)
+	const serializedMessages = filteredMessages.map(msg => {
+		const s = serializeMessageForClient(msg, requestingUserId);
+		if (afterTimestamp !== null) {
+			try {
+				if (decryptTimestamp(msg.encryptedTimestamp) <= afterTimestamp) s.isUpdate = true;
+			} catch {}
+		}
+		return s;
+	});
+
+	// nextCursor = max(all timestamps + lastUpdated) so client cursor advances past updates too
+	let nextCursor = null;
+	if (afterTimestamp !== null && filteredMessages.length > 0) {
+		let maxTime = afterTimestamp;
+		filteredMessages.forEach(msg => {
+			try {
+				const t = decryptTimestamp(msg.encryptedTimestamp);
+				if (t > maxTime) maxTime = t;
+			} catch {}
+			if ((msg.lastUpdated || 0) > maxTime) maxTime = msg.lastUpdated;
+		});
+		if (maxTime > afterTimestamp) nextCursor = encryptTimestamp(maxTime);
+	}
+
 	// Send the (filtered and sorted) list, serialized for client
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	res.end(JSON.stringify(filteredMessages.map(m => serializeMessageForClient(m, requestingUserId))));
+	if (afterTimestamp !== null) {
+		res.end(JSON.stringify({ messages: serializedMessages, nextCursor }));
+	} else {
+		res.end(JSON.stringify(serializedMessages));
+	}
 }
 
 // Generate UUID v4
@@ -1147,6 +1178,8 @@ function handleReaction(req, res, pathname) {
 				if (encryptedUserName) reactionData.encryptedUserNames[userId] = encryptedUserName;
 			}
 
+			message.lastUpdated = Date.now();
+
 			// Return updated reactions for this message (isMine computed for requester)
 			const transformedReactions = {};
 			for (const [emoji, data] of Object.entries(message.reactions)) {
@@ -1218,6 +1251,7 @@ function handleEditMessage(req, res, pathname) {
 			// Apply edit
 			message.encryptedContent = encryptedContent;
 			message.edits.push({ encryptedEditTimestamp });
+			message.lastUpdated = Date.now();
 
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ success: true }));
