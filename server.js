@@ -137,6 +137,38 @@ const MAX_DISK_BYTES = 1024 * 1024 * 1024; // 1 GB
 const EVICT_BATCH = 200;
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// Persistent seen positions: chatHandle -> Map(userId -> { lastReadId, encryptedUserName })
+const seenPositions = new Map();
+const SEEN_FILE = path.join(DATA_DIR, '_seen.json');
+
+function loadSeenPositions() {
+	try {
+		if (!fs.existsSync(SEEN_FILE)) return;
+		const obj = JSON.parse(fs.readFileSync(SEEN_FILE, 'utf8'));
+		for (const [chatHandle, userObj] of Object.entries(obj)) {
+			const userMap = new Map();
+			for (const [uid, data] of Object.entries(userObj)) userMap.set(uid, data);
+			seenPositions.set(chatHandle, userMap);
+		}
+		originalLog(`[Seen] Loaded seen positions for ${seenPositions.size} chat(s)`);
+	} catch (e) {
+		originalError('[Seen] Failed to load seen positions:', e);
+	}
+}
+
+function saveSeenPositions() {
+	try {
+		const obj = {};
+		for (const [chatHandle, userMap] of seenPositions.entries()) {
+			obj[chatHandle] = {};
+			for (const [uid, data] of userMap.entries()) obj[chatHandle][uid] = data;
+		}
+		fs.writeFileSync(SEEN_FILE, JSON.stringify(obj));
+	} catch (e) {
+		originalError('[Seen] Failed to save seen positions:', e);
+	}
+}
+
 // Cleanup old upload sessions periodically
 setInterval(() => {
 	const now = Date.now();
@@ -715,6 +747,7 @@ function loadPersistentStorage() {
 }
 
 loadPersistentStorage();
+loadSeenPositions();
 
 function handleVerify(req) {
 	const authorization = req.headers.authorization;
@@ -1061,14 +1094,26 @@ function handleHeartbeat(req, res, pathname) {
 
 			const prevUser = chatUsers.get(userId);
 
+			// Restore persisted lastReadId if user reconnects without sending one
+			const persistedSeen = seenPositions.get(chatHandle);
+			const persistedReadId = persistedSeen?.get(userId)?.lastReadId || '';
+			const resolvedReadId = lastReadId || prevUser?.lastReadId || persistedReadId;
+
 			// Update the current user's heartbeat - store encrypted user name
 			chatUsers.set(userId, {
 				lastHeartbeat: now,
 				encryptedUserName: encryptedUserName || 'Unknown',
 				isTyping: isTypingBool,
 				lastTypingTime: isTypingBool ? now : (prevUser?.lastTypingTime || 0),
-				lastReadId: lastReadId || prevUser?.lastReadId || ''
+				lastReadId: resolvedReadId
 			});
+
+			// Persist seen position when lastReadId advances
+			if (lastReadId && lastReadId !== persistedSeen?.get(userId)?.lastReadId) {
+				if (!seenPositions.has(chatHandle)) seenPositions.set(chatHandle, new Map());
+				seenPositions.get(chatHandle).set(userId, { lastReadId, encryptedUserName: encryptedUserName || 'Unknown' });
+				saveSeenPositions();
+			}
 
 			console.log(`Heartbeat from ${userId} (${encryptedUserName}) in chat ${chatHandle}`);
 
@@ -1091,11 +1136,18 @@ function handleHeartbeat(req, res, pathname) {
 
 			console.log(`Online users in ${chatHandle}: ${onlineUsersHeader}`);
 
-			// Build read receipts for all users except the requesting user
+			// Build read receipts: merge persisted (offline users) with current online users
+			// Persisted data is the base; online users override with latest values
+			const mergedSeen = new Map(seenPositions.get(chatHandle) || []);
+			for (const [uid, userData] of chatUsers.entries()) {
+				if (userData.lastReadId) {
+					mergedSeen.set(uid, { lastReadId: userData.lastReadId, encryptedUserName: userData.encryptedUserName });
+				}
+			}
 			// Format: encryptedUserName|lastReadId (both already encrypted)
-			const readReceiptsArray = Array.from(chatUsers.entries())
-				.filter(([uid, userData]) => uid !== userId && userData.lastReadId)
-				.map(([uid, userData]) => `${userData.encryptedUserName}|${userData.lastReadId}`);
+			const readReceiptsArray = Array.from(mergedSeen.entries())
+				.filter(([uid, data]) => uid !== userId && data.lastReadId)
+				.map(([uid, data]) => `${data.encryptedUserName}|${data.lastReadId}`);
 
 			// Encode headers to handle non-ASCII characters
 			const encodedOnlineUsersHeader = encodeURIComponent(onlineUsersHeader);
