@@ -378,13 +378,7 @@
             const sessionDuration = localStorage.getItem("sessionDuration");
             const maxAge = sessionDuration ? parseInt(sessionDuration, 10) : SESSION_CONFIG.REMEMBER_DURATION;
 
-            if (now - loginTime > maxAge) {
-                console.log('[Session] Session expired, clearing credentials');
-                clearCredentials();
-                return false;
-            }
-
-            return true;
+            return (now - loginTime) <= maxAge;
         }
 
         /**

@@ -41,13 +41,7 @@
             const sessionDuration = localStorage.getItem("sessionDuration");
             const maxAge = sessionDuration ? parseInt(sessionDuration, 10) : SESSION_CONFIG.REMEMBER_DURATION;
 
-            if (now - loginTime > maxAge) {
-                console.log('[Session] Session expired, clearing credentials');
-                clearCredentials();
-                return false;
-            }
-
-            return true;
+            return (now - loginTime) <= maxAge;
         }
 
         /**
@@ -76,10 +70,16 @@
 
             window.sessionExpiryInterval = setInterval(() => {
                 if (!isSessionValid()) {
-                    // Session expired, redirect to login
-                    console.log('[Session] Session expired, redirecting to login');
-                    clearCredentials();
-                    window.location.href = '/';
+                    const rememberMe = localStorage.getItem("sessionRememberMe") === "true";
+                    if (rememberMe) {
+                        // Silently renew while the user is active
+                        localStorage.setItem("sessionLoginTime", Date.now().toString());
+                        console.log('[Session] Session renewed for remember-me user');
+                    } else {
+                        // Redirect to re-verify password; keys are preserved so identity persists
+                        console.log('[Session] Session expired, redirecting to login');
+                        window.location.href = '/';
+                    }
                 }
             }, SESSION_CONFIG.CHECK_INTERVAL);
         }
@@ -1030,7 +1030,7 @@
             right: -5px;
             min-width: 18px;
             height: 18px;
-            background: var(--error);
+            background: var(--accent);
             color: #fff;
             border-radius: 9px;
             font-size: 10px;
@@ -1111,6 +1111,25 @@
             background: var(--bg-received);
             color: var(--text-primary);
             border-bottom-left-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        /* Date separator */
+        .date-separator {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 14px 0 6px;
+            pointer-events: none;
+        }
+
+        .date-separator-text {
+            font-size: var(--font-size-xs);
+            font-weight: 500;
+            color: var(--text-muted);
+            background: var(--bg-secondary);
+            padding: 4px 14px;
+            border-radius: var(--radius-full);
             border: 1px solid var(--border-color);
         }
 
@@ -5830,8 +5849,7 @@
         function getServerEncryptionKey() {
             const key = localStorage.getItem("serverPassword");
             if (!key) {
-                console.error("Server password not found in localStorage. User must authenticate first.");
-                window.location.href = "/";
+                console.error("Server password not found in localStorage.");
                 return null;
             }
             return key;
@@ -5846,6 +5864,7 @@
         const recordingCtx = recordingCanvas?.getContext('2d');
 
         const renderedMessageIds = new Set();
+        const renderedDateSeparators = new Set();
         const activeAudioPlayers = new Map();
 
         // Scroll tracking for auto-scroll and new message indicator
@@ -6643,6 +6662,7 @@
             statusText.textContent = 'Connecting...';
 
             renderedMessageIds.clear();
+            renderedDateSeparators.clear();
             messagesContainer.innerHTML = '';
             messageDeliveryStatus.clear();
             messageOrder.length = 0;
@@ -7236,6 +7256,7 @@
 
                 // Clear rendered state and re-render from sorted set
                 renderedMessageIds.clear();
+                renderedDateSeparators.clear();
                 messageOrder.length = 0;
                 messagesContainer.innerHTML = '';
 
@@ -7278,6 +7299,27 @@
                 isLoadingHistory = false;
                 if (btn) { btn.textContent = '↑ Load earlier messages'; btn.disabled = false; }
             }
+        }
+
+        function getDateLabel(date) {
+            const today = new Date();
+            const yesterday = new Date(today);
+            yesterday.setDate(today.getDate() - 1);
+            if (date.toDateString() === today.toDateString()) return 'Today';
+            if (date.toDateString() === yesterday.toDateString()) return 'Yesterday';
+            const opts = { month: 'long', day: 'numeric' };
+            if (date.getFullYear() !== today.getFullYear()) opts.year = 'numeric';
+            return date.toLocaleDateString([], opts);
+        }
+
+        function createDateSeparator(label) {
+            const sep = document.createElement('div');
+            sep.className = 'date-separator';
+            const span = document.createElement('span');
+            span.className = 'date-separator-text';
+            span.textContent = label;
+            sep.appendChild(span);
+            return sep;
         }
 
         async function appendMessages(messages, { prepend = false } = {}) {
@@ -7332,11 +7374,13 @@
 
                 // Decrypt server timestamp and apply time offset for display
                 let timeStr = '';
+                let msgDate = null;
                 try {
                     const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
                     const syncedTimestamp = serverTimestamp + timeOffset;
                     const time = new Date(syncedTimestamp);
                     timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                    msgDate = time;
                 } catch (err) {
                     window.reportClientError(err, 'get server timestamp for message');
                     timeStr = '--:--';
@@ -7627,9 +7671,23 @@
                 messageElement.appendChild(reactionBar);
 
                 if (prepend) {
+                    if (msgDate) {
+                        const dateKey = msgDate.toDateString();
+                        if (!renderedDateSeparators.has(dateKey)) {
+                            renderedDateSeparators.add(dateKey);
+                            prependFragment.appendChild(createDateSeparator(getDateLabel(msgDate)));
+                        }
+                    }
                     prependFragment.appendChild(messageElement);
                     prependIds.push(message.id);
                 } else {
+                    if (msgDate) {
+                        const dateKey = msgDate.toDateString();
+                        if (!renderedDateSeparators.has(dateKey)) {
+                            renderedDateSeparators.add(dateKey);
+                            messagesContainer.appendChild(createDateSeparator(getDateLabel(msgDate)));
+                        }
+                    }
                     messagesContainer.appendChild(messageElement);
                 }
                 renderedMessageIds.add(message.id);

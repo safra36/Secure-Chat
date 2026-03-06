@@ -209,12 +209,6 @@ async function authenticatedFetch(url, options = {}) {
 			}
 		}
 
-		// If unauthorized, clear credentials and redirect to login
-		if (response.status === 401) {
-			console.warn('Authentication failed, redirecting to login...');
-			logout(true); // Pass true to skip confirmation dialog
-		}
-
 		return response;
 	} catch (error) {
 		console.error('Fetch error:', error);
