@@ -234,19 +234,26 @@ class P2PTransferManager {
 		const chatHandle = sendTransfer.chatHandle;
 		const startTime = Date.now();
 
+		const cleanup = () => {
+			sendTransfer.status = 'FAILED';
+			this.activeSends.delete(transferSessionId);
+		};
+
 		return new Promise((resolve, reject) => {
 			const checkStatus = async () => {
 				try {
 					const elapsed = Date.now() - startTime;
 					if (elapsed >= maxWaitMs) {
+						cleanup();
 						reject(new Error('Timeout waiting for receiver acceptance'));
 						return;
 					}
 
 					const response = await authenticatedFetch(`/transfer/status/${chatHandle}/${transferSessionId}`);
-					
+
 					if (!response.ok) {
 						const error = await response.json();
+						cleanup();
 						reject(new Error(error.error || 'Failed to get transfer status'));
 						return;
 					}
@@ -258,14 +265,17 @@ class P2PTransferManager {
 						// Receiver has accepted, we can start sending
 						resolve(true);
 					} else if (status.status === 'FAILED' || status.status === 'CANCELLED') {
+						cleanup();
 						reject(new Error('Transfer was cancelled or failed'));
 					} else if (status.status === 'COMPLETED') {
+						cleanup();
 						reject(new Error('Transfer already completed'));
 					} else {
 						// Still PENDING, continue polling
 						setTimeout(checkStatus, pollIntervalMs);
 					}
 				} catch (error) {
+					cleanup();
 					reject(error);
 				}
 			};
