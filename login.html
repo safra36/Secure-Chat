@@ -1216,6 +1216,12 @@
             opacity: 1;
             color: #60a5fa;
         }
+        .read-status.pending {
+            opacity: 0.4;
+        }
+        .message.pending-message {
+            opacity: 0.65;
+        }
 
         /* ── Message action toolbar ── */
         /* Toolbar lives INSIDE .message (which already has position:relative),
@@ -7323,6 +7329,13 @@
         }
 
         async function appendMessages(messages, { prepend = false } = {}) {
+            // Snapshot currentChat at entry — currentChat is a mutable global that can
+            // change mid-execution if the user switches chats during an async fetch.
+            const chatSnapshot = currentChat;
+            if (!chatSnapshot) return;
+            const encryptionKey = chatSnapshot.encryptionKey;
+            const handle = chatSnapshot.handle;
+
             // For prepend: save scrollHeight to restore scroll after insertion
             const prevScrollHeight = prepend ? messagesContainer.scrollHeight : 0;
             // Capture scroll position BEFORE adding messages
@@ -7342,7 +7355,7 @@
                     if (message.isEdited) {
                         const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
                         if (msgGroup && msgGroup.dataset.encryptedContent !== message.encryptedContent) {
-                            decryptMessage(message.encryptedContent, currentChat.encryptionKey)
+                            decryptMessage(message.encryptedContent, encryptionKey)
                                 .then(plaintext => patchRenderedMessage(message.id, plaintext, true, message.encryptedContent))
                                 .catch(() => {});
                         }
@@ -7362,7 +7375,7 @@
 
                 let senderName;
                 try {
-                    senderName = await decryptMessage(message.encryptedName, currentChat.encryptionKey);
+                    senderName = await decryptMessage(message.encryptedName, encryptionKey);
                 } catch (err) {
                     window.reportClientError(err, 'decrypt sender name');
                     console.warn('Failed to decrypt sender name for message:', message.id);
@@ -7400,7 +7413,7 @@
                         const cachedContent = await getCachedContent(message.id);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
                             // Content is cached, decrypt and render immediately
-                            const decryptedAudioBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
+                            const decryptedAudioBuffer = await decryptBinary(cachedContent, encryptionKey);
                             const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm;codecs=opus' });
                             const audioUrl = createTrackedBlobUrl(audioBlob);
                             const audio = new Audio(audioUrl);
@@ -7425,7 +7438,7 @@
                             if (message.encryptedContent) {
                                 // Cache and render immediately
                                 await cacheContentWithQuota(message.id, message.encryptedContent);
-                                const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                                const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, encryptionKey);
                                 const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm;codecs=opus' });
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
@@ -7452,7 +7465,7 @@
                         const cachedContent = await getCachedContent(message.id);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
                             // Content is cached, decrypt and render immediately
-                            const decryptedImageBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
+                            const decryptedImageBuffer = await decryptBinary(cachedContent, encryptionKey);
                             const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
                             const imageUrl = createTrackedBlobUrl(imageBlob);
 
@@ -7465,7 +7478,7 @@
                             if (message.encryptedContent) {
                                 // Cache and render immediately
                                 await cacheContentWithQuota(message.id, message.encryptedContent);
-                                const decryptedImageBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                                const decryptedImageBuffer = await decryptBinary(message.encryptedContent, encryptionKey);
                                 const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
                                 const imageUrl = createTrackedBlobUrl(imageBlob);
 
@@ -7478,7 +7491,7 @@
                     } else if (isVideo) {
                         const cachedContent = await getCachedContent(message.id);
                         if (cachedContent && cachedContent !== 'PLACEHOLDER') {
-                            const decryptedVideoBuffer = await decryptBinary(cachedContent, currentChat.encryptionKey);
+                            const decryptedVideoBuffer = await decryptBinary(cachedContent, encryptionKey);
                             const videoBlob = new Blob([decryptedVideoBuffer], { type: 'video/*' });
                             const videoUrl = createTrackedBlobUrl(videoBlob);
                             contentHtml = `<video class="message-video" src="${videoUrl}" controls playsinline></video>`;
@@ -7487,7 +7500,7 @@
                         } else {
                             if (message.encryptedContent) {
                                 await cacheContentWithQuota(message.id, message.encryptedContent);
-                                const decryptedVideoBuffer = await decryptBinary(message.encryptedContent, currentChat.encryptionKey);
+                                const decryptedVideoBuffer = await decryptBinary(message.encryptedContent, encryptionKey);
                                 const videoBlob = new Blob([decryptedVideoBuffer], { type: 'video/*' });
                                 const videoUrl = createTrackedBlobUrl(videoBlob);
                                 contentHtml = `<video class="message-video" src="${videoUrl}" controls playsinline></video>`;
@@ -7499,12 +7512,12 @@
                         let fileMeta = null;
                         if (message.encryptedMeta) {
                             try {
-                                fileMeta = JSON.parse(await decryptMessage(message.encryptedMeta, currentChat.encryptionKey));
+                                fileMeta = JSON.parse(await decryptMessage(message.encryptedMeta, encryptionKey));
                             } catch (e) { /* leave null */ }
                         }
                         contentHtml = createFileMessageCard(message.id, fileMeta);
                     } else {
-                        const decrypted = await decryptMessage(message.encryptedContent, currentChat.encryptionKey);
+                        const decrypted = await decryptMessage(message.encryptedContent, encryptionKey);
                         contentHtml = `<div class="message-content">${escapeHtml(decrypted)}</div>`;
                     }
                 } catch (err) {
@@ -7541,10 +7554,10 @@
                     textDiv.textContent = '…';
 
                     // Decrypt preview and sender name with chat key
-                    decryptMessage(message.replyTo.encryptedSenderName, currentChat.encryptionKey)
+                    decryptMessage(message.replyTo.encryptedSenderName, encryptionKey)
                         .then(s => { senderDiv.textContent = s; })
                         .catch(() => { senderDiv.textContent = ''; });
-                    decryptMessage(message.replyTo.encryptedPreview, currentChat.encryptionKey)
+                    decryptMessage(message.replyTo.encryptedPreview, encryptionKey)
                         .then(p => { textDiv.textContent = p; })
                         .catch(() => {});
 
@@ -7708,7 +7721,7 @@
                         const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
                         const syncedTimestamp = serverTimestamp + timeOffset;
                         const timestampStr = new Date(syncedTimestamp).toISOString();
-                        updateLastMessage(currentChat.handle, textContent, timestampStr);
+                        updateLastMessage(handle, textContent, timestampStr);
                     } catch (err) {
                         window.reportClientError(err, 'update last message timestamp');
                         // Skip update on decryption failure to avoid corrupting lastMessageTime
@@ -7747,8 +7760,8 @@
             }
 
             // Save new messages to cache (merge with existing cache) and update polling cursor
-            if (allMessages.length > 0 && currentChat) {
-                const cacheKey = `messages_${currentChat.handle}`;
+            if (allMessages.length > 0 && chatSnapshot) {
+                const cacheKey = `messages_${handle}`;
                 const cachedMessagesJson = localStorage.getItem(cacheKey);
                 let existingMessages = [];
 
@@ -7776,10 +7789,10 @@
 
                 // Update polling cursor to the latest message
                 if (mergedMessages.length > 0) {
-                    pollingCursors[currentChat.handle] = mergedMessages[mergedMessages.length - 1].id;
+                    pollingCursors[handle] = mergedMessages[mergedMessages.length - 1].id;
                 }
 
-                saveCachedMessages(currentChat.handle, mergedMessages);
+                saveCachedMessages(handle, mergedMessages);
             }
         }
 
@@ -8394,6 +8407,54 @@
             }
         }
 
+        function appendOptimisticMessage(id, text, timeStr) {
+            const messageEl = document.createElement('div');
+            messageEl.className = 'message-group';
+            messageEl.dataset.messageId = id;
+
+            const bubble = document.createElement('div');
+            bubble.className = 'message own pending-message';
+
+            const timeHeader = document.createElement('div');
+            timeHeader.className = 'message-header';
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'message-time';
+            timeSpan.textContent = timeStr;
+            const readStatus = document.createElement('span');
+            readStatus.className = 'read-status pending';
+            readStatus.setAttribute('data-msg-id', id);
+            readStatus.textContent = '○';
+            timeHeader.appendChild(timeSpan);
+            timeHeader.appendChild(readStatus);
+            bubble.appendChild(timeHeader);
+
+            const contentDiv = document.createElement('div');
+            contentDiv.className = 'message-content';
+            contentDiv.textContent = text;
+            bubble.appendChild(contentDiv);
+
+            messageEl.appendChild(bubble);
+            messagesContainer.appendChild(messageEl);
+            renderedMessageIds.add(id);
+            if (isAtBottom) scrollToBottom(false);
+        }
+
+        function confirmOptimisticMessage(id) {
+            const readStatus = document.querySelector(`.read-status[data-msg-id="${CSS.escape(id)}"]`);
+            if (readStatus) {
+                readStatus.textContent = '✓';
+                readStatus.classList.remove('pending');
+            }
+            const bubble = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(id)}"] .message`);
+            if (bubble) bubble.classList.remove('pending-message');
+        }
+
+        function removeOptimisticMessage(id) {
+            const msgEl = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(id)}"]`);
+            if (msgEl) msgEl.remove();
+            renderedMessageIds.delete(id);
+        }
+
         async function sendMessage() {
             const message = messageInput.value.trim();
             const hasMedia = selectedMedia !== null;
@@ -8506,6 +8567,11 @@
                 clearReplyContext();
                 handleInputChange();
 
+                // Optimistic bubble — shown immediately, removed or confirmed on server response
+                const optimisticId = encryptedTimestamp;
+                const optimisticTimeStr = new Date(currentTime + timeOffset).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                appendOptimisticMessage(optimisticId, message, optimisticTimeStr);
+
                 try {
                     await sendWithRetry(`/send/${currentChat.handle}`, {
                         method: 'POST',
@@ -8513,9 +8579,11 @@
                         body: JSON.stringify(messageData)
                     });
 
+                    confirmOptimisticMessage(optimisticId);
                     fetchMessages();
                 } catch (error) {
                     window.reportClientError(error, 'send message');
+                    removeOptimisticMessage(optimisticId);
                     showToast('Failed to send message', 'error');
                 }
             }

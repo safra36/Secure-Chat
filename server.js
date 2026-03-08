@@ -77,6 +77,17 @@ function logClientError(entry) {
 // In-memory storage for messages (in production, use a database)
 const messagesStorage = new Map();
 
+// Rate limiting for /send endpoint
+const sendRateLimits = new Map(); // `${userId}:${chatHandle}` -> { count, windowStart }
+const RATE_LIMIT_WINDOW_MS = 10000;
+const RATE_LIMIT_MAX = 15;
+setInterval(() => {
+	const now = Date.now();
+	for (const [key, bucket] of sendRateLimits) {
+		if (now - bucket.windowStart > RATE_LIMIT_WINDOW_MS) sendRateLimits.delete(key);
+	}
+}, 60000);
+
 // In-memory storage for message content (for deferred downloads)
 // Structure: messageId -> { chatHandle, content, createdAt }
 const messageContentStorage = new Map();
@@ -979,6 +990,19 @@ function handleSendMessage(req, res, pathname) {
 			// Extract userId for edit authorization
 			const authorization = req.headers.authorization || '';
 			const [senderUserId] = authorization.split(':');
+
+			// Rate limit check
+			const rateLimitKey = `${senderUserId}:${chatHandle}`;
+			const now = Date.now();
+			const bucket = sendRateLimits.get(rateLimitKey) || { count: 0, windowStart: now };
+			if (now - bucket.windowStart > RATE_LIMIT_WINDOW_MS) { bucket.count = 0; bucket.windowStart = now; }
+			bucket.count++;
+			sendRateLimits.set(rateLimitKey, bucket);
+			if (bucket.count > RATE_LIMIT_MAX) {
+				res.writeHead(429, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Rate limit exceeded' }));
+				return;
+			}
 
 			// Create message object with encrypted timestamp as ID (secure and chronological)
 			const messageId = messageData.encryptedTimestamp;
