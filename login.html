@@ -8416,7 +8416,7 @@
             }
         }
 
-        function appendOptimisticMessage(id, text, timeStr, isoTimestamp) {
+        function appendOptimisticMessage(id, text, timeStr, isoTimestamp, replyPreview) {
             const messageEl = document.createElement('div');
             messageEl.className = 'message-group';
             messageEl.dataset.messageId = id;
@@ -8436,6 +8436,16 @@
             timeHeader.appendChild(timeSpan);
             timeHeader.appendChild(readStatus);
             bubble.appendChild(timeHeader);
+
+            if (replyPreview) {
+                const quoteDiv = document.createElement('div');
+                quoteDiv.className = 'reply-quote';
+                const textDiv = document.createElement('div');
+                textDiv.className = 'reply-quote-text';
+                textDiv.textContent = replyPreview;
+                quoteDiv.appendChild(textDiv);
+                bubble.appendChild(quoteDiv);
+            }
 
             const contentDiv = document.createElement('div');
             contentDiv.className = 'message-content';
@@ -8582,6 +8592,9 @@
 
                 messageInput.value = '';
                 messageInput.style.height = 'auto';
+                const replyPreview = replyContext
+                    ? document.getElementById('reply-context-preview').textContent
+                    : null;
                 clearReplyContext();
                 handleInputChange();
 
@@ -8590,7 +8603,7 @@
                 const optimisticDate = new Date(currentTime + timeOffset);
                 const optimisticTimeStr = optimisticDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 const optimisticIso = optimisticDate.toISOString();
-                appendOptimisticMessage(optimisticId, message, optimisticTimeStr, optimisticIso);
+                appendOptimisticMessage(optimisticId, message, optimisticTimeStr, optimisticIso, replyPreview);
 
                 try {
                     await sendWithRetry(`/send/${currentChat.handle}`, {
