@@ -5870,6 +5870,8 @@
         const recordingCtx = recordingCanvas?.getContext('2d');
 
         const renderedMessageIds = new Set();
+        const optimisticIds = new Set(); // IDs of messages shown optimistically but not yet cached
+        const optimisticMeta = new Map(); // id -> { text, handle, isoTimestamp }
         const renderedDateSeparators = new Set();
         const activeAudioPlayers = new Map();
 
@@ -7360,6 +7362,13 @@
                                 .catch(() => {});
                         }
                     }
+                    // Optimistic messages bypassed the normal render→cache path.
+                    // When the server confirms them here, push to allMessages so they
+                    // get written to localStorage before the cursor can advance past them.
+                    if (!prepend && optimisticIds.has(message.id)) {
+                        allMessages.push(message);
+                        optimisticIds.delete(message.id);
+                    }
                     continue;
                 }
 
@@ -8407,7 +8416,7 @@
             }
         }
 
-        function appendOptimisticMessage(id, text, timeStr) {
+        function appendOptimisticMessage(id, text, timeStr, isoTimestamp) {
             const messageEl = document.createElement('div');
             messageEl.className = 'message-group';
             messageEl.dataset.messageId = id;
@@ -8436,6 +8445,8 @@
             messageEl.appendChild(bubble);
             messagesContainer.appendChild(messageEl);
             renderedMessageIds.add(id);
+            optimisticIds.add(id);
+            optimisticMeta.set(id, { text, handle: currentChat.handle, isoTimestamp });
             if (isAtBottom) scrollToBottom(false);
         }
 
@@ -8447,12 +8458,19 @@
             }
             const bubble = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(id)}"] .message`);
             if (bubble) bubble.classList.remove('pending-message');
+            const meta = optimisticMeta.get(id);
+            if (meta) {
+                updateLastMessage(meta.handle, meta.text, meta.isoTimestamp);
+                optimisticMeta.delete(id);
+            }
         }
 
         function removeOptimisticMessage(id) {
             const msgEl = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(id)}"]`);
             if (msgEl) msgEl.remove();
             renderedMessageIds.delete(id);
+            optimisticIds.delete(id);
+            optimisticMeta.delete(id);
         }
 
         async function sendMessage() {
@@ -8569,8 +8587,10 @@
 
                 // Optimistic bubble — shown immediately, removed or confirmed on server response
                 const optimisticId = encryptedTimestamp;
-                const optimisticTimeStr = new Date(currentTime + timeOffset).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                appendOptimisticMessage(optimisticId, message, optimisticTimeStr);
+                const optimisticDate = new Date(currentTime + timeOffset);
+                const optimisticTimeStr = optimisticDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const optimisticIso = optimisticDate.toISOString();
+                appendOptimisticMessage(optimisticId, message, optimisticTimeStr, optimisticIso);
 
                 try {
                     await sendWithRetry(`/send/${currentChat.handle}`, {
