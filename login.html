@@ -5892,6 +5892,7 @@
         // Read receipt state
         let lastReadId = ''; // encrypted timestamp of last rendered message (for outgoing heartbeat)
         const messageOrder = []; // all rendered message IDs in chronological order
+        let lastReadReceiptsHeader = null; // last X-Read-Receipts header value, re-applied after cache load
 
         // Edit / reply / reaction state
         let editContext = null;    // { messageId, originalContent }
@@ -6694,6 +6695,7 @@
             resetScrollState();
 
             // Load cached messages from localStorage
+            lastReadReceiptsHeader = null;
             loadCachedMessages(handle);
 
             // Show load-more bar; set oldest ID from cache so first request knows where to start
@@ -6805,6 +6807,7 @@
                 // Parse X-Read-Receipts header (encrypted names + encrypted lastReadIds from other users)
                 const readReceiptsHeader = response.headers.get('X-Read-Receipts');
                 if (readReceiptsHeader) {
+                    lastReadReceiptsHeader = readReceiptsHeader;
                     updateReadReceipts(readReceiptsHeader);
                 }
 
@@ -7351,25 +7354,29 @@
             
             for (const message of messages) {
                 if (renderedMessageIds.has(message.id)) {
-                    // Always sync reaction bar (handles additions and removals)
-                    updateReactionBar(message.id, message.reactions || {});
-                    // Sync edited content if edit state changed
-                    if (message.isEdited) {
-                        const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
-                        if (msgGroup && msgGroup.dataset.encryptedContent !== message.encryptedContent) {
-                            decryptMessage(message.encryptedContent, encryptionKey)
-                                .then(plaintext => patchRenderedMessage(message.id, plaintext, true, message.encryptedContent))
-                                .catch(() => {});
-                        }
-                    }
-                    // Optimistic messages bypassed the normal render→cache path.
-                    // When the server confirms them here, push to allMessages so they
-                    // get written to localStorage before the cursor can advance past them.
                     if (!prepend && optimisticIds.has(message.id)) {
-                        allMessages.push(message);
+                        // Optimistic stub → upgrade to full message.
+                        // Remove the stripped bubble and fall through to the full render
+                        // path so action buttons, reaction bar, encryptedContent dataset,
+                        // edit/reply/react all work correctly in the current session.
+                        const stub = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
+                        if (stub) stub.remove();
+                        renderedMessageIds.delete(message.id);
                         optimisticIds.delete(message.id);
+                        // fall through — do NOT continue
+                    } else {
+                        // Normal already-rendered message: sync reactions and edits only
+                        updateReactionBar(message.id, message.reactions || {});
+                        if (message.isEdited) {
+                            const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
+                            if (msgGroup && msgGroup.dataset.encryptedContent !== message.encryptedContent) {
+                                decryptMessage(message.encryptedContent, encryptionKey)
+                                    .then(plaintext => patchRenderedMessage(message.id, plaintext, true, message.encryptedContent))
+                                    .catch(() => {});
+                            }
+                        }
+                        continue;
                     }
-                    continue;
                 }
 
                 // Skip update messages for evicted (non-rendered) messages to prevent out-of-order insertion
@@ -9236,7 +9243,9 @@
                 console.log(`Loaded ${cachedMessages.length} cached messages for chat: ${chatHandle}`);
                 
                 // Render all cached messages
-                appendMessages(cachedMessages).catch(err => {
+                appendMessages(cachedMessages).then(() => {
+                    if (lastReadReceiptsHeader) updateReadReceipts(lastReadReceiptsHeader);
+                }).catch(err => {
                     window.reportClientError(err, 'render cached messages');
                     console.error('Error rendering cached messages:', err);
                 });
