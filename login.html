@@ -15,6 +15,7 @@
     <script src="error-reporter.js"></script>
     <script src="pako.min.js"></script>
     <script src="content-cache-db.js"></script>
+    <script src="sticker-db.js"></script>
     <script>
         // Session configuration (must be loaded before auth.js functions)
         const SESSION_CONFIG = {
@@ -1433,6 +1434,171 @@
 
         .emoji-picker.visible {
             display: flex;
+        }
+
+        /* ── Sticker button ── */
+        .sticker-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            padding: 0 4px;
+            opacity: 0.45;
+            transition: opacity 0.15s;
+            flex-shrink: 0;
+            line-height: 1;
+        }
+        .sticker-btn:hover, .sticker-btn.active { opacity: 1; }
+
+        /* ── Sticker picker panel ── */
+        .sticker-picker {
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            padding: 0;
+            display: none;
+            flex-direction: column;
+            box-shadow: 0 -4px 32px rgba(0,0,0,0.4);
+            z-index: 1002;
+            width: min(340px, 94vw);
+            overflow: hidden;
+        }
+        .sticker-picker.visible { display: flex; }
+        .sticker-picker-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px 8px;
+            border-bottom: 1px solid var(--border-color);
+            flex-shrink: 0;
+        }
+        .sticker-picker-title {
+            font-size: 12px;
+            font-weight: 600;
+            opacity: 0.55;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+        }
+        .sticker-add-btn {
+            background: var(--accent, #6366f1);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 700;
+            line-height: 1;
+            width: 26px;
+            height: 26px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            opacity: 0.9;
+            transition: opacity 0.15s, transform 0.1s;
+        }
+        .sticker-add-btn:hover { opacity: 1; transform: scale(1.1); }
+        .sticker-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 6px;
+            padding: 10px;
+            overflow-y: auto;
+            max-height: 240px;
+            min-height: 72px;
+            scrollbar-width: thin;
+            scrollbar-color: var(--border-color) transparent;
+        }
+        .sticker-grid::-webkit-scrollbar { width: 4px; }
+        .sticker-grid::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 2px; }
+        .sticker-item {
+            position: relative;
+            aspect-ratio: 1;
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: pointer;
+            background: rgba(255,255,255,0.04);
+            transition: background 0.15s, transform 0.12s;
+        }
+        .sticker-item:hover { background: rgba(255,255,255,0.1); transform: scale(1.06); }
+        .sticker-item:active { transform: scale(0.94); }
+        .sticker-item img { width: 100%; height: 100%; object-fit: contain; padding: 4px; display: block; }
+        .sticker-item-del {
+            position: absolute;
+            top: 2px;
+            right: 2px;
+            width: 16px;
+            height: 16px;
+            background: rgba(0,0,0,0.6);
+            border: none;
+            border-radius: 50%;
+            color: rgba(255,255,255,0.8);
+            cursor: pointer;
+            font-size: 10px;
+            line-height: 1;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 0;
+            z-index: 1;
+            transition: background 0.12s;
+        }
+        .sticker-item:hover .sticker-item-del { display: flex; }
+        .sticker-item-del:hover { background: rgba(200,40,40,0.85); color: #fff; }
+        .sticker-empty {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 22px 12px;
+            opacity: 0.38;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        /* ── Sticker message rendering ── */
+        .message.sticker-msg { background: transparent !important; box-shadow: none !important; padding: 2px 0; }
+        .sticker-bubble-wrap { position: relative; display: inline-block; }
+        .sticker-bubble-wrap img.msg-sticker {
+            width: 160px;
+            height: 160px;
+            object-fit: contain;
+            border-radius: 10px;
+            display: block;
+            transition: transform 0.15s;
+        }
+        .sticker-bubble-wrap:hover img.msg-sticker { transform: scale(1.04); }
+        .sticker-save-btn {
+            position: absolute;
+            bottom: 4px;
+            right: 4px;
+            background: rgba(0,0,0,0.6);
+            border: none;
+            border-radius: 6px;
+            color: rgba(255,255,255,0.88);
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 3px 8px;
+            display: none;
+            align-items: center;
+            gap: 3px;
+            white-space: nowrap;
+            z-index: 2;
+            transition: background 0.12s;
+        }
+        .sticker-save-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
+        .sticker-bubble-wrap:hover .sticker-save-btn { display: flex; }
+        .sticker-save-btn.saved { color: #4ade80; pointer-events: none; }
+        .sticker-loading {
+            width: 160px;
+            height: 160px;
+            border-radius: 10px;
+            background: rgba(255,255,255,0.05);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+            opacity: 0.4;
         }
 
         .emoji-option {
@@ -4648,6 +4814,7 @@
                         rows="1"
                     ></textarea>
                     <button id="emoji-btn" class="emoji-btn" title="Emoji" type="button">😊</button>
+                    <button id="sticker-btn" class="sticker-btn" title="Stickers" type="button">🪄</button>
                 </div>
                 <button id="voice-btn" class="voice-btn" title="Record voice">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 22px; height: 22px;">
@@ -4967,6 +5134,17 @@
         </div>
     </div>
 
+    <!-- Sticker picker panel -->
+    <div id="sticker-picker" class="sticker-picker">
+        <div class="sticker-picker-header">
+            <span class="sticker-picker-title">Stickers</span>
+            <button id="sticker-add-btn" class="sticker-add-btn" title="Add sticker">+</button>
+        </div>
+        <div id="sticker-grid" class="sticker-grid">
+            <div class="sticker-empty">No stickers yet.<br>Tap + to add some</div>
+        </div>
+    </div>
+
     <!-- Toast -->
     <div id="toast" class="toast"></div>
 
@@ -4974,6 +5152,7 @@
     <input type="file" accept="image/*,video/*" id="image-input" style="display: none;">
     <input type="file" id="p2p-file-input" style="display: none;">
     <input type="file" id="offline-file-input" style="display: none;">
+    <input type="file" accept="image/png,image/gif,image/webp,image/jpeg" id="sticker-input" style="display: none;">
 
     <!-- P2P File Transfer Modal -->
     <div id="p2p-transfer-modal" class="modal-overlay">
@@ -5717,7 +5896,7 @@
                 }
             }
 
-            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null) {
+            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null) {
                 try {
                     const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
                         method: 'POST',
@@ -5728,7 +5907,8 @@
                             encryptedTimestamp: encryptedTimestamp,
                             messageType: messageType,
                             isCompressed: isCompressed,
-                            encryptedMeta: encryptedMeta
+                            encryptedMeta: encryptedMeta,
+                            stickerId: stickerId
                         })
                     });
 
@@ -6134,6 +6314,7 @@
 
             // Initialize storage (IndexedDB with localStorage fallback)
             await initializeStorage();
+            stickerDB.init().catch(e => console.warn('StickerDB init failed:', e));
 
             // Load saved data
             userName = localStorage.getItem('userName') || '';
@@ -6287,6 +6468,101 @@
                         messageInput.focus();
                     });
                 });
+            })();
+
+            // ── Sticker picker ──
+            (function() {
+                const stickerBtn = document.getElementById('sticker-btn');
+                const picker = document.getElementById('sticker-picker');
+                const stickerAddBtn = document.getElementById('sticker-add-btn');
+                const stickerGrid = document.getElementById('sticker-grid');
+                const stickerInput = document.getElementById('sticker-input');
+                if (!stickerBtn || !picker) return;
+
+                async function loadStickersIntoGrid() {
+                    let stickers = [];
+                    try { stickers = await stickerDB.getAll(); } catch (e) {}
+                    stickerGrid.innerHTML = '';
+                    if (stickers.length === 0) {
+                        stickerGrid.innerHTML = '<div class="sticker-empty">No stickers yet.<br>Tap + to add some</div>';
+                        return;
+                    }
+                    stickers.forEach(sticker => {
+                        const item = document.createElement('div');
+                        item.className = 'sticker-item';
+                        const img = document.createElement('img');
+                        img.src = `data:${sticker.contentType};base64,${sticker.imageData}`;
+                        img.alt = sticker.name || 'Sticker';
+                        const del = document.createElement('button');
+                        del.className = 'sticker-item-del';
+                        del.innerHTML = '&times;';
+                        del.title = 'Remove';
+                        del.addEventListener('click', async (e) => {
+                            e.stopPropagation();
+                            await stickerDB.deleteSticker(sticker.stickerId);
+                            item.remove();
+                            if (!stickerGrid.querySelector('.sticker-item')) {
+                                stickerGrid.innerHTML = '<div class="sticker-empty">No stickers yet.<br>Tap + to add some</div>';
+                            }
+                        });
+                        item.appendChild(img);
+                        item.appendChild(del);
+                        item.addEventListener('click', () => window.sendSticker(sticker));
+                        stickerGrid.appendChild(item);
+                    });
+                }
+
+                window._stickerPickerRefresh = loadStickersIntoGrid;
+
+                function openPicker() {
+                    const rect = stickerBtn.getBoundingClientRect();
+                    const w = Math.min(340, window.innerWidth * 0.94);
+                    let left = rect.left + rect.width / 2 - w / 2;
+                    left = Math.max(8, Math.min(left, window.innerWidth - w - 8));
+                    picker.style.left = left + 'px';
+                    picker.style.bottom = (window.innerHeight - rect.top + 8) + 'px';
+                    picker.classList.add('visible');
+                    stickerBtn.classList.add('active');
+                    loadStickersIntoGrid();
+                }
+
+                function closePicker() {
+                    picker.classList.remove('visible');
+                    stickerBtn.classList.remove('active');
+                }
+                window.closeStickerPicker = closePicker;
+
+                stickerBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    picker.classList.contains('visible') ? closePicker() : openPicker();
+                });
+
+                document.addEventListener('click', (e) => {
+                    if (!e.target.closest('#sticker-picker') && !e.target.closest('#sticker-btn')) closePicker();
+                });
+
+                if (stickerAddBtn) {
+                    stickerAddBtn.addEventListener('click', (e) => { e.stopPropagation(); stickerInput.click(); });
+                }
+
+                if (stickerInput) {
+                    stickerInput.addEventListener('change', async (e) => {
+                        const file = e.target.files[0];
+                        stickerInput.value = '';
+                        if (!file) return;
+                        if (file.size > 512 * 1024) { showToast('Sticker too large (max 512KB)', 'error'); return; }
+                        try {
+                            const buf = await file.arrayBuffer();
+                            const imageDataB64 = uint8ArrayToBase64(new Uint8Array(buf));
+                            const id = 'own_' + Date.now() + '_' + Math.random().toString(36).slice(2, 7);
+                            await stickerDB.addSticker(id, imageDataB64, file.type, '', 'own');
+                            loadStickersIntoGrid();
+                            showToast('Sticker added!', 'success');
+                        } catch (err) {
+                            showToast(err.message && err.message.includes('large') ? err.message : 'Failed to add sticker', 'error');
+                        }
+                    });
+                }
             })();
 
             // Swipe-to-reply
@@ -7419,7 +7695,8 @@
                 const isImage = message.type === 'image';
                 const isVideo = message.type === 'video';
                 const isFile = message.type === 'file';
-                const isMedia = isVoice || isImage || isVideo || isFile;
+                const isSticker = message.type === 'sticker';
+                const isMedia = isVoice || isImage || isVideo || isFile || isSticker;
 
                 let contentHtml = '';
 
@@ -7532,6 +7809,8 @@
                             } catch (e) { /* leave null */ }
                         }
                         contentHtml = createFileMessageCard(message.id, fileMeta);
+                    } else if (isSticker) {
+                        contentHtml = await buildStickerElement(message, isOwn, encryptionKey);
                     } else {
                         const decrypted = await decryptMessage(message.encryptedContent, encryptionKey);
                         contentHtml = `<div class="message-content">${escapeHtml(decrypted)}</div>`;
@@ -7542,6 +7821,8 @@
                     if (isVoice || isImage || isVideo) {
                         const contentType = isVoice ? 'voice' : isVideo ? 'video' : 'image';
                         contentHtml = createDeferredContentButton(message.id, contentType);
+                    } else if (isSticker) {
+                        contentHtml = buildStickerPlaceholder();
                     } else if (isFile) {
                         contentHtml = createFileMessageCard(message.id, null);
                     } else {
@@ -7555,7 +7836,7 @@
 
                 // Create message bubble
                 const messageBubble = document.createElement('div');
-                messageBubble.className = `message ${bubbleClass}`;
+                messageBubble.className = `message ${bubbleClass}${isSticker ? ' sticker-msg' : ''}`;
 
                 // Render reply quote if present (decrypted with chat key)
                 if (message.replyTo) {
@@ -9419,6 +9700,174 @@
                 throw err;
             }
         }
+
+        // ==================== STICKER HELPERS ====================
+
+        function buildStickerPlaceholder() {
+            const d = document.createElement('div');
+            d.className = 'sticker-loading';
+            d.textContent = '🪄';
+            return d;
+        }
+
+        async function downloadStickerWithRetry(messageId, maxRetries) {
+            maxRetries = maxRetries || 3;
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const encodedId = encodeURIComponent(messageId);
+                    const response = await authenticatedFetch(`/download-content/${currentChat.handle}/${encodedId}`, { method: 'GET' });
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    const data = await response.json();
+                    return data.encryptedContent || null;
+                } catch (err) {
+                    if (attempt === maxRetries - 1) return null;
+                    await new Promise(r => setTimeout(r, 1000 * Math.pow(2, attempt)));
+                }
+            }
+            return null;
+        }
+
+        async function saveStickerFromMessage(message, saveBtn, encryptionKey) {
+            saveBtn.disabled = true;
+            saveBtn.textContent = '…';
+            try {
+                let encB64 = await getCachedContent(message.id);
+                if (!encB64 || encB64 === 'PLACEHOLDER') {
+                    encB64 = await downloadStickerWithRetry(message.id);
+                }
+                if (!encB64) throw new Error('Download failed');
+                const buf = await decryptBinary(encB64, encryptionKey);
+                const imageDataB64 = uint8ArrayToBase64(new Uint8Array(buf));
+                await stickerDB.addSticker(message.stickerId, imageDataB64, 'image/png', '', 'saved');
+                saveBtn.innerHTML = '✓ Saved';
+                saveBtn.classList.add('saved');
+                saveBtn.disabled = false;
+                showToast('Sticker saved!', 'success');
+                if (window._stickerPickerRefresh) window._stickerPickerRefresh();
+            } catch (err) {
+                window.reportClientError(err, 'save sticker');
+                saveBtn.textContent = '↓ Save';
+                saveBtn.disabled = false;
+                showToast('Failed to save sticker', 'error');
+            }
+        }
+
+        async function buildStickerElement(message, isOwn, encryptionKey) {
+            const wrap = document.createElement('div');
+            wrap.className = 'sticker-bubble-wrap';
+
+            const img = document.createElement('img');
+            img.className = 'msg-sticker';
+            img.alt = 'Sticker';
+            wrap.appendChild(img);
+
+            // Save button (only for others' stickers that have a stickerId)
+            let saveBtn = null;
+            if (!isOwn && message.stickerId) {
+                saveBtn = document.createElement('button');
+                saveBtn.className = 'sticker-save-btn';
+                const alreadySaved = await stickerDB.hasSticker(message.stickerId).catch(() => false);
+                if (alreadySaved) {
+                    saveBtn.innerHTML = '✓ Saved';
+                    saveBtn.classList.add('saved');
+                } else {
+                    saveBtn.innerHTML = '↓ Save';
+                    saveBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        saveStickerFromMessage(message, saveBtn, encryptionKey);
+                    });
+                }
+                wrap.appendChild(saveBtn);
+            }
+
+            // Try local sticker DB first
+            if (message.stickerId) {
+                try {
+                    const local = await stickerDB.getById(message.stickerId);
+                    if (local) {
+                        img.src = `data:${local.contentType};base64,${local.imageData}`;
+                        return wrap;
+                    }
+                } catch (e) { /* fall through */ }
+            }
+
+            // Not local — show placeholder while downloading
+            img.style.cssText = 'width:160px;height:160px;background:rgba(255,255,255,0.05);border-radius:10px;';
+
+            (async () => {
+                const encB64 = await downloadStickerWithRetry(message.id);
+                if (encB64) {
+                    try {
+                        const buf = await decryptBinary(encB64, encryptionKey);
+                        const blob = new Blob([buf], { type: 'image/*' });
+                        const url = createTrackedBlobUrl(blob);
+                        img.src = url;
+                        img.style.cssText = '';
+                        // Cache it
+                        await cacheContentWithQuota(message.id, encB64);
+                    } catch (e) {
+                        img.style.opacity = '0.25';
+                        img.alt = '?';
+                    }
+                } else {
+                    // Show retry
+                    img.style.opacity = '0.2';
+                    img.alt = '⚠';
+                    if (saveBtn) saveBtn.style.display = 'none';
+                    const retryBtn = document.createElement('button');
+                    retryBtn.className = 'sticker-save-btn';
+                    retryBtn.style.cssText = 'display:flex;bottom:50%;transform:translateY(50%);right:50%;translate:-50%';
+                    retryBtn.textContent = '↻ Retry';
+                    retryBtn.addEventListener('click', async (e) => {
+                        e.stopPropagation();
+                        retryBtn.remove();
+                        img.style.opacity = '';
+                        img.style.cssText = 'width:160px;height:160px;background:rgba(255,255,255,0.05);border-radius:10px;';
+                        const enc = await downloadStickerWithRetry(message.id, 5);
+                        if (enc) {
+                            const buf = await decryptBinary(enc, encryptionKey);
+                            const blob = new Blob([buf], { type: 'image/*' });
+                            img.src = createTrackedBlobUrl(blob);
+                            img.style.cssText = '';
+                            if (saveBtn) saveBtn.style.display = '';
+                        }
+                    });
+                    wrap.appendChild(retryBtn);
+                }
+            })();
+
+            return wrap;
+        }
+
+        async function sendSticker(sticker) {
+            if (!currentChat) return;
+            if (window.closeStickerPicker) window.closeStickerPicker();
+            try {
+                // Decode stored base64 image to ArrayBuffer
+                const binaryStr = atob(sticker.imageData);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+                const encB64 = await encryptBinary(bytes.buffer, currentChat.encryptionKey);
+                const encStr = atob(encB64);
+                const encBytes = new Uint8Array(encStr.length);
+                for (let i = 0; i < encStr.length; i++) encBytes[i] = encStr.charCodeAt(i);
+
+                const uploader = new ChunkedUploader();
+                await uploader.uploadChunked(currentChat.handle, encBytes.buffer, 'sticker', null);
+
+                const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
+                await ensureTimeSynced();
+                const encryptedTimestamp = await encryptTimestampWithServerKey(getSyncedServerTime());
+                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId);
+            } catch (err) {
+                window.reportClientError(err, 'send sticker');
+                showToast('Failed to send sticker', 'error');
+            }
+        }
+        window.sendSticker = sendSticker;
+
+        // ==================== END STICKER HELPERS ====================
 
         // Create a deferred content button for images/voice that need downloading
         function createDeferredContentButton(messageId, contentType) {

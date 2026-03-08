@@ -11,7 +11,8 @@ const filesToEmbed = [
   'login.html',
   'auth.js',
   'encryption.js',
-  'pako.min.js'
+  'pako.min.js',
+  'sticker-db.js'
 ];
 
 /**

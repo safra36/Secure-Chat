@@ -823,6 +823,7 @@ function serializeMessageForClient(message, requestingUserId) {
 		encryptedContent: message.encryptedContent,
 		encryptedTimestamp: message.encryptedTimestamp,
 		type: message.type,
+		stickerId: message.stickerId || null,
 		replyTo: message.replyTo || null,
 		isEdited: (message.edits || []).length > 0,
 		reactions: transformedReactions
@@ -1452,7 +1453,7 @@ function handleUploadComplete(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const completeData = JSON.parse(body);
-			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta } = completeData;
+			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta, stickerId } = completeData;
 
 			const session = uploadSessions.get(sessionId);
 			if (!session) {
@@ -1510,6 +1511,7 @@ function handleUploadComplete(req, res, pathname) {
 				type: messageType || 'file',
 				id: encryptedTimestamp, // Use encrypted timestamp as ID
 				encryptedMeta: encryptedMeta || null,
+				stickerId: stickerId || null,
 				reactions: {},
 				edits: []
 			};
