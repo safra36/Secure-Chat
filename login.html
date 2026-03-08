@@ -3697,6 +3697,116 @@
 
         .active-call-dismiss-btn:hover { color: var(--text-primary); }
 
+        /* Music Now Playing bar */
+        .music-now-playing {
+            position: relative;
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 7px 14px;
+            background: rgba(99, 102, 241, 0.1);
+            border-bottom: 1px solid rgba(99, 102, 241, 0.2);
+            font-size: 13px;
+            color: var(--text-primary);
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+
+        .music-np-icon {
+            width: 26px;
+            height: 26px;
+            border-radius: 7px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: white;
+        }
+
+        .music-np-title {
+            flex: 1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-size: 12px;
+            font-weight: 500;
+            min-width: 0;
+            opacity: 0.9;
+        }
+
+        .music-np-controls {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            flex-shrink: 0;
+        }
+
+        .music-np-skip {
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0.6;
+            transition: opacity 0.15s;
+        }
+
+        .music-np-skip:hover { opacity: 1; }
+
+        .music-np-play {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: rgba(99, 102, 241, 0.25);
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s;
+            flex-shrink: 0;
+        }
+
+        .music-np-play:hover { background: rgba(99, 102, 241, 0.45); }
+
+        .music-np-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 15px;
+            line-height: 1;
+            padding: 3px 5px;
+            flex-shrink: 0;
+            opacity: 0.55;
+            transition: opacity 0.15s;
+        }
+
+        .music-np-close:hover { opacity: 1; }
+
+        .music-np-progress {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: rgba(99, 102, 241, 0.15);
+            pointer-events: none;
+        }
+
+        .music-np-progress-fill {
+            height: 100%;
+            background: rgba(99, 102, 241, 0.65);
+            width: 0%;
+        }
+
         /* Incoming call modal */
         .incoming-call-content {
             text-align: center;
@@ -4780,6 +4890,26 @@
             <span id="active-call-count" class="active-call-count"></span>
             <button id="active-call-join-btn" class="active-call-join-btn">Join</button>
             <button id="active-call-dismiss-btn" class="active-call-dismiss-btn" title="Dismiss">✕</button>
+        </div>
+
+        <div id="music-now-playing" class="music-now-playing" style="display:none">
+            <div class="music-np-icon">
+                <svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>
+            </div>
+            <span class="music-np-title" id="music-np-title">—</span>
+            <div class="music-np-controls">
+                <button class="music-np-skip" id="music-np-back" title="Back 15s">
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>
+                </button>
+                <button class="music-np-play" id="music-np-play" title="Play / Pause">
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;margin-left:1px"><polygon points="5,3 19,12 5,21"/></svg>
+                </button>
+                <button class="music-np-skip" id="music-np-fwd" title="Forward 15s">
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 3.9V8.1L8.5 12zM16 6h2v12h-2z"/></svg>
+                </button>
+            </div>
+            <button class="music-np-close" id="music-np-close" title="Stop">✕</button>
+            <div class="music-np-progress"><div class="music-np-progress-fill" id="music-np-progress-fill"></div></div>
         </div>
 
         <div id="load-more-bar" style="display:none;text-align:center;padding:6px 0;flex-shrink:0">
@@ -6183,6 +6313,8 @@
         const optimisticMeta = new Map(); // id -> { text, handle, isoTimestamp }
         const renderedDateSeparators = new Set();
         const activeAudioPlayers = new Map();
+        let nowPlayingMusic = null; // { audio, playBtn, fileName, updateProgress }
+        let npRafId = null;
 
         // Scroll tracking for auto-scroll and new message indicator
         let isAtBottom = true;
@@ -6567,6 +6699,60 @@
                     hideEmojiPicker();
                 }
             });
+
+            // Music now-playing bar controls
+            const npPlayBtn = document.getElementById('music-np-play');
+            const npBackBtn = document.getElementById('music-np-back');
+            const npFwdBtn  = document.getElementById('music-np-fwd');
+            const npCloseBtn = document.getElementById('music-np-close');
+
+            if (npPlayBtn) {
+                npPlayBtn.addEventListener('click', async () => {
+                    if (!nowPlayingMusic) return;
+                    const { audio, playBtn } = nowPlayingMusic;
+                    if (audio.paused) {
+                        await audio.play();
+                        playBtn.innerHTML = SVG_PAUSE;
+                        playBtn.closest('.music-message-player')?.classList.add('playing');
+                        npPlayBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
+                        // Restart bar RAF
+                        showNowPlayingBar(audio, playBtn, nowPlayingMusic.fileName, nowPlayingMusic.updateProgress);
+                    } else {
+                        audio.pause();
+                        playBtn.innerHTML = SVG_PLAY;
+                        npPlayBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;margin-left:1px"><polygon points="5,3 19,12 5,21"/></svg>`;
+                    }
+                });
+            }
+
+            if (npBackBtn) {
+                npBackBtn.addEventListener('click', () => {
+                    if (!nowPlayingMusic) return;
+                    const { audio, updateProgress } = nowPlayingMusic;
+                    audio.currentTime = Math.max(0, audio.currentTime - 15);
+                    updateProgress();
+                });
+            }
+
+            if (npFwdBtn) {
+                npFwdBtn.addEventListener('click', () => {
+                    if (!nowPlayingMusic) return;
+                    const { audio, updateProgress } = nowPlayingMusic;
+                    const dur = isFinite(audio.duration) ? audio.duration : 0;
+                    audio.currentTime = Math.min(dur || audio.currentTime, audio.currentTime + 15);
+                    updateProgress();
+                });
+            }
+
+            if (npCloseBtn) {
+                npCloseBtn.addEventListener('click', () => {
+                    if (!nowPlayingMusic) return;
+                    const { audio, playBtn } = nowPlayingMusic;
+                    audio.pause();
+                    playBtn.innerHTML = SVG_PLAY;
+                    hideNowPlayingBar();
+                });
+            }
 
             // Input emoji picker
             (function() {
@@ -7078,6 +7264,7 @@
             }
             activeAudioPlayers.clear();
             cleanupAllBlobUrls();
+            hideNowPlayingBar();
 
             chatListContainer.style.display = 'none';
             chatContainer.style.display = 'flex';
@@ -7147,6 +7334,7 @@
                 audio.src = '';
             }
             activeAudioPlayers.clear();
+            hideNowPlayingBar();
 
             // Cleanup blob URLs to prevent memory leaks
             cleanupAllBlobUrls();
@@ -7440,6 +7628,16 @@
                 if (!response.ok) throw new Error('Reaction failed');
                 const { reactions } = await response.json();
                 updateReactionBar(messageId, reactions);
+                // Persist reactions to local cache so they survive chat switches
+                try {
+                    const cacheKey = `messages_${currentChat.handle}`;
+                    const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                    const idx = cached.findIndex(m => m.id === messageId);
+                    if (idx !== -1) {
+                        cached[idx] = { ...cached[idx], reactions };
+                        localStorage.setItem(cacheKey, JSON.stringify(cached));
+                    }
+                } catch (e) { /* non-fatal */ }
             } catch (e) {
                 window.reportClientError(e, 'add reaction');
             }
@@ -7791,6 +7989,16 @@
                                 decryptMessage(message.encryptedContent, encryptionKey)
                                     .then(plaintext => patchRenderedMessage(message.id, plaintext, true, message.encryptedContent))
                                     .catch(() => {});
+                                // Persist edited content to cache so it survives chat switches
+                                try {
+                                    const cacheKey = `messages_${handle}`;
+                                    const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                                    const idx = cached.findIndex(m => m.id === message.id);
+                                    if (idx !== -1) {
+                                        cached[idx] = { ...cached[idx], encryptedContent: message.encryptedContent, isEdited: true };
+                                        setItemWithEviction(cacheKey, JSON.stringify(cached));
+                                    }
+                                } catch (e) { /* non-fatal */ }
                             }
                         }
                         continue;
@@ -8653,6 +8861,36 @@
             return player;
         }
 
+        function showNowPlayingBar(audio, playBtn, fileName, updateProgress) {
+            nowPlayingMusic = { audio, playBtn, fileName, updateProgress };
+            const bar = document.getElementById('music-now-playing');
+            const titleEl = document.getElementById('music-np-title');
+            const npPlay = document.getElementById('music-np-play');
+            if (!bar) return;
+            titleEl.textContent = fileName || 'Audio';
+            npPlay.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg>`;
+            bar.style.display = 'flex';
+            cancelAnimationFrame(npRafId);
+            function npTick() {
+                if (!nowPlayingMusic || nowPlayingMusic.audio !== audio) return;
+                const dur = audio.duration || 0;
+                const fill = document.getElementById('music-np-progress-fill');
+                if (fill) fill.style.width = (dur > 0 ? Math.min(100, audio.currentTime / dur * 100) : 0) + '%';
+                if (!audio.paused && !audio.ended) npRafId = requestAnimationFrame(npTick);
+            }
+            npRafId = requestAnimationFrame(npTick);
+        }
+
+        function hideNowPlayingBar() {
+            cancelAnimationFrame(npRafId);
+            npRafId = null;
+            nowPlayingMusic = null;
+            const bar = document.getElementById('music-now-playing');
+            if (bar) bar.style.display = 'none';
+            const fill = document.getElementById('music-np-progress-fill');
+            if (fill) fill.style.width = '0%';
+        }
+
         async function createMusicPlayer(audioUrl, duration, fileName) {
             const player = document.createElement('div');
             player.className = 'music-message-player';
@@ -8752,15 +8990,29 @@
                 e.stopPropagation();
                 try {
                     if (audio.paused) {
+                        // Stop all other music players
+                        for (const [p, { audio: a, playBtn: pb }] of activeAudioPlayers.entries()) {
+                            if (p !== player && p.classList.contains('music-message-player') && !a.paused) {
+                                a.pause();
+                                pb.innerHTML = SVG_PLAY;
+                                p.classList.remove('playing');
+                            }
+                        }
                         await audio.play();
                         playBtn.innerHTML = SVG_PAUSE;
                         player.classList.add('playing');
                         rafId = requestAnimationFrame(tick);
+                        showNowPlayingBar(audio, playBtn, fileName, updateProgress);
                     } else {
                         audio.pause();
                         cancelAnimationFrame(rafId);
                         playBtn.innerHTML = SVG_PLAY;
                         player.classList.remove('playing');
+                        // Update bar to show paused state
+                        const npPlay = document.getElementById('music-np-play');
+                        if (npPlay && nowPlayingMusic?.audio === audio) {
+                            npPlay.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px;margin-left:1px"><polygon points="5,3 19,12 5,21"/></svg>`;
+                        }
                     }
                 } catch (err) {
                     window.reportClientError(err, 'play music');
@@ -8800,6 +9052,7 @@
                 playBtn.innerHTML = SVG_PLAY;
                 player.classList.remove('playing');
                 updateProgress();
+                if (nowPlayingMusic?.audio === audio) hideNowPlayingBar();
             });
 
             audio.addEventListener('error', () => {
