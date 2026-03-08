@@ -2430,6 +2430,123 @@
             letter-spacing: 0.3px;
         }
 
+        /* Music Player */
+        .music-message-player {
+            display: flex;
+            flex-direction: column;
+            gap: 9px;
+            padding: 12px 14px;
+            background: rgba(0, 0, 0, 0.15);
+            border-radius: 16px;
+            min-width: 260px;
+            max-width: 320px;
+        }
+
+        .music-header {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            min-width: 0;
+        }
+
+        .music-note-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 9px;
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            color: white;
+        }
+
+        .music-title {
+            flex: 1;
+            font-size: 13px;
+            font-weight: 500;
+            color: rgba(255, 255, 255, 0.92);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            min-width: 0;
+        }
+
+        .music-controls-row {
+            display: flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .music-play-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.2s ease, transform 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .music-play-btn:hover { background: rgba(255,255,255,0.35); transform: scale(1.08); }
+        .music-play-btn:active { transform: scale(0.95); }
+
+        .music-skip-btn {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            color: rgba(255, 255, 255, 0.75);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .music-skip-btn:hover { background: rgba(255,255,255,0.18); color: white; }
+
+        .music-progress-wrapper {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 0;
+        }
+
+        .music-progress-bar {
+            height: 4px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 2px;
+            cursor: pointer;
+            position: relative;
+        }
+
+        .music-progress-fill {
+            height: 100%;
+            background: rgba(255, 255, 255, 0.85);
+            border-radius: 2px;
+            pointer-events: none;
+            max-width: 100%;
+        }
+
+        .music-progress-bar:hover .music-progress-fill { background: white; }
+
+        .music-time {
+            font-size: 10px;
+            opacity: 0.65;
+            font-variant-numeric: tabular-nums;
+            letter-spacing: 0.3px;
+            white-space: nowrap;
+        }
+
         /* Lightbox */
         .lightbox {
             display: none;
@@ -4746,6 +4863,16 @@
                     </span>
                     <span class="menu-label">Media</span>
                 </button>
+                <button class="attachment-menu-item" id="menu-music-btn" title="Send Music">
+                    <span class="menu-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M9 18V5l12-2v13"/>
+                            <circle cx="6" cy="18" r="3"/>
+                            <circle cx="18" cy="16" r="3"/>
+                        </svg>
+                    </span>
+                    <span class="menu-label">Music</span>
+                </button>
                 <button class="attachment-menu-item" id="menu-file-btn" title="P2P Transfer (requires both users online)">
                     <span class="menu-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -5150,6 +5277,7 @@
 
     <!-- Hidden file inputs -->
     <input type="file" accept="image/*,video/*" id="image-input" style="display: none;">
+    <input type="file" accept="audio/*" id="audio-input" style="display: none;">
     <input type="file" id="p2p-file-input" style="display: none;">
     <input type="file" id="offline-file-input" style="display: none;">
     <input type="file" accept="image/png,image/gif,image/webp,image/jpeg" id="sticker-input" style="display: none;">
@@ -5964,6 +6092,7 @@
         const chatName = document.getElementById('chat-name');
         const chatAvatar = document.getElementById('chat-avatar');
         const imageInput = document.getElementById('image-input');
+        const audioInput = document.getElementById('audio-input');
         const imagePreview = document.getElementById('image-preview');
         const attachmentBtn = document.getElementById('attachment-btn');
         const voiceBtn = document.getElementById('voice-btn');
@@ -6331,14 +6460,27 @@
             
             // Menu item handlers
             const menuImageBtn = document.getElementById('menu-image-btn');
+            const menuMusicBtn = document.getElementById('menu-music-btn');
             const menuFileBtn = document.getElementById('menu-file-btn');
             const menuPendingBtn = document.getElementById('menu-pending-btn');
-            
+
             if (menuImageBtn) {
                 menuImageBtn.addEventListener('click', () => {
                     closeAttachmentMenu();
                     imageInput.click();
                 });
+            }
+
+            if (menuMusicBtn) {
+                menuMusicBtn.addEventListener('click', () => {
+                    closeAttachmentMenu();
+                    if (!currentChat) { showToast('Please open a chat first', 'error'); return; }
+                    audioInput.click();
+                });
+            }
+
+            if (audioInput) {
+                audioInput.addEventListener('change', handleAudioSelect);
             }
             
             if (menuFileBtn) {
@@ -7696,7 +7838,8 @@
                 const isVideo = message.type === 'video';
                 const isFile = message.type === 'file';
                 const isSticker = message.type === 'sticker';
-                const isMedia = isVoice || isImage || isVideo || isFile || isSticker;
+                const isAudio = message.type === 'audio';
+                const isMedia = isVoice || isImage || isVideo || isFile || isSticker || isAudio;
 
                 let contentHtml = '';
 
@@ -7801,6 +7944,43 @@
                                 contentHtml = createDeferredContentButton(message.id, 'video');
                             }
                         }
+                    } else if (isAudio) {
+                        let audioFileName = 'Audio';
+                        if (message.encryptedMeta) {
+                            try {
+                                const meta = JSON.parse(await decryptMessage(message.encryptedMeta, encryptionKey));
+                                audioFileName = meta.name || 'Audio';
+                            } catch (e) { /* keep default */ }
+                        }
+                        const cachedContent = await getCachedContent(message.id);
+                        if (cachedContent && cachedContent !== 'PLACEHOLDER') {
+                            const decryptedAudioBuffer = await decryptBinary(cachedContent, encryptionKey);
+                            const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/*' });
+                            const audioUrl = createTrackedBlobUrl(audioBlob);
+                            const audio = new Audio(audioUrl);
+                            const duration = await new Promise(resolve => {
+                                audio.addEventListener('loadedmetadata', () => resolve(audio.duration));
+                                audio.addEventListener('error', () => resolve(0));
+                            });
+                            contentHtml = await createMusicPlayer(audioUrl, duration, audioFileName);
+                        } else if (message.encryptedContent === null) {
+                            contentHtml = createDeferredContentButton(message.id, 'audio', audioFileName);
+                        } else {
+                            if (message.encryptedContent) {
+                                await cacheContentWithQuota(message.id, message.encryptedContent);
+                                const decryptedAudioBuffer = await decryptBinary(message.encryptedContent, encryptionKey);
+                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/*' });
+                                const audioUrl = createTrackedBlobUrl(audioBlob);
+                                const audio = new Audio(audioUrl);
+                                const duration = await new Promise(resolve => {
+                                    audio.addEventListener('loadedmetadata', () => resolve(audio.duration));
+                                    audio.addEventListener('error', () => resolve(0));
+                                });
+                                contentHtml = await createMusicPlayer(audioUrl, duration, audioFileName);
+                            } else {
+                                contentHtml = createDeferredContentButton(message.id, 'audio', audioFileName);
+                            }
+                        }
                     } else if (isFile) {
                         let fileMeta = null;
                         if (message.encryptedMeta) {
@@ -7818,8 +7998,8 @@
                 } catch (err) {
                     window.reportClientError(err, 'decrypt message content');
                     // For deferred content, just show the download button
-                    if (isVoice || isImage || isVideo) {
-                        const contentType = isVoice ? 'voice' : isVideo ? 'video' : 'image';
+                    if (isVoice || isImage || isVideo || isAudio) {
+                        const contentType = isVoice ? 'voice' : isVideo ? 'video' : isAudio ? 'audio' : 'image';
                         contentHtml = createDeferredContentButton(message.id, contentType);
                     } else if (isSticker) {
                         contentHtml = buildStickerPlaceholder();
@@ -8158,8 +8338,31 @@
             }
         }
 
+        function handleAudioSelect(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            selectedMediaType = 'audio';
+            selectedMediaFile = file;
+            selectedMedia = URL.createObjectURL(file);
+
+            const previewItem = document.createElement('div');
+            previewItem.className = 'preview-item';
+            previewItem.innerHTML = `
+                <div style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:rgba(99,102,241,0.15);border-radius:10px;max-width:220px">
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px;flex-shrink:0;color:#818cf8"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>
+                    <span style="font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:0.9">${file.name}</span>
+                </div>
+                <button class="preview-remove" onclick="removeMedia()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            `;
+            imagePreview.innerHTML = '';
+            imagePreview.appendChild(previewItem);
+            imagePreview.classList.add('active');
+            handleInputChange();
+        }
+
         window.removeMedia = function() {
-            if (selectedMediaType === 'video' && selectedMedia) {
+            if ((selectedMediaType === 'video' || selectedMediaType === 'audio') && selectedMedia) {
                 URL.revokeObjectURL(selectedMedia);
             }
             selectedMedia = null;
@@ -8168,6 +8371,7 @@
             imagePreview.innerHTML = '';
             imagePreview.classList.remove('active');
             imageInput.value = '';
+            if (audioInput) audioInput.value = '';
             handleInputChange();
         };
 
@@ -8444,6 +8648,165 @@
                 const p = validDuration > 0 ? audio.currentTime / validDuration : 0;
                 drawWaveform(p);
             }).observe(waveformWrapper);
+
+            activeAudioPlayers.set(player, { audio, playBtn });
+            return player;
+        }
+
+        async function createMusicPlayer(audioUrl, duration, fileName) {
+            const player = document.createElement('div');
+            player.className = 'music-message-player';
+
+            // Header: note icon + title
+            const header = document.createElement('div');
+            header.className = 'music-header';
+
+            const iconEl = document.createElement('div');
+            iconEl.className = 'music-note-icon';
+            iconEl.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:17px;height:17px"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>`;
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'music-title';
+            titleEl.textContent = fileName || 'Audio';
+            titleEl.title = fileName || 'Audio';
+
+            header.appendChild(iconEl);
+            header.appendChild(titleEl);
+
+            // Controls row: skip-back | play | skip-fwd | progress+time
+            const controlsRow = document.createElement('div');
+            controlsRow.className = 'music-controls-row';
+
+            const SVG_SKIP_BACK = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><path d="M6 6h2v12H6zm3.5 6 8.5 6V6z"/></svg>`;
+            const SVG_SKIP_FWD  = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:14px;height:14px"><path d="M6 18l8.5-6L6 6v12zm2.5-6 5.5 3.9V8.1L8.5 12zM16 6h2v12h-2z"/></svg>`;
+
+            const skipBackBtn = document.createElement('button');
+            skipBackBtn.className = 'music-skip-btn';
+            skipBackBtn.type = 'button';
+            skipBackBtn.title = 'Back 15s';
+            skipBackBtn.innerHTML = SVG_SKIP_BACK;
+
+            const playBtn = document.createElement('button');
+            playBtn.className = 'music-play-btn';
+            playBtn.type = 'button';
+            playBtn.innerHTML = SVG_PLAY;
+
+            const skipFwdBtn = document.createElement('button');
+            skipFwdBtn.className = 'music-skip-btn';
+            skipFwdBtn.type = 'button';
+            skipFwdBtn.title = 'Forward 15s';
+            skipFwdBtn.innerHTML = SVG_SKIP_FWD;
+
+            const progressWrapper = document.createElement('div');
+            progressWrapper.className = 'music-progress-wrapper';
+
+            const progressBar = document.createElement('div');
+            progressBar.className = 'music-progress-bar';
+            const progressFill = document.createElement('div');
+            progressFill.className = 'music-progress-fill';
+            progressFill.style.width = '0%';
+            progressBar.appendChild(progressFill);
+
+            const timeEl = document.createElement('div');
+            timeEl.className = 'music-time';
+
+            progressWrapper.appendChild(progressBar);
+            progressWrapper.appendChild(timeEl);
+
+            controlsRow.appendChild(skipBackBtn);
+            controlsRow.appendChild(playBtn);
+            controlsRow.appendChild(skipFwdBtn);
+            controlsRow.appendChild(progressWrapper);
+
+            player.appendChild(header);
+            player.appendChild(controlsRow);
+
+            // Audio
+            const audio = new Audio(audioUrl);
+            audio.preload = 'auto';
+            let validDuration = (typeof duration === 'number' && isFinite(duration) && duration > 0) ? duration : 0;
+
+            function fmt(secs) {
+                const m = Math.floor(secs / 60).toString().padStart(2, '0');
+                const s = Math.floor(secs % 60).toString().padStart(2, '0');
+                return `${m}:${s}`;
+            }
+
+            function updateProgress() {
+                const dur = validDuration || (isFinite(audio.duration) ? audio.duration : 0);
+                const cur = audio.currentTime;
+                const pct = dur > 0 ? Math.min(100, cur / dur * 100) : 0;
+                progressFill.style.width = pct + '%';
+                timeEl.textContent = dur > 0 ? `${fmt(cur)} / ${fmt(dur)}` : fmt(cur);
+            }
+
+            updateProgress();
+
+            let rafId = null;
+            function tick() {
+                updateProgress();
+                if (!audio.paused && !audio.ended) rafId = requestAnimationFrame(tick);
+            }
+
+            playBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                try {
+                    if (audio.paused) {
+                        await audio.play();
+                        playBtn.innerHTML = SVG_PAUSE;
+                        player.classList.add('playing');
+                        rafId = requestAnimationFrame(tick);
+                    } else {
+                        audio.pause();
+                        cancelAnimationFrame(rafId);
+                        playBtn.innerHTML = SVG_PLAY;
+                        player.classList.remove('playing');
+                    }
+                } catch (err) {
+                    window.reportClientError(err, 'play music');
+                    showToast('Failed to play audio', 'error');
+                }
+            });
+
+            skipBackBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                audio.currentTime = Math.max(0, audio.currentTime - 15);
+                updateProgress();
+            });
+
+            skipFwdBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const dur = validDuration || (isFinite(audio.duration) ? audio.duration : 0);
+                audio.currentTime = Math.min(dur || audio.currentTime, audio.currentTime + 15);
+                updateProgress();
+            });
+
+            progressBar.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const dur = validDuration || (isFinite(audio.duration) ? audio.duration : 0);
+                if (!dur) return;
+                const rect = progressBar.getBoundingClientRect();
+                audio.currentTime = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)) * dur;
+                updateProgress();
+            });
+
+            audio.addEventListener('loadedmetadata', () => {
+                if (!validDuration && isFinite(audio.duration)) validDuration = audio.duration;
+                updateProgress();
+            });
+
+            audio.addEventListener('ended', () => {
+                cancelAnimationFrame(rafId);
+                playBtn.innerHTML = SVG_PLAY;
+                player.classList.remove('playing');
+                updateProgress();
+            });
+
+            audio.addEventListener('error', () => {
+                if (audio._cleanup) return;
+                window.reportClientError(new Error(`Music playback error: ${audio.error?.message || 'unknown'} (code ${audio.error?.code})`), 'music playback');
+                showToast('Error playing audio', 'error');
+            });
 
             activeAudioPlayers.set(player, { audio, playBtn });
             return player;
@@ -8918,6 +9281,7 @@
         const MAX_IMAGE_SIZE = 5 * 1024 * 1024;   // 5MB limit
         const MAX_VIDEO_SIZE = 30 * 1024 * 1024;  // 30MB limit
         const MAX_VOICE_SIZE = 2 * 1024 * 1024;   // 2MB limit
+        const MAX_AUDIO_SIZE = 15 * 1024 * 1024;  // 15MB limit
         const MAX_OFFLINE_FILE_SIZE = 50 * 1024 * 1024; // 50MB limit
 
         async function sendMediaChunked() {
@@ -8932,8 +9296,9 @@
             }
 
             const isVideo = selectedMediaType === 'video';
-            const MAX_SIZE = isVideo ? MAX_VIDEO_SIZE : MAX_IMAGE_SIZE;
-            const msgType = selectedMediaType; // 'image' or 'video'
+            const isAudioFile = selectedMediaType === 'audio';
+            const MAX_SIZE = isVideo ? MAX_VIDEO_SIZE : isAudioFile ? MAX_AUDIO_SIZE : MAX_IMAGE_SIZE;
+            const msgType = selectedMediaType; // 'image', 'video', or 'audio'
 
             // Check storage health before attempting upload
             const stats = await getStorageStats();
@@ -8943,9 +9308,9 @@
 
             // Validate file size and get ArrayBuffer
             let mediaData;
-            if (isVideo) {
+            if (isVideo || isAudioFile) {
                 if (selectedMediaFile.size > MAX_SIZE) {
-                    showToast(`Video too large. Maximum size is ${MAX_SIZE / 1024 / 1024}MB`, 'error');
+                    showToast(`${isAudioFile ? 'Audio' : 'Video'} too large. Maximum size is ${MAX_SIZE / 1024 / 1024}MB`, 'error');
                     window.removeMedia();
                     return;
                 }
@@ -9035,12 +9400,18 @@
                 const currentTime = getSyncedServerTime();
                 const encryptedTimestamp = await encryptTimestampWithServerKey(currentTime);
 
+                let encryptedMeta = null;
+                if (isAudioFile && selectedMediaFile) {
+                    encryptedMeta = await encryptMessage(JSON.stringify({ name: selectedMediaFile.name }), currentChat.encryptionKey);
+                }
+
                 const result = await uploader.finalize(
                     currentChat.handle,
                     encryptedName,
                     encryptedTimestamp,
                     msgType,
-                    isCompressed
+                    isCompressed,
+                    encryptedMeta
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
@@ -9870,7 +10241,7 @@
         // ==================== END STICKER HELPERS ====================
 
         // Create a deferred content button for images/voice that need downloading
-        function createDeferredContentButton(messageId, contentType) {
+        function createDeferredContentButton(messageId, contentType, fileName) {
             const container = document.createElement('div');
             container.className = 'deferred-content';
 
@@ -9932,6 +10303,67 @@
                     e.stopPropagation();
                     btn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
                     await downloadDeferredContent(messageId, contentType, btn);
+                });
+
+                return container;
+            }
+
+            // Audio: music card placeholder with download button
+            if (contentType === 'audio') {
+                container.className += ' music-message-player';
+                container.dataset.fileName = fileName || 'Audio';
+
+                const header = document.createElement('div');
+                header.className = 'music-header';
+
+                const iconEl = document.createElement('div');
+                iconEl.className = 'music-note-icon';
+                iconEl.innerHTML = `<svg viewBox="0 0 24 24" fill="currentColor" style="width:17px;height:17px"><path d="M12 3v10.55A4 4 0 1 0 14 17V7h4V3z"/></svg>`;
+
+                const titleEl = document.createElement('div');
+                titleEl.className = 'music-title';
+                titleEl.textContent = fileName || 'Audio';
+                titleEl.title = fileName || 'Audio';
+
+                header.appendChild(iconEl);
+                header.appendChild(titleEl);
+
+                const controlsRow = document.createElement('div');
+                controlsRow.className = 'music-controls-row';
+
+                const dlBtn = document.createElement('button');
+                dlBtn.className = 'music-play-btn';
+                dlBtn.type = 'button';
+                dlBtn.title = 'Download audio';
+                dlBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`;
+
+                const progressWrapper = document.createElement('div');
+                progressWrapper.className = 'music-progress-wrapper';
+
+                const progressBar = document.createElement('div');
+                progressBar.className = 'music-progress-bar';
+                const progressFill = document.createElement('div');
+                progressFill.className = 'music-progress-fill';
+                progressFill.style.cssText = 'width:0%;opacity:0.3';
+                progressBar.appendChild(progressFill);
+
+                const timeEl = document.createElement('div');
+                timeEl.className = 'music-time';
+                timeEl.textContent = '--:-- / --:--';
+
+                progressWrapper.appendChild(progressBar);
+                progressWrapper.appendChild(timeEl);
+
+                controlsRow.appendChild(dlBtn);
+                controlsRow.appendChild(progressWrapper);
+
+                container.appendChild(header);
+                container.appendChild(controlsRow);
+
+                dlBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    dlBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;animation:spin 1s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>`;
+                    await downloadDeferredContent(messageId, contentType, dlBtn);
                 });
 
                 return container;
@@ -10117,7 +10549,7 @@
                 // Cache the encrypted content (now decompressed) with quota management
                 await cacheContentWithQuota(messageId, encryptedBase64);
 
-                showToast(`${contentType === 'voice' ? 'Voice' : 'Image'} cached!`, 'success');
+                showToast(`${contentType === 'voice' ? 'Voice' : contentType === 'audio' ? 'Audio' : 'Image'} cached!`, 'success');
 
                 // Re-render the message with actual content
                 const messageGroup = document.querySelector(`[data-message-id="${messageId}"]`);
@@ -10183,6 +10615,20 @@
 
                                 if (deferredElement.parentElement) {
                                     deferredElement.parentElement.replaceChild(newContentDiv, deferredElement);
+                                }
+                            } else if (contentType === 'audio') {
+                                const audioFileName = deferredElement.dataset.fileName || 'Audio';
+                                const decryptedAudioBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/*' });
+                                const audioUrl = createTrackedBlobUrl(audioBlob);
+                                const audio = new Audio(audioUrl);
+                                const duration = await new Promise(resolve => {
+                                    audio.addEventListener('loadedmetadata', () => resolve(audio.duration));
+                                    audio.addEventListener('error', () => resolve(0));
+                                });
+                                const musicPlayer = await createMusicPlayer(audioUrl, duration, audioFileName);
+                                if (deferredElement.parentElement) {
+                                    deferredElement.parentElement.replaceChild(musicPlayer, deferredElement);
                                 }
                             }
                         } catch (err) {
