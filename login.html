@@ -7302,7 +7302,11 @@
             updateScrollButton();
         }
 
-        function openChat(handle) {
+        async function openChat(handle) {
+            // Defensively stop any previous polling/heartbeat (safe even if already stopped)
+            stopPolling();
+            stopHeartbeat();
+
             currentChat = chats.find(chat => chat.handle === handle);
             if (!currentChat) return;
 
@@ -7337,6 +7341,7 @@
             lastReadId = '';
             historyOldestId = null;
             isLoadingHistory = false;
+            isFetchingMessages = false;
             isTyping = false;
             clearTimeout(typingTimeout);
             const typingIndicator = document.getElementById('typing-indicator');
@@ -7353,9 +7358,10 @@
             // Reset scroll state
             resetScrollState();
 
-            // Load cached messages from localStorage
+            // Load cached messages from localStorage and AWAIT before starting polling
+            // to prevent concurrent appendMessages calls racing on renderedMessageIds
             lastReadReceiptsHeader = null;
-            loadCachedMessages(handle);
+            await loadCachedMessages(handle);
 
             // Show load-more bar; set oldest ID from cache so first request knows where to start
             const cachedForHistory = (() => {
@@ -7827,6 +7833,7 @@
             if (isPolling) return;
 
             isPolling = true;
+            fetchMessages(); // immediate fetch; interval fires subsequent ones
             pollingInterval = setInterval(fetchMessages, 2000);
         }
 
@@ -8537,10 +8544,6 @@
                 });
                 const mergedMessages = Array.from(messageMap.values());
 
-                // Update polling cursor to the latest message
-                if (mergedMessages.length > 0) {
-                    pollingCursors[handle] = mergedMessages[mergedMessages.length - 1].id;
-                }
 
                 saveCachedMessages(handle, mergedMessages);
             }
@@ -10338,10 +10341,10 @@
         // ─────────────────────────────────────────────────────────────────────
 
         // Message caching helpers
-        function loadCachedMessages(chatHandle) {
+        async function loadCachedMessages(chatHandle) {
             const cacheKey = `messages_${chatHandle}`;
             const cachedMessagesJson = localStorage.getItem(cacheKey);
-            
+
             if (!cachedMessagesJson) {
                 console.log(`No cached messages for chat: ${chatHandle}`);
                 return;
@@ -10350,14 +10353,10 @@
             try {
                 const cachedMessages = JSON.parse(cachedMessagesJson);
                 console.log(`Loaded ${cachedMessages.length} cached messages for chat: ${chatHandle}`);
-                
-                // Render all cached messages
-                appendMessages(cachedMessages).then(() => {
-                    if (lastReadReceiptsHeader) updateReadReceipts(lastReadReceiptsHeader);
-                }).catch(err => {
-                    window.reportClientError(err, 'render cached messages');
-                    console.error('Error rendering cached messages:', err);
-                });
+
+                // Await so openChat doesn't start polling until cache is fully rendered
+                await appendMessages(cachedMessages);
+                if (lastReadReceiptsHeader) updateReadReceipts(lastReadReceiptsHeader);
             } catch (error) {
                 window.reportClientError(error, 'load cached messages');
                 console.error('Error loading cached messages:', error);
