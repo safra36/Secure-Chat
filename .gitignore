@@ -2,3 +2,4 @@ node_modules
 plans
 chatapp.zip
 client-errors.log
+settings.local.json

@@ -7331,6 +7331,8 @@
             messagesContainer.innerHTML = '';
             messageDeliveryStatus.clear();
             messageOrder.length = 0;
+            optimisticIds.clear();
+            optimisticMeta.clear();
             lastReadId = '';
             historyOldestId = null;
             isLoadingHistory = false;
@@ -7843,9 +7845,10 @@
 
             // Use global polling cursor for this chat, not local rendered message IDs
             const pollingCursor = pollingCursors[currentChat.handle] || '';
+            const fetchHandle = currentChat.handle;
             const url = pollingCursor
-                ? `/messages/${currentChat.handle}?after=${encodeURIComponent(pollingCursor)}`
-                : `/messages/${currentChat.handle}`;
+                ? `/messages/${fetchHandle}?after=${encodeURIComponent(pollingCursor)}`
+                : `/messages/${fetchHandle}`;
 
             try {
                 const response = await authenticatedFetch(url, {
@@ -7883,8 +7886,9 @@
                 const unseenMsgs = messages.filter(m => !renderedMessageIds.has(m.id));
                 if (!pollingCursor && renderedMessageIds.size > 0 && unseenMsgs.length > 0) {
                     await rearrangeMessages(messages);
+                    if (!currentChat || currentChat.handle !== fetchHandle) return;
                     if (serverNextCursor) {
-                        pollingCursors[currentChat.handle] = serverNextCursor;
+                        pollingCursors[fetchHandle] = serverNextCursor;
                         savePollingCursors();
                     }
                     return;
@@ -7893,15 +7897,16 @@
                 // Snapshot known IDs before append so we can identify truly new messages
                 const knownIdsBefore = new Set(renderedMessageIds);
                 await appendMessages(messages);
+                if (!currentChat || currentChat.handle !== fetchHandle) return;
 
                 // Advance cursor: server nextCursor covers both new messages and recent updates
                 if (serverNextCursor) {
-                    pollingCursors[currentChat.handle] = serverNextCursor;
+                    pollingCursors[fetchHandle] = serverNextCursor;
                     savePollingCursors();
                 } else {
                     const trulyNew = messages.filter(m => !m.isUpdate && !knownIdsBefore.has(m.id));
                     if (trulyNew.length > 0) {
-                        pollingCursors[currentChat.handle] = trulyNew[trulyNew.length - 1].id;
+                        pollingCursors[fetchHandle] = trulyNew[trulyNew.length - 1].id;
                         savePollingCursors();
                     }
                 }
@@ -7936,6 +7941,8 @@
                 renderedMessageIds.clear();
                 renderedDateSeparators.clear();
                 messageOrder.length = 0;
+                optimisticIds.clear();
+                optimisticMeta.clear();
                 messagesContainer.innerHTML = '';
 
                 await appendMessages(sortedMessages);
@@ -8018,7 +8025,8 @@
             // For prepend: collect rendered elements to insert as a batch
             const prependFragment = prepend ? document.createDocumentFragment() : null;
             const prependIds = [];
-            
+            const upgradeStubs = new Map();
+
             for (const message of messages) {
                 if (renderedMessageIds.has(message.id)) {
                     if (!prepend && optimisticIds.has(message.id)) {
@@ -8027,7 +8035,7 @@
                         // path so action buttons, reaction bar, encryptedContent dataset,
                         // edit/reply/react all work correctly in the current session.
                         const stub = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
-                        if (stub) stub.remove();
+                        if (stub) upgradeStubs.set(message.id, stub);
                         renderedMessageIds.delete(message.id);
                         optimisticIds.delete(message.id);
                         // fall through — do NOT continue
@@ -8419,6 +8427,7 @@
                 }
                 messageElement.appendChild(reactionBar);
 
+                if (chatSnapshot !== currentChat) return;
                 if (prepend) {
                     if (msgDate) {
                         const dateKey = msgDate.toDateString();
@@ -8430,14 +8439,18 @@
                     prependFragment.appendChild(messageElement);
                     prependIds.push(message.id);
                 } else {
-                    if (msgDate) {
-                        const dateKey = msgDate.toDateString();
-                        if (!renderedDateSeparators.has(dateKey)) {
-                            renderedDateSeparators.add(dateKey);
-                            messagesContainer.appendChild(createDateSeparator(getDateLabel(msgDate)));
+                    if (upgradeStubs.has(message.id)) {
+                        upgradeStubs.get(message.id).replaceWith(messageElement);
+                    } else {
+                        if (msgDate) {
+                            const dateKey = msgDate.toDateString();
+                            if (!renderedDateSeparators.has(dateKey)) {
+                                renderedDateSeparators.add(dateKey);
+                                messagesContainer.appendChild(createDateSeparator(getDateLabel(msgDate)));
+                            }
                         }
+                        messagesContainer.appendChild(messageElement);
                     }
-                    messagesContainer.appendChild(messageElement);
                 }
                 renderedMessageIds.add(message.id);
                 if (!prepend) messageOrder.push(message.id);
