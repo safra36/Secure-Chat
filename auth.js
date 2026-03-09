@@ -145,10 +145,7 @@ function logout(automatic = false) {
 	if (window.clearCredentials) {
 		window.clearCredentials();
 	} else {
-		// Fallback if clearCredentials is not available
-		localStorage.removeItem('privateKey');
-		localStorage.removeItem('publicKey');
-		localStorage.removeItem('userId');
+		// Fallback if clearCredentials is not available (identity keys are permanent)
 		localStorage.removeItem('serverPassword');
 		localStorage.removeItem('sessionLoginTime');
 		localStorage.removeItem('sessionDuration');
