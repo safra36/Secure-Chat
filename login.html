@@ -6203,7 +6203,7 @@
                 }
             }
 
-            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null) {
+            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null, replyTo = null) {
                 try {
                     const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
                         method: 'POST',
@@ -6215,7 +6215,8 @@
                             messageType: messageType,
                             isCompressed: isCompressed,
                             encryptedMeta: encryptedMeta,
-                            stickerId: stickerId
+                            stickerId: stickerId,
+                            replyTo: replyTo
                         })
                     });
 
@@ -9606,6 +9607,7 @@
                 showToast('No media selected', 'error');
                 return;
             }
+            const pendingReply = replyContext;
 
             if (isUploading) {
                 showToast('Upload already in progress', 'error');
@@ -9728,13 +9730,16 @@
                     encryptedTimestamp,
                     msgType,
                     isCompressed,
-                    encryptedMeta
+                    encryptedMeta,
+                    null,
+                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
                 uploadSucceeded = true;
                 finalResult = result;
 
+                clearReplyContext();
                 showToast(`${msgType.charAt(0).toUpperCase() + msgType.slice(1)} sent successfully!`, 'success');
                 showUploadProgress(false);
                 window.removeMedia();
@@ -9790,6 +9795,7 @@
         }
 
         async function sendVoiceMessage(audioBlob) {
+            const pendingReply = replyContext;
             let uploadSucceeded = false;
             let finalResult = null;
             let encryptionFailed = false;
@@ -9875,13 +9881,17 @@
                     encryptedName,
                     encryptedTimestamp,
                     'voice',
-                    isCompressed
+                    isCompressed,
+                    null,
+                    null,
+                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
                 uploadSucceeded = true;
                 finalResult = result;
-                
+
+                clearReplyContext();
                 showToast('Voice message sent successfully!', 'success');
                 showUploadProgress(false);
                 
@@ -9924,6 +9934,7 @@
         async function sendOfflineFileChunked(file) {
             if (!currentChat) { showToast('Please open a chat first', 'error'); return; }
             if (isUploading) { showToast('Upload already in progress', 'error'); return; }
+            const pendingReply = replyContext;
             if (file.size > MAX_OFFLINE_FILE_SIZE) {
                 showToast(`File too large. Maximum size is 50MB`, 'error');
                 return;
@@ -10012,11 +10023,14 @@
                     encryptedTimestamp,
                     'file',
                     isCompressed,
-                    encryptedMeta
+                    encryptedMeta,
+                    null,
+                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null
                 );
 
                 uploadSucceeded = true;
                 finalResult = result;
+                clearReplyContext();
                 showToast(`${file.name} uploaded!`, 'success');
                 showUploadProgress(false);
             } catch (error) {
@@ -10656,6 +10670,8 @@
         async function sendSticker(sticker) {
             if (!currentChat) return;
             if (window.closeStickerPicker) window.closeStickerPicker();
+            const pendingReply = replyContext;
+            clearReplyContext();
             try {
                 // Decode stored base64 image to ArrayBuffer
                 const binaryStr = atob(sticker.imageData);
@@ -10673,7 +10689,7 @@
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
                 await ensureTimeSynced();
                 const encryptedTimestamp = await encryptTimestampWithServerKey(getSyncedServerTime());
-                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId);
+                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId, pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null);
             } catch (err) {
                 window.reportClientError(err, 'send sticker');
                 showToast('Failed to send sticker', 'error');
