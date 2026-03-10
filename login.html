@@ -5161,6 +5161,28 @@
                 <input type="file" id="import-keys-file" accept=".json" style="display:none">
             </div>
 
+            <!-- Chats export/import -->
+            <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:16px;margin-top:16px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                    <div style="width:36px;height:36px;border-radius:50%;background:var(--accent-gradient);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Chats</div>
+                        <div style="font-size:11px;color:var(--text-muted)">Handles &amp; encryption keys</div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-bottom:12px;padding:0 2px">
+                    <div style="margin-bottom:4px">&#9679; Export all chat handles and their encryption keys as an encrypted file.</div>
+                    <div>&#9679; On import, chats with an already-existing handle are skipped.</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:10px">
+                    <button id="export-chats-btn" class="btn btn-primary" style="margin:0">Export Chats (Encrypted)</button>
+                    <button id="import-chats-btn" class="btn btn-secondary" style="margin:0">Import Chats from File</button>
+                    <input type="file" id="import-chats-file" accept=".json" style="display:none">
+                </div>
+            </div>
+
             <div id="settings-msg" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid"></div>
         </div>
     </div>
@@ -10333,6 +10355,86 @@
 
                 document.getElementById('settings-userid').textContent = bundle.userId;
                 _settingsMsg('Keys imported successfully. Your identity has been restored.', false);
+            } catch (e) {
+                _settingsMsg('Import failed: wrong password or corrupted file.', true);
+            }
+        });
+
+        document.getElementById('export-chats-btn').addEventListener('click', async () => {
+            if (!chats.length) { _settingsMsg('No chats to export.', true); return; }
+            const password = prompt('Enter a password to encrypt your chats export:');
+            if (!password) return;
+            const confirm2 = prompt('Confirm password:');
+            if (password !== confirm2) { _settingsMsg('Passwords do not match.', true); return; }
+
+            try {
+                const salt = crypto.getRandomValues(new Uint8Array(16));
+                const iv   = crypto.getRandomValues(new Uint8Array(12));
+                const key  = await _pbkdf2Key(password, salt);
+                const payload = new TextEncoder().encode(JSON.stringify(
+                    chats.map(c => ({ handle: c.handle, encryptionKey: c.encryptionKey }))
+                ));
+                const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, payload);
+
+                const out = JSON.stringify({
+                    v: 2,
+                    salt: btoa(String.fromCharCode(...salt)),
+                    iv:   btoa(String.fromCharCode(...iv)),
+                    data: btoa(String.fromCharCode(...new Uint8Array(encrypted)))
+                });
+
+                const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                const blob = new Blob([out], { type: 'application/json' });
+                const url  = URL.createObjectURL(blob);
+                const a    = document.createElement('a');
+                a.href = url;
+                a.download = `chats-${date}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+                _settingsMsg(`Exported ${chats.length} chat(s) successfully.`, false);
+            } catch (e) {
+                _settingsMsg('Export failed: ' + e.message, true);
+            }
+        });
+
+        document.getElementById('import-chats-btn').addEventListener('click', () => {
+            document.getElementById('import-chats-file').value = '';
+            document.getElementById('import-chats-file').click();
+        });
+
+        document.getElementById('import-chats-file').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const password = prompt('Enter the password used to encrypt this export:');
+            if (!password) return;
+
+            try {
+                const json = JSON.parse(await file.text());
+                if (json.v !== 2) throw new Error('Unknown export format version.');
+
+                const salt = new Uint8Array(atob(json.salt).split('').map(c => c.charCodeAt(0)));
+                const iv   = new Uint8Array(atob(json.iv).split('').map(c => c.charCodeAt(0)));
+                const data = new Uint8Array(atob(json.data).split('').map(c => c.charCodeAt(0)));
+
+                const key = await _pbkdf2Key(password, salt);
+                const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+                const imported = JSON.parse(new TextDecoder().decode(decrypted));
+
+                if (!Array.isArray(imported)) throw new Error('Invalid chats bundle.');
+
+                const existingHandles = new Set(chats.map(c => c.handle));
+                let added = 0;
+                for (const entry of imported) {
+                    if (!entry.handle || !entry.encryptionKey) continue;
+                    if (existingHandles.has(entry.handle)) continue;
+                    chats.push({ handle: entry.handle, encryptionKey: entry.encryptionKey, lastMessage: '', lastMessageTime: null, unreadCount: 0 });
+                    existingHandles.add(entry.handle);
+                    added++;
+                }
+
+                saveChats();
+                renderChatList();
+                _settingsMsg(`Imported ${added} new chat(s). ${imported.length - added} skipped (already exist).`, false);
             } catch (e) {
                 _settingsMsg('Import failed: wrong password or corrupted file.', true);
             }
