@@ -680,6 +680,15 @@ function appendMessageToDisk(chatHandle, message, content, isCompressed) {
 	evictOldestIfOverQuota();
 }
 
+function appendReactionPatchToDisk(chatHandle, messageId, reactions) {
+	try {
+		const entry = { h: chatHandle, type: 'reaction_patch', messageId, reactions };
+		fs.appendFileSync(chatToFilePath(chatHandle), JSON.stringify(entry) + '\n');
+	} catch (e) {
+		console.error('Failed to persist reaction patch:', e);
+	}
+}
+
 function getTotalDataSizeBytes() {
 	let total = 0;
 	try {
@@ -734,20 +743,44 @@ function loadPersistentStorage() {
 			}
 			if (!chatHandle) continue;
 
-			// Load last 100 into memory
-			const last100 = rawLines.slice(-100);
-			const messages = [];
-			for (const line of last100) {
+			// Two-pass: collect messages (Map deduplicates by id, preserving insertion order)
+			// and collect reaction patches to apply after.
+			const messageMap = new Map(); // id → { msg, content, isCompressed }
+			const reactionPatches = [];   // { messageId, reactions }
+
+			for (const line of rawLines) {
 				try {
 					const entry = JSON.parse(line);
-					messages.push(entry.msg);
-					if (entry.content) {
-						messageContentStorage.set(`${chatHandle}:${entry.msg.id}`, entry.content);
-					}
-					if (entry.msg.id) {
-						messageMetadata.set(entry.msg.id, { isCompressed: entry.isCompressed || false });
+					if (entry.type === 'reaction_patch') {
+						reactionPatches.push(entry);
+					} else if (entry.msg && entry.msg.id) {
+						const existing = messageMap.get(entry.msg.id);
+						messageMap.set(entry.msg.id, {
+							msg: entry.msg,
+							content: entry.content || (existing && existing.content) || null,
+							isCompressed: entry.isCompressed || false
+						});
 					}
 				} catch (e) {}
+			}
+
+			// Apply reaction patches to their messages
+			for (const patch of reactionPatches) {
+				const entry = messageMap.get(patch.messageId);
+				if (entry) entry.msg.reactions = patch.reactions;
+			}
+
+			// Keep last 100 unique messages
+			const entries = [...messageMap.values()].slice(-100);
+			const messages = [];
+			for (const entry of entries) {
+				messages.push(entry.msg);
+				if (entry.content) {
+					messageContentStorage.set(`${chatHandle}:${entry.msg.id}`, entry.content);
+				}
+				if (entry.msg.id) {
+					messageMetadata.set(entry.msg.id, { isCompressed: entry.isCompressed || false });
+				}
 			}
 			messagesStorage.set(chatHandle, messages);
 		}
@@ -1256,6 +1289,7 @@ function handleReaction(req, res, pathname) {
 			}
 
 			message.lastUpdated = Date.now();
+			appendReactionPatchToDisk(chatHandle, messageId, message.reactions);
 
 			// Return updated reactions for this message (isMine computed for requester)
 			const transformedReactions = {};

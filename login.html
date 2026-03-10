@@ -7747,8 +7747,8 @@
             }
         }
 
-        async function updateReactionBar(messageId, reactions) {
-            const bar = document.querySelector(`.reaction-bar[data-message-id="${CSS.escape(messageId)}"]`);
+        async function updateReactionBar(messageId, reactions, barEl) {
+            const bar = barEl || document.querySelector(`.reaction-bar[data-message-id="${CSS.escape(messageId)}"]`);
             if (!bar) return;
             bar.innerHTML = '';
             for (const [encryptedEmoji, { count, isMine }] of Object.entries(reactions)) {
@@ -8072,6 +8072,18 @@
                     } else {
                         // Normal already-rendered message: sync reactions and edits only
                         updateReactionBar(message.id, message.reactions || {});
+                        // Persist updated reactions to cache so they survive chat switches
+                        if (message.reactions && Object.keys(message.reactions).length > 0) {
+                            try {
+                                const cacheKey = `messages_${handle}`;
+                                const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+                                const idx = cached.findIndex(m => m.id === message.id);
+                                if (idx !== -1 && JSON.stringify(cached[idx].reactions) !== JSON.stringify(message.reactions)) {
+                                    cached[idx] = { ...cached[idx], reactions: message.reactions };
+                                    setItemWithEviction(cacheKey, JSON.stringify(cached));
+                                }
+                            } catch (e) { /* non-fatal */ }
+                        }
                         if (message.isEdited) {
                             const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
                             if (msgGroup && msgGroup.dataset.encryptedContent !== message.encryptedContent) {
@@ -8452,8 +8464,8 @@
                 reactionBar.className = 'reaction-bar';
                 reactionBar.setAttribute('data-message-id', message.id);
                 if (message.reactions && Object.keys(message.reactions).length > 0) {
-                    // Populate asynchronously
-                    updateReactionBar(message.id, message.reactions);
+                    // Pass element directly — it may not be in the DOM yet so querySelector would return null
+                    updateReactionBar(message.id, message.reactions, reactionBar);
                 }
                 messageElement.appendChild(reactionBar);
 
