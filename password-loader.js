@@ -4,6 +4,11 @@ const path = require('path');
 
 let cachedPassword = null;
 
+function getBasePath() {
+  try { if (require('node:sea').isSea()) return path.dirname(process.execPath); } catch (_) {}
+  return __dirname;
+}
+
 /**
  * Load password from .passwd file
  * @returns {string|null} The password or null if not found
@@ -13,8 +18,8 @@ function loadPassword() {
   if (cachedPassword !== null) {
     return cachedPassword;
   }
-  
-  const passwdPath = path.join(__dirname, '.passwd');
+
+  const passwdPath = path.join(getBasePath(), '.passwd');
   
   try {
     if (fs.existsSync(passwdPath)) {
@@ -52,8 +57,7 @@ function reloadPassword() {
  * @returns {boolean} True if password file exists
  */
 function hasPasswordFile() {
-  const passwdPath = path.join(__dirname, '.passwd');
-  return fs.existsSync(passwdPath);
+  return fs.existsSync(path.join(getBasePath(), '.passwd'));
 }
 
 module.exports = {

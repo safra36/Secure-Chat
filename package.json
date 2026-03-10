@@ -1,0 +1,13 @@
+{
+  "name": "chat",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "node build.js --win",
+    "build:linux": "node build.js --linux",
+    "build:bundle": "node build.js --no-binary"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "html-minifier-terser": "^7.2.0"
+  }
+}
