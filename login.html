@@ -533,15 +533,6 @@
 
         .chat-item:active {
             background: var(--bg-tertiary);
-            transform: scale(0.998);
-        }
-
-        .chat-item:hover {
-            background: var(--bg-secondary);
-        }
-
-        .chat-item:active {
-            background: var(--bg-tertiary);
             transform: scale(0.995);
         }
 
@@ -4876,7 +4867,7 @@
                 <div class="chat-info">
                     <div class="chat-name" id="chat-name">Chat</div>
                     <div class="chat-status">
-                        <span class="status-dot" id="status-dot"></span>
+                        <span class="status-dot" id="status-dot" aria-hidden="true"></span>
                         <span id="status-text">Connecting...</span>
                     </div>
                 </div>
@@ -4925,9 +4916,9 @@
             <span>Chat history full, rearranging messages…</span>
         </div>
 
-        <div id="messages" class="messages"></div>
+        <div id="messages" class="messages" role="log" aria-live="polite"></div>
 
-        <div id="typing-indicator" class="typing-indicator">
+        <div id="typing-indicator" class="typing-indicator" aria-live="polite">
             <div class="typing-dots"><span></span><span></span><span></span></div>
             <span id="typing-text"></span>
         </div>
@@ -5096,10 +5087,10 @@
     </div>
 
     <!-- New Chat Modal -->
-    <div id="new-chat-modal" class="modal-overlay">
+    <div id="new-chat-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="new-chat-modal-title">
         <div class="modal">
             <div class="modal-header">
-                <h3 class="modal-title">New Chat</h3>
+                <h3 class="modal-title" id="new-chat-modal-title">New Chat</h3>
                 <button id="close-modal" class="modal-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
 
@@ -5121,10 +5112,10 @@
     </div>
 
     <!-- Settings Modal -->
-    <div id="settings-modal" class="modal-overlay">
+    <div id="settings-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
         <div class="modal" style="max-width:460px">
             <div class="modal-header">
-                <h3 class="modal-title">Identity & Keys</h3>
+                <h3 class="modal-title" id="settings-modal-title">Identity & Keys</h3>
                 <button id="close-settings-modal" class="modal-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
 
@@ -5188,82 +5179,82 @@
     </div>
 
     <!-- Lightbox -->
-    <div id="lightbox" class="lightbox">
+    <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Full size image">
         <button id="lightbox-close" class="lightbox-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
         <img id="lightbox-image" class="lightbox-image" src="" alt="Full size image">
     </div>
 
     <!-- Emoji picker (global popup) -->
     <div id="emoji-picker" class="emoji-picker">
-        <button class="emoji-option" data-emoji="👍">👍</button>
-        <button class="emoji-option" data-emoji="👎">👎</button>
-        <button class="emoji-option" data-emoji="❤️">❤️</button>
-        <button class="emoji-option" data-emoji="😍">😍</button>
-        <button class="emoji-option" data-emoji="😘">😘</button>
-        <button class="emoji-option" data-emoji="🥰">🥰</button>
-        <button class="emoji-option" data-emoji="😂">😂</button>
-        <button class="emoji-option" data-emoji="😄">😄</button>
-        <button class="emoji-option" data-emoji="😁">😁</button>
-        <button class="emoji-option" data-emoji="😅">😅</button>
-        <button class="emoji-option" data-emoji="😆">😆</button>
-        <button class="emoji-option" data-emoji="😮">😮</button>
-        <button class="emoji-option" data-emoji="😱">😱</button>
-        <button class="emoji-option" data-emoji="🤯">🤯</button>
-        <button class="emoji-option" data-emoji="😢">😢</button>
-        <button class="emoji-option" data-emoji="😭">😭</button>
-        <button class="emoji-option" data-emoji="😤">😤</button>
-        <button class="emoji-option" data-emoji="😡">😡</button>
-        <button class="emoji-option" data-emoji="🥺">🥺</button>
-        <button class="emoji-option" data-emoji="😳">😳</button>
-        <button class="emoji-option" data-emoji="😏">😏</button>
-        <button class="emoji-option" data-emoji="😇">😇</button>
-        <button class="emoji-option" data-emoji="🤔">🤔</button>
-        <button class="emoji-option" data-emoji="🤩">🤩</button>
-        <button class="emoji-option" data-emoji="😎">😎</button>
-        <button class="emoji-option" data-emoji="🥳">🥳</button>
-        <button class="emoji-option" data-emoji="😈">😈</button>
-        <button class="emoji-option" data-emoji="👿">👿</button>
-        <button class="emoji-option" data-emoji="💀">💀</button>
-        <button class="emoji-option" data-emoji="☠️">☠️</button>
-        <button class="emoji-option" data-emoji="💩">💩</button>
-        <button class="emoji-option" data-emoji="🤡">🤡</button>
-        <button class="emoji-option" data-emoji="👽">👽</button>
-        <button class="emoji-option" data-emoji="👻">👻</button>
-        <button class="emoji-option" data-emoji="🤖">🤖</button>
-        <button class="emoji-option" data-emoji="🎃">🎃</button>
-        <button class="emoji-option" data-emoji="👹">👹</button>
-        <button class="emoji-option" data-emoji="👺">👺</button>
-        <button class="emoji-option" data-emoji="👏">👏</button>
-        <button class="emoji-option" data-emoji="👋">👋</button>
-        <button class="emoji-option" data-emoji="🤚">🤚</button>
-        <button class="emoji-option" data-emoji="🖐️">🖐️</button>
-        <button class="emoji-option" data-emoji="✋">✋</button>
-        <button class="emoji-option" data-emoji="👍">👍</button>
-        <button class="emoji-option" data-emoji="👌">👌</button>
-        <button class="emoji-option" data-emoji="🤌">🤌</button>
-        <button class="emoji-option" data-emoji="🤏">🤏</button>
-        <button class="emoji-option" data-emoji="✌️">✌️</button>
-        <button class="emoji-option" data-emoji="🤞">🤞</button>
-        <button class="emoji-option" data-emoji="🤝">🤝</button>
-        <button class="emoji-option" data-emoji="🙏">🙏</button>
-        <button class="emoji-option" data-emoji="💪">💪</button>
-        <button class="emoji-option" data-emoji="🦾">🦾</button>
-        <button class="emoji-option" data-emoji="🫱">🫱</button>
-        <button class="emoji-option" data-emoji="🫲">🫲</button>
-        <button class="emoji-option" data-emoji="🤙">🤙</button>
-        <button class="emoji-option" data-emoji="🤘">🤘</button>
-        <button class="emoji-option" data-emoji="✍️">✍️</button>
-        <button class="emoji-option" data-emoji="🔥">🔥</button>
-        <button class="emoji-option" data-emoji="💯">💯</button>
-        <button class="emoji-option" data-emoji="⭐">⭐</button>
-        <button class="emoji-option" data-emoji="🌟">🌟</button>
-        <button class="emoji-option" data-emoji="💫">💫</button>
-        <button class="emoji-option" data-emoji="✨">✨</button>
-        <button class="emoji-option" data-emoji="🎉">🎉</button>
-        <button class="emoji-option" data-emoji="🎊">🎊</button>
-        <button class="emoji-option" data-emoji="🏆">🏆</button>
-        <button class="emoji-option" data-emoji="🥇">🥇</button>
-        <button class="emoji-option" data-emoji="🍆">🍆</button>
+        <button class="emoji-option" data-emoji="👍" aria-label="thumbs up">👍</button>
+        <button class="emoji-option" data-emoji="👎" aria-label="thumbs down">👎</button>
+        <button class="emoji-option" data-emoji="❤️" aria-label="red heart">❤️</button>
+        <button class="emoji-option" data-emoji="😍" aria-label="heart eyes">😍</button>
+        <button class="emoji-option" data-emoji="😘" aria-label="kissing face">😘</button>
+        <button class="emoji-option" data-emoji="🥰" aria-label="smiling with hearts">🥰</button>
+        <button class="emoji-option" data-emoji="😂" aria-label="face with tears of joy">😂</button>
+        <button class="emoji-option" data-emoji="😄" aria-label="grinning face">😄</button>
+        <button class="emoji-option" data-emoji="😁" aria-label="beaming face">😁</button>
+        <button class="emoji-option" data-emoji="😅" aria-label="grinning with sweat">😅</button>
+        <button class="emoji-option" data-emoji="😆" aria-label="squinting face">😆</button>
+        <button class="emoji-option" data-emoji="😮" aria-label="open mouth">😮</button>
+        <button class="emoji-option" data-emoji="😱" aria-label="screaming face">😱</button>
+        <button class="emoji-option" data-emoji="🤯" aria-label="exploding head">🤯</button>
+        <button class="emoji-option" data-emoji="😢" aria-label="crying face">😢</button>
+        <button class="emoji-option" data-emoji="😭" aria-label="loudly crying">😭</button>
+        <button class="emoji-option" data-emoji="😤" aria-label="huffing face">😤</button>
+        <button class="emoji-option" data-emoji="😡" aria-label="angry face">😡</button>
+        <button class="emoji-option" data-emoji="🥺" aria-label="pleading face">🥺</button>
+        <button class="emoji-option" data-emoji="😳" aria-label="flushed face">😳</button>
+        <button class="emoji-option" data-emoji="😏" aria-label="smirking face">😏</button>
+        <button class="emoji-option" data-emoji="😇" aria-label="smiling with halo">😇</button>
+        <button class="emoji-option" data-emoji="🤔" aria-label="thinking face">🤔</button>
+        <button class="emoji-option" data-emoji="🤩" aria-label="star struck">🤩</button>
+        <button class="emoji-option" data-emoji="😎" aria-label="sunglasses face">😎</button>
+        <button class="emoji-option" data-emoji="🥳" aria-label="party face">🥳</button>
+        <button class="emoji-option" data-emoji="😈" aria-label="smiling devil">😈</button>
+        <button class="emoji-option" data-emoji="👿" aria-label="angry devil">👿</button>
+        <button class="emoji-option" data-emoji="💀" aria-label="skull">💀</button>
+        <button class="emoji-option" data-emoji="☠️" aria-label="skull and crossbones">☠️</button>
+        <button class="emoji-option" data-emoji="💩" aria-label="poop">💩</button>
+        <button class="emoji-option" data-emoji="🤡" aria-label="clown face">🤡</button>
+        <button class="emoji-option" data-emoji="👽" aria-label="alien">👽</button>
+        <button class="emoji-option" data-emoji="👻" aria-label="ghost">👻</button>
+        <button class="emoji-option" data-emoji="🤖" aria-label="robot">🤖</button>
+        <button class="emoji-option" data-emoji="🎃" aria-label="jack-o-lantern">🎃</button>
+        <button class="emoji-option" data-emoji="👹" aria-label="ogre">👹</button>
+        <button class="emoji-option" data-emoji="👺" aria-label="goblin">👺</button>
+        <button class="emoji-option" data-emoji="👏" aria-label="clapping hands">👏</button>
+        <button class="emoji-option" data-emoji="👋" aria-label="waving hand">👋</button>
+        <button class="emoji-option" data-emoji="🤚" aria-label="raised back of hand">🤚</button>
+        <button class="emoji-option" data-emoji="🖐️" aria-label="hand with fingers splayed">🖐️</button>
+        <button class="emoji-option" data-emoji="✋" aria-label="raised hand">✋</button>
+        <button class="emoji-option" data-emoji="👍" aria-label="thumbs up">👍</button>
+        <button class="emoji-option" data-emoji="👌" aria-label="OK hand">👌</button>
+        <button class="emoji-option" data-emoji="🤌" aria-label="pinched fingers">🤌</button>
+        <button class="emoji-option" data-emoji="🤏" aria-label="pinching hand">🤏</button>
+        <button class="emoji-option" data-emoji="✌️" aria-label="victory hand">✌️</button>
+        <button class="emoji-option" data-emoji="🤞" aria-label="crossed fingers">🤞</button>
+        <button class="emoji-option" data-emoji="🤝" aria-label="handshake">🤝</button>
+        <button class="emoji-option" data-emoji="🙏" aria-label="folded hands">🙏</button>
+        <button class="emoji-option" data-emoji="💪" aria-label="flexed biceps">💪</button>
+        <button class="emoji-option" data-emoji="🦾" aria-label="mechanical arm">🦾</button>
+        <button class="emoji-option" data-emoji="🫱" aria-label="rightward hand">🫱</button>
+        <button class="emoji-option" data-emoji="🫲" aria-label="leftward hand">🫲</button>
+        <button class="emoji-option" data-emoji="🤙" aria-label="call me hand">🤙</button>
+        <button class="emoji-option" data-emoji="🤘" aria-label="sign of the horns">🤘</button>
+        <button class="emoji-option" data-emoji="✍️" aria-label="writing hand">✍️</button>
+        <button class="emoji-option" data-emoji="🔥" aria-label="fire">🔥</button>
+        <button class="emoji-option" data-emoji="💯" aria-label="hundred points">💯</button>
+        <button class="emoji-option" data-emoji="⭐" aria-label="star">⭐</button>
+        <button class="emoji-option" data-emoji="🌟" aria-label="glowing star">🌟</button>
+        <button class="emoji-option" data-emoji="💫" aria-label="dizzy">💫</button>
+        <button class="emoji-option" data-emoji="✨" aria-label="sparkles">✨</button>
+        <button class="emoji-option" data-emoji="🎉" aria-label="party popper">🎉</button>
+        <button class="emoji-option" data-emoji="🎊" aria-label="confetti ball">🎊</button>
+        <button class="emoji-option" data-emoji="🏆" aria-label="trophy">🏆</button>
+        <button class="emoji-option" data-emoji="🥇" aria-label="gold medal">🥇</button>
+        <button class="emoji-option" data-emoji="🍆" aria-label="eggplant">🍆</button>
         <button class="emoji-option" data-emoji="🍑">🍑</button>
         <button class="emoji-option" data-emoji="🍿">🍿</button>
         <button class="emoji-option" data-emoji="🍕">🍕</button>
@@ -5474,7 +5465,7 @@
     </div>
 
     <!-- Toast -->
-    <div id="toast" class="toast"></div>
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <!-- Hidden file inputs -->
     <input type="file" accept="image/*,video/*" id="image-input" style="display: none;">
@@ -5484,10 +5475,10 @@
     <input type="file" accept="image/png,image/gif,image/webp,image/jpeg" id="sticker-input" style="display: none;">
 
     <!-- P2P File Transfer Modal -->
-    <div id="p2p-transfer-modal" class="modal-overlay">
+    <div id="p2p-transfer-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="p2p-transfer-modal-title">
         <div class="modal">
             <div class="modal-header">
-                <h3 class="modal-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;vertical-align:-0.2em;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Send File</h3>
+                <h3 class="modal-title" id="p2p-transfer-modal-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;vertical-align:-0.2em;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>Send File</h3>
                 <button id="close-p2p-modal" class="modal-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
 
@@ -5507,10 +5498,10 @@
     </div>
 
     <!-- P2P Pending Invitations Modal -->
-    <div id="p2p-invitations-modal" class="modal-overlay">
+    <div id="p2p-invitations-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="p2p-invitations-modal-title">
         <div class="modal">
             <div class="modal-header">
-                <h3 class="modal-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;vertical-align:-0.2em;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Pending File Transfers</h3>
+                <h3 class="modal-title" id="p2p-invitations-modal-title"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;vertical-align:-0.2em;margin-right:6px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Pending File Transfers</h3>
                 <button id="close-invitations-modal" class="modal-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
 
@@ -5526,7 +5517,7 @@
     </div>
 
     <!-- Incoming Call Modal -->
-    <div id="incoming-call-modal" class="modal-overlay">
+    <div id="incoming-call-modal" class="modal-overlay" role="dialog" aria-modal="true" aria-label="Incoming call">
         <div class="modal">
             <div class="incoming-call-content">
                 <div class="incoming-call-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:2em;height:2em"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.19 12 19.79 19.79 0 0 1 1.12 3.38 2 2 0 0 1 3.1 1h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/></svg></div>
@@ -5637,13 +5628,9 @@
             if (!isCompressed) {
                 return data;
             }
-            
+
             try {
-                // For decompression with Brotli
-                if (typeof BrotliDecode !== 'undefined') {
-                    return BrotliDecode(new Uint8Array(data));
-                }
-                return data;
+                return pako.inflate(new Uint8Array(data), { to: 'string' });
             } catch (error) {
                 window.reportClientError(error, 'decompress data');
                 console.error('Decompression error:', error);
@@ -5781,6 +5768,21 @@
         }
         
         // Evict oldest cached content to make space
+        function evictOldestMessageCache() {
+            const msgKeys = [];
+            for (let key in localStorage) {
+                if (key.startsWith('messages_')) {
+                    msgKeys.push(key);
+                }
+            }
+            if (msgKeys.length > 0) {
+                localStorage.removeItem(msgKeys[0]);
+                console.log(`Evicted message cache: ${msgKeys[0]}`);
+                return true;
+            }
+            return false;
+        }
+
         function evictOldestCachedContent() {
             const contentKeys = [];
             for (let key in localStorage) {
@@ -6993,6 +6995,7 @@
                         if (Math.abs(lastDx) > 0) _resetSwipe();
                         return;
                     }
+                    e.preventDefault();
                     lastDx = dx;
                     const translate = swipeDir * Math.min(absDx * 0.45, 70);
                     swipeMsgEl.style.transition = 'none';
@@ -7005,7 +7008,7 @@
                         swipeTarget.appendChild(swipeIcon);
                     }
                     swipeIcon.style.opacity = Math.min(absDx / THRESHOLD, 1);
-                }, { passive: true });
+                }, { passive: false });
                 messagesContainer.addEventListener('touchend', () => {
                     if (!swipeMsgEl) return;
                     if (Math.abs(lastDx) >= THRESHOLD) {
@@ -7052,6 +7055,15 @@
             if (messagesContainer) {
                 messagesContainer.addEventListener('scroll', () => {
                     checkScrollPosition();
+                });
+            }
+
+            // Adjust scroll when virtual keyboard appears/disappears on mobile
+            if (window.visualViewport) {
+                window.visualViewport.addEventListener('resize', () => {
+                    if (messagesContainer && isAtBottom) {
+                        requestAnimationFrame(() => scrollToBottom(false));
+                    }
                 });
             }
 
@@ -7109,13 +7121,52 @@
             }
         }
 
+        let _toastTimeout = null;
         function showToast(message, type = 'info') {
             toast.textContent = message;
             toast.className = `toast ${type} show`;
-            
-            setTimeout(() => {
+
+            clearTimeout(_toastTimeout);
+            _toastTimeout = setTimeout(() => {
                 toast.classList.remove('show');
             }, 3000);
+        }
+
+        // Modal focus management
+        let _modalPreviousFocus = null;
+        let _modalFocusTrapHandler = null;
+
+        function openModalA11y(modalEl) {
+            _modalPreviousFocus = document.activeElement;
+            modalEl.classList.add('active');
+            // Focus first focusable element
+            const focusable = modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+            if (focusable.length) focusable[0].focus();
+            // Trap focus
+            _modalFocusTrapHandler = (e) => {
+                if (e.key !== 'Tab') return;
+                const elems = modalEl.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])');
+                if (!elems.length) return;
+                const first = elems[0], last = elems[elems.length - 1];
+                if (e.shiftKey) {
+                    if (document.activeElement === first) { e.preventDefault(); last.focus(); }
+                } else {
+                    if (document.activeElement === last) { e.preventDefault(); first.focus(); }
+                }
+            };
+            document.addEventListener('keydown', _modalFocusTrapHandler);
+        }
+
+        function closeModalA11y(modalEl) {
+            modalEl.classList.remove('active');
+            if (_modalFocusTrapHandler) {
+                document.removeEventListener('keydown', _modalFocusTrapHandler);
+                _modalFocusTrapHandler = null;
+            }
+            if (_modalPreviousFocus) {
+                _modalPreviousFocus.focus();
+                _modalPreviousFocus = null;
+            }
         }
 
         function completeSetup() {
@@ -7139,9 +7190,7 @@
         }
 
         function renderChatList(filter = '') {
-            chatList.innerHTML = '';
-
-            const filteredChats = chats.filter(chat => 
+            const filteredChats = chats.filter(chat =>
                 chat.handle.toLowerCase().includes(filter.toLowerCase())
             );
 
@@ -7165,37 +7214,78 @@
                 return timeB - timeA;
             });
 
-            filteredChats.forEach(chat => {
-                const chatItem = document.createElement('div');
-                chatItem.className = 'chat-item';
-                chatItem.dataset.handle = chat.handle;
+            // Build a set of handles that should be present
+            const desiredHandles = filteredChats.map(c => c.handle);
+            const existingItems = new Map();
+            for (const el of chatList.querySelectorAll('.chat-item[data-handle]')) {
+                existingItems.set(el.dataset.handle, el);
+            }
 
+            // Remove items no longer in the list (or empty-state placeholder)
+            for (const [handle, el] of existingItems) {
+                if (!desiredHandles.includes(handle)) el.remove();
+            }
+            const emptyState = chatList.querySelector('.empty-state');
+            if (emptyState) emptyState.remove();
+
+            // Update or create items in order
+            let prevNode = null;
+            filteredChats.forEach(chat => {
                 const avatarInitial = chat.handle.charAt(0).toUpperCase();
-                const timeStr = chat.lastMessageTime 
+                const timeStr = chat.lastMessageTime
                     ? formatTime(new Date(chat.lastMessageTime))
                     : '';
+                const unreadCount = chat.unreadCount && chat.unreadCount > 0 ? Math.min(chat.unreadCount, 99) : 0;
 
-                const unreadBadge = chat.unreadCount && chat.unreadCount > 0 
-                    ? `<div class="unread-badge">${Math.min(chat.unreadCount, 99)}</div>`
-                    : '';
-
-                chatItem.innerHTML = `
-                    <div class="chat-avatar">${avatarInitial}</div>
-                    <div class="chat-info">
-                        <div class="chat-name-row">
-                            <div class="chat-name">${escapeHtml(chat.handle)}</div>
-                            <div class="chat-time">${timeStr}</div>
+                let chatItem = existingItems.get(chat.handle);
+                if (chatItem) {
+                    // Update existing node in-place
+                    const timeEl = chatItem.querySelector('.chat-time');
+                    if (timeEl) timeEl.textContent = timeStr;
+                    const lastMsgEl = chatItem.querySelector('.last-message');
+                    if (lastMsgEl) lastMsgEl.textContent = chat.lastMessage || 'No messages yet';
+                    let badge = chatItem.querySelector('.unread-badge');
+                    if (unreadCount > 0) {
+                        if (!badge) {
+                            badge = document.createElement('div');
+                            badge.className = 'unread-badge';
+                            chatItem.querySelector('.chat-preview')?.appendChild(badge);
+                        }
+                        badge.textContent = unreadCount;
+                    } else if (badge) {
+                        badge.remove();
+                    }
+                } else {
+                    // Create new node
+                    chatItem = document.createElement('div');
+                    chatItem.className = 'chat-item';
+                    chatItem.dataset.handle = chat.handle;
+                    const unreadBadge = unreadCount > 0
+                        ? `<div class="unread-badge">${unreadCount}</div>`
+                        : '';
+                    chatItem.innerHTML = `
+                        <div class="chat-avatar">${avatarInitial}</div>
+                        <div class="chat-info">
+                            <div class="chat-name-row">
+                                <div class="chat-name">${escapeHtml(chat.handle)}</div>
+                                <div class="chat-time">${timeStr}</div>
+                            </div>
+                            <div class="chat-preview">
+                                <div class="last-message">${escapeHtml(chat.lastMessage || 'No messages yet')}</div>
+                                ${unreadBadge}
+                            </div>
                         </div>
-                        <div class="chat-preview">
-                            <div class="last-message">${escapeHtml(chat.lastMessage || 'No messages yet')}</div>
-                            ${unreadBadge}
-                        </div>
-                    </div>
-                    <button class="delete-btn" onclick="event.stopPropagation(); deleteChat('${chat.handle}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
-                `;
+                        <button class="delete-btn" onclick="event.stopPropagation(); deleteChat('${chat.handle}')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
+                    `;
+                    chatItem.addEventListener('click', () => openChat(chat.handle));
+                }
 
-                chatItem.addEventListener('click', () => openChat(chat.handle));
-                chatList.appendChild(chatItem);
+                // Ensure correct order
+                const nextSibling = prevNode ? prevNode.nextSibling : chatList.firstChild;
+                if (chatItem !== nextSibling) {
+                    chatList.insertBefore(chatItem, nextSibling);
+                }
+                prevNode = chatItem;
             });
         }
 
@@ -7223,11 +7313,11 @@
         function openNewChatModal() {
             newChatHandle.value = '';
             newChatKey.value = '';
-            newChatModal.classList.add('active');
+            openModalA11y(newChatModal);
         }
 
         function closeNewChatModal() {
-            newChatModal.classList.remove('active');
+            closeModalA11y(newChatModal);
         }
 
         function createNewChat() {
@@ -7335,7 +7425,8 @@
             closeAttachmentMenu();
 
             // Cleanup before opening new chat
-            for (const [player, { audio }] of activeAudioPlayers.entries()) {
+            for (const [player, { audio, resizeObs }] of activeAudioPlayers.entries()) {
+                if (resizeObs) resizeObs.disconnect();
                 audio._cleanup = true;
                 audio.pause();
                 audio.src = '';
@@ -7383,7 +7474,13 @@
             // Load cached messages from localStorage and AWAIT before starting polling
             // to prevent concurrent appendMessages calls racing on renderedMessageIds
             lastReadReceiptsHeader = null;
+            const rearrangeOverlay = document.getElementById('rearrange-overlay');
+            if (rearrangeOverlay) {
+                rearrangeOverlay.querySelector('span').textContent = 'Loading messages…';
+                rearrangeOverlay.style.display = '';
+            }
             await loadCachedMessages(handle);
+            if (rearrangeOverlay) rearrangeOverlay.style.display = 'none';
 
             // Show load-more bar; set oldest ID from cache so first request knows where to start
             const cachedForHistory = (() => {
@@ -7397,7 +7494,7 @@
             lastFetchTime = 0;
 
             // Scroll to bottom after loading messages
-            setTimeout(() => scrollToBottom(false), 100);
+            requestAnimationFrame(() => scrollToBottom(false));
 
             startPolling();
             startHeartbeat();
@@ -7410,7 +7507,8 @@
             if (loadMoreBar) loadMoreBar.style.display = 'none';
             
             // Cleanup audio players
-            for (const [player, { audio }] of activeAudioPlayers.entries()) {
+            for (const [player, { audio, resizeObs }] of activeAudioPlayers.entries()) {
+                if (resizeObs) resizeObs.disconnect();
                 audio._cleanup = true;
                 audio.pause();
                 audio.src = '';
@@ -8052,6 +8150,7 @@
             // Collect all messages (both cached and new) for caching
             let allMessages = [];
             let hasNewMessages = false;
+            let newMessageCount = 0;
             // For prepend: collect rendered elements to insert as a batch
             const prependFragment = prepend ? document.createDocumentFragment() : null;
             const prependIds = [];
@@ -8110,6 +8209,7 @@
                 if (message.isUpdate) continue;
 
                 hasNewMessages = true;
+                newMessageCount++;
 
                 const messageElement = document.createElement('div');
                 messageElement.className = 'message-group';
@@ -8131,10 +8231,11 @@
                 // Decrypt server timestamp and apply time offset for display
                 let timeStr = '';
                 let msgDate = null;
+                let cachedSyncedTimestamp = null;
                 try {
                     const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
-                    const syncedTimestamp = serverTimestamp + timeOffset;
-                    const time = new Date(syncedTimestamp);
+                    cachedSyncedTimestamp = serverTimestamp + timeOffset;
+                    const time = new Date(cachedSyncedTimestamp);
                     timeStr = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                     msgDate = time;
                 } catch (err) {
@@ -8507,15 +8608,10 @@
                         tempDiv.textContent = 'Voice message';
                     }
                     const textContent = tempDiv.textContent || tempDiv.innerText || 'Media message';
-                    // Update last message time using decrypted and synced timestamp
-                    try {
-                        const serverTimestamp = parseInt(await decryptServerTimestamp(message.encryptedTimestamp));
-                        const syncedTimestamp = serverTimestamp + timeOffset;
-                        const timestampStr = new Date(syncedTimestamp).toISOString();
+                    // Update last message time using cached decrypted timestamp
+                    if (cachedSyncedTimestamp !== null) {
+                        const timestampStr = new Date(cachedSyncedTimestamp).toISOString();
                         updateLastMessage(handle, textContent, timestampStr);
-                    } catch (err) {
-                        window.reportClientError(err, 'update last message timestamp');
-                        // Skip update on decryption failure to avoid corrupting lastMessageTime
                     }
                 }
                 
@@ -8544,7 +8640,7 @@
                     if (wasAtBottom) {
                         scrollToBottom(false);
                     } else {
-                        unreadMessageCounter++;
+                        unreadMessageCounter += newMessageCount;
                         updateScrollButton();
                     }
                 }, 50);
@@ -8954,12 +9050,13 @@
             });
 
             // Redraw on resize
-            new ResizeObserver(() => {
+            const resizeObs = new ResizeObserver(() => {
                 const p = validDuration > 0 ? audio.currentTime / validDuration : 0;
                 drawWaveform(p);
-            }).observe(waveformWrapper);
+            });
+            resizeObs.observe(waveformWrapper);
 
-            activeAudioPlayers.set(player, { audio, playBtn });
+            activeAudioPlayers.set(player, { audio, playBtn, resizeObs });
             return player;
         }
 
@@ -9251,18 +9348,28 @@
 
         function openLightbox(imageSrc) {
             lightboxImage.src = imageSrc;
-            lightbox.classList.add('active');
+            openModalA11y(lightbox);
         }
 
         function closeLightbox() {
-            lightbox.classList.remove('active');
+            closeModalA11y(lightbox);
             lightboxImage.src = '';
+        }
+
+        // Shared AudioContext for notification sounds
+        let _sharedAudioCtx = null;
+        function getAudioContext() {
+            if (!_sharedAudioCtx || _sharedAudioCtx.state === 'closed') {
+                _sharedAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (_sharedAudioCtx.state === 'suspended') _sharedAudioCtx.resume();
+            return _sharedAudioCtx;
         }
 
         // Notification sound function (Web Audio API beep)
         function playNotificationSound() {
             try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const audioCtx = getAudioContext();
                 const now = audioCtx.currentTime;
                 
                 // Create a simple beep: 800Hz for 150ms
@@ -9304,17 +9411,13 @@
         }
 
         async function pollAllChatsForNewMessages() {
-            // Poll all chats that are not currently being viewed
-            for (const chat of chats) {
-                if (currentChat && currentChat.handle === chat.handle) {
-                    continue; // Skip the current chat, it's already being polled
-                }
+            // Poll all chats that are not currently being viewed — in parallel
+            const otherChats = chats.filter(c => !(currentChat && currentChat.handle === c.handle));
+            let anyNew = false;
 
+            await Promise.all(otherChats.map(async (chat) => {
                 try {
-                    // Use pollingCursors for consistent cursor tracking across active and background chats
                     const cursorId = pollingCursors[chat.handle] || '';
-
-                    // Fetch new messages
                     const url = cursorId
                         ? `/messages/${chat.handle}?after=${encodeURIComponent(cursorId)}`
                         : `/messages/${chat.handle}`;
@@ -9324,16 +9427,13 @@
                         headers: { 'Content-Type': 'application/json' }
                     });
 
-                    if (!response.ok) {
-                        continue; // Skip this chat if fetch failed
-                    }
+                    if (!response.ok) return;
 
                     const rawBgData = await response.json();
                     const messages = Array.isArray(rawBgData) ? rawBgData : (rawBgData.messages || []);
                     const bgNextCursor = Array.isArray(rawBgData) ? null : rawBgData.nextCursor;
 
                     if (messages.length > 0) {
-                        // Cache new messages
                         const cacheKey = `messages_${chat.handle}`;
                         const cachedMessagesJson = localStorage.getItem(cacheKey);
                         let existingMessages = [];
@@ -9347,11 +9447,9 @@
                             }
                         }
 
-                        // Identify truly new messages (not reaction/edit re-sends)
                         const existingIds = new Set(existingMessages.map(m => m.id));
                         const trulyNew = messages.filter(m => !m.isUpdate && !existingIds.has(m.id));
 
-                        // Merge: skip isUpdate messages not in cache to preserve sort order
                         const messageMap = new Map();
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => {
@@ -9360,10 +9458,8 @@
                         });
 
                         const mergedMessages = Array.from(messageMap.values());
-
                         saveCachedMessages(chat.handle, mergedMessages);
 
-                        // Advance cursor using server nextCursor or last truly new message
                         if (bgNextCursor) {
                             pollingCursors[chat.handle] = bgNextCursor;
                             savePollingCursors();
@@ -9372,21 +9468,23 @@
                             savePollingCursors();
                         }
 
-                        // Only notify for truly new messages
                         if (trulyNew.length > 0) {
                             chat.unreadCount = (chat.unreadCount || 0) + trulyNew.length;
                             chat.lastMessage = 'New message...';
                             chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();
-
                             playNotificationSound();
-                            saveChats();
-                            renderChatList();
+                            anyNew = true;
                         }
                     }
                 } catch (error) {
                     window.reportClientError(error, 'poll chat messages');
                     console.error(`Error polling chat ${chat.handle}:`, error);
                 }
+            }));
+
+            if (anyNew) {
+                saveChats();
+                renderChatList();
             }
         }
 
@@ -10251,15 +10349,15 @@
             const userId = localStorage.getItem('userId') || '(no identity)';
             document.getElementById('settings-userid').textContent = userId;
             document.getElementById('settings-msg').style.display = 'none';
-            document.getElementById('settings-modal').classList.add('active');
+            openModalA11y(document.getElementById('settings-modal'));
         }
 
         document.getElementById('close-settings-modal').addEventListener('click', () => {
-            document.getElementById('settings-modal').classList.remove('active');
+            closeModalA11y(document.getElementById('settings-modal'));
         });
         document.getElementById('settings-modal').addEventListener('click', (e) => {
             if (e.target === document.getElementById('settings-modal'))
-                document.getElementById('settings-modal').classList.remove('active');
+                closeModalA11y(document.getElementById('settings-modal'));
         });
 
         function _settingsMsg(text, isError) {
@@ -10543,7 +10641,7 @@
 
                 return btoa(String.fromCharCode(...result));
             } catch (error) {
-                window.reportClientError(error, 'encryptBinary');
+                window.reportClientError(error, 'encryptMessage');
                 throw error;
             }
         }
@@ -11035,6 +11133,7 @@
         // Download deferred content from server
         async function downloadDeferredContent(messageId, contentType, downloadBtn) {
             if (!currentChat) return;
+            const chatSnapshot = currentChat;
 
             let btn = downloadBtn;
             const originalHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:12px;height:12px;vertical-align:-0.1em;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Download';
@@ -11142,11 +11241,11 @@
                             }
                             
                             if (contentType === 'voice') {
-                                const decryptedAudioBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const decryptedAudioBuffer = await decryptBinary(encryptedBase64, chatSnapshot.encryptionKey);
                                 const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/webm;codecs=opus' });
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
-                                
+
                                 const duration = await new Promise(resolve => {
                                     audio.addEventListener('loadedmetadata', () => {
                                         resolve(audio.duration);
@@ -11158,13 +11257,13 @@
                                 });
 
                                 const voicePlayer = await createVoicePlayer(audioUrl, duration);
-                                
+
                                 // Replace the deferred element with the voice player
                                 if (deferredElement.parentElement) {
                                     deferredElement.parentElement.replaceChild(voicePlayer, deferredElement);
                                 }
                             } else if (contentType === 'image') {
-                                const decryptedImageBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const decryptedImageBuffer = await decryptBinary(encryptedBase64, chatSnapshot.encryptionKey);
                                 const imageBlob = new Blob([decryptedImageBuffer], { type: 'image/*' });
                                 const imageUrl = createTrackedBlobUrl(imageBlob);
 
@@ -11178,7 +11277,7 @@
                                     deferredElement.parentElement.replaceChild(newContentDiv, deferredElement);
                                 }
                             } else if (contentType === 'video') {
-                                const decryptedVideoBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const decryptedVideoBuffer = await decryptBinary(encryptedBase64, chatSnapshot.encryptionKey);
                                 const videoBlob = new Blob([decryptedVideoBuffer], { type: 'video/*' });
                                 const videoUrl = createTrackedBlobUrl(videoBlob);
 
@@ -11190,7 +11289,7 @@
                                 }
                             } else if (contentType === 'audio') {
                                 const audioFileName = deferredElement.dataset.fileName || 'Audio';
-                                const decryptedAudioBuffer = await decryptBinary(encryptedBase64, currentChat.encryptionKey);
+                                const decryptedAudioBuffer = await decryptBinary(encryptedBase64, chatSnapshot.encryptionKey);
                                 const audioBlob = new Blob([decryptedAudioBuffer], { type: 'audio/*' });
                                 const audioUrl = createTrackedBlobUrl(audioBlob);
                                 const audio = new Audio(audioUrl);
@@ -11521,7 +11620,7 @@
 
         if (closeInvitationsModal) {
             closeInvitationsModal.addEventListener('click', () => {
-                p2pInvitationsModal.classList.remove('active');
+                closeModalA11y(p2pInvitationsModal);
             });
         }
 
@@ -11537,7 +11636,7 @@
         if (p2pInvitationsModal) {
             p2pInvitationsModal.addEventListener('click', (e) => {
                 if (e.target === p2pInvitationsModal) {
-                    p2pInvitationsModal.classList.remove('active');
+                    closeModalA11y(p2pInvitationsModal);
                 }
             });
         }
@@ -11573,14 +11672,14 @@
 
             // Show modal
             if (p2pTransferModal) {
-                p2pTransferModal.classList.add('active');
+                openModalA11y(p2pTransferModal);
             }
         }
 
         // Close P2P transfer modal
         function closeP2PTransferModal() {
             if (p2pTransferModal) {
-                p2pTransferModal.classList.remove('active');
+                closeModalA11y(p2pTransferModal);
             }
             
             // Reset state
@@ -11827,10 +11926,10 @@
                 const p2pTransferModal = document.getElementById('p2p-transfer-modal');
                 const p2pInvitationsModal = document.getElementById('p2p-invitations-modal');
                 if (p2pTransferModal) {
-                    p2pTransferModal.classList.remove('active');
+                    closeModalA11y(p2pTransferModal);
                 }
                 if (p2pInvitationsModal) {
-                    p2pInvitationsModal.classList.remove('active');
+                    closeModalA11y(p2pInvitationsModal);
                 }
 
                 activeTransfers.delete(sessionId);
@@ -11848,7 +11947,7 @@
             if (!p2pInvitationsModal || !currentChat) return;
 
             await renderPendingInvitations();
-            p2pInvitationsModal.classList.add('active');
+            openModalA11y(p2pInvitationsModal);
         }
 
         // Render pending invitations
@@ -12255,16 +12354,16 @@
             document.getElementById('incoming-call-name').textContent = callerId;
             document.getElementById('incoming-call-modal').querySelector('.incoming-call-label').textContent =
                 callStatus === 'ACTIVE' ? 'Ongoing call – tap to join' : 'Incoming voice call...';
-            document.getElementById('incoming-call-modal').classList.add('active');
+            openModalA11y(document.getElementById('incoming-call-modal'));
         }
 
         function hideIncomingCallModal() {
-            document.getElementById('incoming-call-modal').classList.remove('active');
+            closeModalA11y(document.getElementById('incoming-call-modal'));
         }
 
         function playCallRingSound() {
             try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                const audioCtx = getAudioContext();
                 const now = audioCtx.currentTime;
 
                 // Two-tone ring
@@ -12726,8 +12825,8 @@
 
         // Integration: start incoming call poll when opening chat
         const _origOpenChat = openChat;
-        openChat = function(handle) {
-            _origOpenChat(handle);
+        openChat = async function(handle) {
+            await _origOpenChat(handle);
             startIncomingCallPoll();
             // Clear seen invitations and dismissed calls for new chat
             seenInvitationIds.clear();

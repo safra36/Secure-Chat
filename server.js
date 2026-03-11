@@ -1724,13 +1724,16 @@ function handleGetHistory(req, res, pathname) {
 	const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
 	const entries = [];
 	for (const line of rawLines) {
-		try { entries.push(JSON.parse(line)); } catch (e) {}
+		try {
+			const parsed = JSON.parse(line);
+			if (parsed && parsed.msg) entries.push(parsed);
+		} catch (e) {}
 	}
 
 	// Find the index of the message with beforeId; default to end of array
 	let beforeIndex = entries.length;
 	if (beforeId) {
-		const idx = entries.findIndex(e => e.msg.id === beforeId);
+		const idx = entries.findIndex(e => e.msg && e.msg.id === beforeId);
 		if (idx >= 0) beforeIndex = idx;
 	}
 
