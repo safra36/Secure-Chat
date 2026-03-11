@@ -8551,9 +8551,9 @@
                     if (typeof contentHtml === 'string') {
                         tempDiv.innerHTML = contentHtml;
                     } else {
-                        tempDiv.textContent = 'Voice message';
+                        tempDiv.textContent = isSticker ? 'Sticker' : isVoice ? 'Voice message' : isAudio ? 'Audio' : 'Media message';
                     }
-                    const textContent = tempDiv.textContent || tempDiv.innerText || 'Media message';
+                    const textContent = tempDiv.textContent || tempDiv.innerText || (isSticker ? 'Sticker' : isVoice ? 'Voice message' : isImage ? 'Image' : isVideo ? 'Video' : isAudio ? 'Audio' : isFile ? 'File' : 'Media message');
                     // Update last message time using cached decrypted timestamp
                     if (cachedSyncedTimestamp !== null) {
                         const timestampStr = new Date(cachedSyncedTimestamp).toISOString();

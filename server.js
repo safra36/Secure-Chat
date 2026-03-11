@@ -680,9 +680,9 @@ function appendMessageToDisk(chatHandle, message, content, isCompressed) {
 	evictOldestIfOverQuota();
 }
 
-function appendReactionPatchToDisk(chatHandle, messageId, reactions) {
+function appendReactionPatchToDisk(chatHandle, messageId, reactions, lastUpdated) {
 	try {
-		const entry = { h: chatHandle, type: 'reaction_patch', messageId, reactions };
+		const entry = { h: chatHandle, type: 'reaction_patch', messageId, reactions, lastUpdated };
 		fs.appendFileSync(chatToFilePath(chatHandle), JSON.stringify(entry) + '\n');
 	} catch (e) {
 		console.error('Failed to persist reaction patch:', e);
@@ -767,7 +767,10 @@ function loadPersistentStorage() {
 			// Apply reaction patches to their messages
 			for (const patch of reactionPatches) {
 				const entry = messageMap.get(patch.messageId);
-				if (entry) entry.msg.reactions = patch.reactions;
+				if (entry) {
+					entry.msg.reactions = patch.reactions;
+					if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
+				}
 			}
 
 			// Keep last 100 unique messages
@@ -1289,7 +1292,7 @@ function handleReaction(req, res, pathname) {
 			}
 
 			message.lastUpdated = Date.now();
-			appendReactionPatchToDisk(chatHandle, messageId, message.reactions);
+			appendReactionPatchToDisk(chatHandle, messageId, message.reactions, message.lastUpdated);
 
 			// Return updated reactions for this message (isMine computed for requester)
 			const transformedReactions = {};
