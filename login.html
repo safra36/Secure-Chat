@@ -1954,13 +1954,53 @@
             background: var(--bg-tertiary);
             border: 1px solid var(--border-color);
             border-radius: var(--radius-full);
-            padding: 10px 20px;
+            padding: 10px 12px 10px 20px;
             transition: all var(--transition-base);
         }
 
         .input-wrapper:focus-within {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        /* Attachment button inside pill */
+        .input-wrapper .attachment-btn {
+            width: 26px;
+            height: 26px;
+            min-width: 26px;
+            border-radius: 50%;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            opacity: 0.45;
+            max-width: 30px;
+            overflow: hidden;
+            transition: opacity 0.15s ease, max-width 0.25s ease, min-width 0.25s ease, margin 0.25s ease;
+            margin-left: 2px;
+        }
+
+        .input-wrapper .attachment-btn svg {
+            width: 15px;
+            height: 15px;
+            flex-shrink: 0;
+        }
+
+        .input-wrapper .attachment-btn:hover {
+            opacity: 1;
+        }
+
+        .input-wrapper.has-text .attachment-btn {
+            opacity: 0;
+            max-width: 0;
+            min-width: 0;
+            margin-left: 0;
+            margin-right: 0;
+            pointer-events: none;
         }
 
         .message-input {
@@ -2021,44 +2061,8 @@
             justify-content: center;
         }
 
-        .send-btn {
-            width: 48px;
-            height: 48px;
-            border: none;
-            border-radius: 50%;
-            background: var(--accent);
-            color: #000;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s ease;
-            flex-shrink: 0;
-        }
-
-        .send-btn svg {
-            width: 22px;
-            height: 22px;
-            stroke: #000;
-        }
-
-        .send-btn:hover {
-            transform: scale(1.05);
-        }
-
-        .send-btn:disabled {
-            background: var(--bg-tertiary);
-            color: var(--text-secondary);
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .send-btn:disabled svg {
-            stroke: var(--text-secondary);
-        }
-
-        /* Voice Button - Global Styles */
-        .voice-btn {
+        /* Input Action Button (merged send/voice) */
+        .input-action-btn {
             width: 48px;
             height: 48px;
             border: none;
@@ -2069,21 +2073,48 @@
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: all var(--transition-base);
+            transition: background 0.25s ease, transform 0.2s ease;
             flex-shrink: 0;
+            position: relative;
         }
 
-        .voice-btn svg {
+        .input-action-btn svg {
             width: 22px;
             height: 22px;
+            position: absolute;
+            transition: opacity 0.2s ease, transform 0.2s ease;
         }
 
-        .voice-btn:hover {
-            background: var(--bg-elevated);
+        .input-action-btn .icon-mic {
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+        }
+
+        .input-action-btn .icon-send {
+            opacity: 0;
+            transform: scale(0.4) rotate(-30deg);
+            stroke: #000;
+        }
+
+        .input-action-btn.has-text {
+            background: var(--accent);
+        }
+
+        .input-action-btn.has-text .icon-mic {
+            opacity: 0;
+            transform: scale(0.4) rotate(30deg);
+        }
+
+        .input-action-btn.has-text .icon-send {
+            opacity: 1;
+            transform: scale(1) rotate(0deg);
+        }
+
+        .input-action-btn:hover {
             transform: scale(1.05);
         }
 
-        .voice-btn:active {
+        .input-action-btn:active {
             transform: scale(0.95);
         }
 
@@ -3121,27 +3152,6 @@
                 position: relative;
             }
             
-            .attachment-btn {
-                width: 40px;
-                height: 40px;
-                border-radius: 50%;
-                background: transparent;
-                color: var(--tg-text-secondary);
-                font-size: 24px;
-                flex-shrink: 0;
-            }
-            
-            .attachment-btn:hover {
-                background: rgba(255,255,255,0.1);
-                color: var(--tg-text);
-                transform: none;
-            }
-            
-            .attachment-btn.active {
-                background: var(--tg-accent);
-                color: #fff;
-            }
-            
             .input-wrapper {
                 flex: 1;
                 min-width: 0;
@@ -3166,72 +3176,11 @@
                 color: var(--tg-text-secondary);
             }
             
-            .send-btn {
+            .input-action-btn {
                 width: 40px;
                 height: 40px;
-                border-radius: 50%;
-                background: var(--tg-accent);
-                color: #fff;
-                font-size: 20px;
-                flex-shrink: 0;
             }
             
-            .send-btn:hover {
-                transform: scale(1.05);
-            }
-            
-            .send-btn:disabled {
-                background: transparent;
-                color: var(--tg-text-secondary);
-            }
-            
-            .attachment-btn {
-                width: 40px;
-                height: 40px;
-                border-radius: 50%;
-                background: transparent;
-                border: none;
-                color: var(--tg-text-secondary);
-                font-size: 24px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-                flex-shrink: 0;
-            }
-            
-            .attachment-btn:hover {
-                background: rgba(255,255,255,0.1);
-                color: var(--tg-text);
-            }
-            
-            .attachment-btn.active {
-                background: var(--tg-accent);
-                color: #fff;
-                transform: rotate(45deg);
-            }
-            
-            .voice-btn {
-                width: 40px;
-                height: 40px;
-                border-radius: 50%;
-                background: transparent;
-                border: none;
-                color: var(--tg-text-secondary);
-                font-size: 22px;
-                cursor: pointer;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                transition: all 0.2s ease;
-                flex-shrink: 0;
-            }
-            
-            .voice-btn:hover {
-                background: rgba(255,255,255,0.1);
-                color: var(--tg-text);
-            }
             
             /* Voice Recording - Telegram Style */
             .voice-recording {
@@ -3537,10 +3486,8 @@
                 padding: 4px 6px;
             }
             
-            .attachment-btn,
-            .voice-btn,
-            .p2p-transfer-btn,
-            .send-btn {
+            .input-action-btn,
+            .p2p-transfer-btn {
                 width: 38px;
                 height: 38px;
                 font-size: 20px;
@@ -4494,9 +4441,7 @@
             .btn,
             .header-btn,
             .back-btn,
-            .attachment-btn,
-            .send-btn,
-            .voice-btn,
+            .input-action-btn,
             .p2p-transfer-btn,
             .call-btn,
             .fab,
@@ -4506,24 +4451,22 @@
             .call-action-btn {
                 -webkit-tap-highlight-color: rgba(95, 162, 217, 0.3);
             }
-            
+
             /* Ripple effect simulation */
             .chat-item,
             .btn,
             .header-btn,
             .back-btn,
-            .attachment-btn,
-            .send-btn {
+            .input-action-btn {
                 position: relative;
                 overflow: hidden;
             }
-            
+
             .chat-item::after,
             .btn::after,
             .header-btn::after,
             .back-btn::after,
-            .attachment-btn::after,
-            .send-btn::after {
+            .input-action-btn::after {
                 content: '';
                 position: absolute;
                 top: 50%;
@@ -4537,13 +4480,12 @@
                 pointer-events: none;
                 border-radius: 50%;
             }
-            
+
             .chat-item:active::after,
             .btn:active::after,
             .header-btn:active::after,
             .back-btn:active::after,
-            .attachment-btn:active::after,
-            .send-btn:active::after {
+            .input-action-btn:active::after {
                 transform: translate(-50%, -50%) scale(2);
                 opacity: 1;
                 transition: transform 0s, opacity 0s;
@@ -5052,13 +4994,7 @@
             </div>
 
             <div id="input-container" class="input-container">
-                <button id="attachment-btn" class="attachment-btn" title="Attachments">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 22px; height: 22px;">
-                        <line x1="12" y1="5" x2="12" y2="19"/>
-                        <line x1="5" y1="12" x2="19" y2="12"/>
-                    </svg>
-                </button>
-                <div class="input-wrapper">
+                <div class="input-wrapper" id="input-wrapper">
                     <textarea
                         id="message-input"
                         class="message-input"
@@ -5067,17 +5003,20 @@
                     ></textarea>
                     <button id="emoji-btn" class="emoji-btn" title="Emoji" type="button">😊</button>
                     <button id="sticker-btn" class="sticker-btn" title="Stickers" type="button">🪄</button>
+                    <button id="attachment-btn" class="attachment-btn" title="Attachments">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>
+                        </svg>
+                    </button>
                 </div>
-                <button id="voice-btn" class="voice-btn" title="Record voice">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 22px; height: 22px;">
+                <button id="action-btn" class="input-action-btn" title="Voice / Send">
+                    <svg class="icon-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
                         <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
                         <line x1="12" y1="19" x2="12" y2="23"/>
                         <line x1="8" y1="23" x2="16" y2="23"/>
                     </svg>
-                </button>
-                <button id="send-btn" class="send-btn" title="Send" disabled>
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 22px; height: 22px;">
+                    <svg class="icon-send" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         <line x1="22" y1="2" x2="11" y2="13"/>
                         <polygon points="22 2 15 22 11 13 2 9 22 2"/>
                     </svg>
@@ -6300,8 +6239,10 @@
         const audioInput = document.getElementById('audio-input');
         const imagePreview = document.getElementById('image-preview');
         const attachmentBtn = document.getElementById('attachment-btn');
-        const voiceBtn = document.getElementById('voice-btn');
-        const sendBtn = document.getElementById('send-btn');
+        const actionBtn = document.getElementById('action-btn');
+        const inputWrapper = document.getElementById('input-wrapper');
+        const voiceBtn = actionBtn;
+        const sendBtn = actionBtn;
         const voiceRecording = document.getElementById('voice-recording');
         const recordingTime = document.getElementById('recording-time');
         const stopRecording = document.getElementById('stop-recording');
@@ -6736,8 +6677,13 @@
                 });
             }
 
-            voiceBtn.addEventListener('click', toggleVoiceRecording);
-            sendBtn.addEventListener('click', sendMessage);
+            actionBtn.addEventListener('click', () => {
+                if (actionBtn.classList.contains('has-text') || selectedMedia) {
+                    sendMessage();
+                } else {
+                    toggleVoiceRecording();
+                }
+            });
             stopRecording.addEventListener('click', stopVoiceRecording);
             cancelRecording.addEventListener('click', cancelVoiceRecording);
             closeModal.addEventListener('click', closeNewChatModal);
@@ -8698,7 +8644,9 @@
         function handleInputChange() {
             const hasText = messageInput.value.trim().length > 0;
             const hasMedia = selectedMedia !== null;
-            sendBtn.disabled = !hasText && !hasMedia;
+            const active = hasText || hasMedia;
+            actionBtn.classList.toggle('has-text', active);
+            inputWrapper.classList.toggle('has-text', hasText);
             // Update typing state (piggybacked on next heartbeat)
             isTyping = hasText;
             clearTimeout(typingTimeout);
