@@ -1409,25 +1409,23 @@ function handleUploadChunk(req, res, pathname) {
 		try {
 			// Concatenate all chunks into a single Buffer
 			const body = Buffer.concat(bodyChunks);
-			
-			// For simplicity, we'll parse the multipart data
-			// Format: JSON metadata followed by binary chunk data
-			const dataStr = body.toString('utf8');
-			const metadataEnd = dataStr.indexOf('\r\n\r\n');
-			
+
+			// Find \r\n\r\n separator in raw buffer to avoid UTF-8 encoding issues
+			const separator = Buffer.from('\r\n\r\n');
+			const metadataEnd = body.indexOf(separator);
+
 			if (metadataEnd === -1) {
 				res.writeHead(400, { 'Content-Type': 'application/json' });
 				res.end(JSON.stringify({ error: 'Invalid chunk format' }));
 				return;
 			}
 
-			const metadataStr = dataStr.substring(0, metadataEnd);
+			const metadataStr = body.slice(0, metadataEnd).toString('utf8');
 			const metadata = JSON.parse(metadataStr);
 			const { sessionId, chunkIndex, totalChunks, messageType } = metadata;
 
 			// Extract binary chunk data as a Buffer slice
-			const chunkDataStart = metadataEnd + 4;
-			const chunkData = body.slice(chunkDataStart);
+			const chunkData = body.slice(metadataEnd + separator.length);
 
 			console.log(`Received chunk ${chunkIndex}/${totalChunks} for session ${sessionId}`);
 
@@ -1458,9 +1456,11 @@ function handleUploadChunk(req, res, pathname) {
 				totalChunks: totalChunks
 			}));
 		} catch (error) {
-			console.error('Error processing chunk:', error);
-			res.writeHead(400, { 'Content-Type': 'application/json' });
-			res.end(JSON.stringify({ error: 'Invalid chunk data' }));
+			console.error('Error processing chunk:', error.stack || error);
+			if (!res.headersSent) {
+				res.writeHead(500, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Chunk processing error', detail: error.message }));
+			}
 		}
 	});
 }
