@@ -8616,7 +8616,8 @@
                 existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                 allMessages.forEach(msg => {
                     if (msg.isUpdate && !existingIds.has(msg.id)) return;
-                    messageMap.set(msg.id, msg);
+                    const { isUpdate, ...cleanMsg } = msg;
+                    messageMap.set(msg.id, cleanMsg);
                 });
                 const mergedMessages = Array.from(messageMap.values());
 
@@ -9402,7 +9403,8 @@
                         existingMessages.forEach(msg => messageMap.set(msg.id, msg));
                         messages.forEach(msg => {
                             if (msg.isUpdate && !existingIds.has(msg.id)) return;
-                            messageMap.set(msg.id, msg);
+                            const { isUpdate, ...cleanMsg } = msg;
+                            messageMap.set(msg.id, cleanMsg);
                         });
 
                         const mergedMessages = Array.from(messageMap.values());

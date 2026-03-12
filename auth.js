@@ -1,6 +1,53 @@
 // Authentication utilities for the secure chat app
 
 let _serverBuildId = null;
+let _resyncingTime = null;
+
+/**
+ * Re-sync pageLoadTime/serverTime from /time-sync endpoint.
+ * Requires serverPassword in localStorage to decrypt the response.
+ * Returns true if sync succeeded.
+ */
+async function _resyncServerTime() {
+	const serverPassword = localStorage.getItem('serverPassword');
+	if (!serverPassword) return false;
+
+	try {
+		const clientTime = Date.now();
+		const response = await fetch('/time-sync', {
+			method: 'GET',
+			headers: { 'Content-Type': 'application/json' }
+		});
+		if (!response.ok) return false;
+
+		const data = await response.json();
+		const binary = new Uint8Array(atob(data.encryptedTime).split('').map(c => c.charCodeAt(0)));
+		const iv = binary.slice(0, 12);
+		const encrypted = binary.slice(12);
+
+		// padKey: zero-padded 32-byte key from password string
+		const encoder = new TextEncoder();
+		const keyData = encoder.encode(serverPassword);
+		const padded = new Uint8Array(32);
+		padded.set(keyData.slice(0, 32));
+
+		const cryptoKey = await crypto.subtle.importKey(
+			'raw', padded, { name: 'AES-GCM' }, false, ['decrypt']
+		);
+		const decrypted = await crypto.subtle.decrypt(
+			{ name: 'AES-GCM', iv, tagLength: 128 }, cryptoKey, encrypted
+		);
+		const serverTime = parseInt(new TextDecoder().decode(decrypted), 10);
+
+		localStorage.setItem('pageLoadTime', clientTime.toString());
+		localStorage.setItem('serverTime', serverTime.toString());
+		console.log(`🔄 Auth time re-synced. Offset: ${clientTime - serverTime}ms`);
+		return true;
+	} catch (e) {
+		console.error('Auth time re-sync failed:', e);
+		return false;
+	}
+}
 
 async function _verifyBuildHmac(buildId, receivedHmac, password) {
 	try {
@@ -203,6 +250,20 @@ async function authenticatedFetch(url, options = {}) {
 						location.reload();
 					}
 				}
+			}
+		}
+
+		// On 401, attempt time re-sync and retry once
+		if (response.status === 401) {
+			// Deduplicate concurrent re-syncs
+			if (!_resyncingTime) {
+				_resyncingTime = _resyncServerTime().finally(() => { _resyncingTime = null; });
+			}
+			const synced = await _resyncingTime;
+			if (synced) {
+				const retryHeader = await getAuthHeader();
+				options.headers['Authorization'] = retryHeader;
+				return fetch(url, options);
 			}
 		}
 
