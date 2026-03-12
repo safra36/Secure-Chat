@@ -1407,25 +1407,34 @@ function handleUploadChunk(req, res, pathname) {
 
 	req.on('end', () => {
 		try {
-			// Concatenate all chunks into a single Buffer
 			const body = Buffer.concat(bodyChunks);
+			let sessionId, chunkIndex, totalChunks, messageType, chunkData;
 
-			// Find \r\n\r\n separator in raw buffer to avoid UTF-8 encoding issues
-			const separator = Buffer.from('\r\n\r\n');
-			const metadataEnd = body.indexOf(separator);
-
-			if (metadataEnd === -1) {
-				res.writeHead(400, { 'Content-Type': 'application/json' });
-				res.end(JSON.stringify({ error: 'Invalid chunk format' }));
-				return;
+			const contentType = req.headers['content-type'] || '';
+			if (contentType.includes('application/json')) {
+				// JSON format with base64-encoded chunk data
+				const parsed = JSON.parse(body.toString('utf8'));
+				sessionId = parsed.sessionId;
+				chunkIndex = parsed.chunkIndex;
+				totalChunks = parsed.totalChunks;
+				messageType = parsed.messageType;
+				chunkData = Buffer.from(parsed.chunkData, 'base64');
+			} else {
+				// Legacy binary format: metadata\r\n\r\nchunkData
+				const separator = Buffer.from('\r\n\r\n');
+				const metadataEnd = body.indexOf(separator);
+				if (metadataEnd === -1) {
+					res.writeHead(400, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify({ error: 'Invalid chunk format' }));
+					return;
+				}
+				const metadata = JSON.parse(body.slice(0, metadataEnd).toString('utf8'));
+				sessionId = metadata.sessionId;
+				chunkIndex = metadata.chunkIndex;
+				totalChunks = metadata.totalChunks;
+				messageType = metadata.messageType;
+				chunkData = body.slice(metadataEnd + separator.length);
 			}
-
-			const metadataStr = body.slice(0, metadataEnd).toString('utf8');
-			const metadata = JSON.parse(metadataStr);
-			const { sessionId, chunkIndex, totalChunks, messageType } = metadata;
-
-			// Extract binary chunk data as a Buffer slice
-			const chunkData = body.slice(metadataEnd + separator.length);
 
 			console.log(`Received chunk ${chunkIndex}/${totalChunks} for session ${sessionId}`);
 

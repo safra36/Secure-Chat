@@ -6119,33 +6119,29 @@
                         const end = Math.min(start + this.chunkSize, data.byteLength);
                         const chunkData = data.slice(start, end);
 
-                        // Create metadata and chunk payload
-                        const metadata = {
-                            sessionId: this.sessionId,
-                            chunkIndex: chunkIndex,
-                            totalChunks: totalChunks,
-                            messageType: messageType
-                        };
-
-                        const metadataStr = JSON.stringify(metadata);
-                        const metadataBuffer = new TextEncoder().encode(metadataStr);
-                        
-                    // Combine metadata and chunk data
-                    const separator = new TextEncoder().encode('\r\n\r\n');
-                    const chunkDataArray = new Uint8Array(chunkData);
-                    const combined = new Uint8Array(metadataBuffer.length + separator.length + chunkDataArray.length);
-                    combined.set(metadataBuffer, 0);
-                    combined.set(separator, metadataBuffer.length);
-                    combined.set(chunkDataArray, metadataBuffer.length + separator.length);
+                        // Create JSON payload with base64-encoded chunk data
+                        const chunkBytes = new Uint8Array(chunkData);
+                        let binary = '';
+                        for (let i = 0; i < chunkBytes.length; i++) binary += String.fromCharCode(chunkBytes[i]);
+                        const chunkB64 = btoa(binary);
 
                         // Upload this chunk
                         const response = await authenticatedFetch(`/upload-chunk/${chatHandle}`, {
                             method: 'POST',
-                            body: combined
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sessionId: this.sessionId,
+                                chunkIndex: chunkIndex,
+                                totalChunks: totalChunks,
+                                messageType: messageType,
+                                chunkData: chunkB64
+                            })
                         });
 
                         if (!response.ok) {
-                            throw new Error(`Failed to upload chunk ${chunkIndex}: ${response.status}`);
+                            let detail = '';
+                            try { detail = await response.text(); } catch(e) {}
+                            throw new Error(`Failed to upload chunk ${chunkIndex}: ${response.status} ${detail}`);
                         }
 
                         this.uploadedChunks = chunkIndex + 1;
