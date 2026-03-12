@@ -96,13 +96,18 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
+  // For binary-body requests (uploads/downloads/transfers), skip SW entirely
+  // to avoid body stream consumption issues in some browsers
+  if (url.pathname.startsWith('/upload') ||
+      url.pathname.startsWith('/download') ||
+      url.pathname.startsWith('/transfer/')) {
+    return; // Let browser handle directly
+  }
+
   // For API requests, always go to network
   if (url.pathname.startsWith('/messages/') ||
       url.pathname.startsWith('/send/') ||
       url.pathname.startsWith('/heartbeat/') ||
-      url.pathname.startsWith('/upload') ||
-      url.pathname.startsWith('/download') ||
-      url.pathname.startsWith('/transfer/') ||
       url.pathname.startsWith('/call/') ||
       url.pathname.startsWith('/verify') ||
       url.pathname.startsWith('/time-sync')) {
@@ -115,9 +120,9 @@ self.addEventListener('fetch', (event) => {
         })
         .catch(() => {
           // Network failed, return offline error
-          return new Response(JSON.stringify({ 
-            error: 'Offline', 
-            message: 'You are not connected to the server' 
+          return new Response(JSON.stringify({
+            error: 'Offline',
+            message: 'You are not connected to the server'
           }), {
             status: 503,
             headers: { 'Content-Type': 'application/json' }

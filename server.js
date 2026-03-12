@@ -338,7 +338,7 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	try {
 	// Inject build ID into every response for client-side reload detection
 	const _wh = res.writeHead.bind(res);
-	res.writeHead = (code, headers = {}) => _wh(code, { 'X-Server-Build': SERVER_BUILD_HEADER, ...headers });
+	res.writeHead = (code, headers = {}) => { return _wh(code, { 'X-Server-Build': SERVER_BUILD_HEADER, ...headers }); };
 
 	// Log all requests
 	console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
