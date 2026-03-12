@@ -8369,6 +8369,9 @@
                 // Create message bubble
                 const messageBubble = document.createElement('div');
                 messageBubble.className = `message ${bubbleClass}${isSticker ? ' sticker-msg' : ''}`;
+                if (!isOwn && message.colorToken) {
+                    messageBubble.style.borderLeft = `3px solid ${colorFromToken(message.colorToken)}`;
+                }
 
                 // Render reply quote if present (decrypted with chat key)
                 if (message.replyTo) {
@@ -10590,6 +10593,13 @@
                 window.reportClientError(error, 'encryptMessage');
                 throw error;
             }
+        }
+
+        function colorFromToken(token) {
+            const hue = parseInt(token.slice(0, 4), 16) % 360;
+            const sat = 55 + parseInt(token.slice(4, 6), 16) % 25;
+            const lit = 45 + parseInt(token.slice(6, 8), 16) % 20;
+            return `hsl(${hue}, ${sat}%, ${lit}%)`;
         }
 
         async function decryptMessage(encryptedMessage, key) {

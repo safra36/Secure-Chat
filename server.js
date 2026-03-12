@@ -853,6 +853,9 @@ function serializeMessageForClient(message, requestingUserId) {
 			isMine: data.userIds.includes(requestingUserId)
 		};
 	}
+	const colorToken = crypto.createHash('sha256')
+		.update(message.senderUserId + requestingUserId)
+		.digest('hex').slice(0, 16);
 	return {
 		id: message.id,
 		encryptedName: message.encryptedName,
@@ -862,7 +865,8 @@ function serializeMessageForClient(message, requestingUserId) {
 		stickerId: message.stickerId || null,
 		replyTo: message.replyTo || null,
 		isEdited: (message.edits || []).length > 0,
-		reactions: transformedReactions
+		reactions: transformedReactions,
+		colorToken
 	};
 }
 
@@ -1500,6 +1504,7 @@ function handleUploadComplete(req, res, pathname) {
 		try {
 			const completeData = JSON.parse(body);
 			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta, stickerId, replyTo } = completeData;
+			const [senderUserId] = (req.headers.authorization || '').split(':');
 
 			const session = uploadSessions.get(sessionId);
 			if (!session) {
@@ -1559,6 +1564,7 @@ function handleUploadComplete(req, res, pathname) {
 				encryptedMeta: encryptedMeta || null,
 				stickerId: stickerId || null,
 				replyTo: replyTo || null,
+				senderUserId,
 				reactions: {},
 				edits: []
 			};
