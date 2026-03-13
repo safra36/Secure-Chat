@@ -95,6 +95,7 @@ const messageContentStorage = new Map();
 // In-memory storage for user heartbeats and online status
 // Structure: chatHandle -> userId -> { lastHeartbeat, userName }
 const userHeartbeats = new Map();
+const lastKnownUsers = new Map(); // chatHandle → userId → {encryptedUserName, lastHeartbeat, lastMessageTime}
 
 // In-memory storage for upload sessions
 // Structure: sessionId -> { chatHandle, chunks: Map(chunkIndex -> data), totalChunks, createdAt, messageType, isCompressed }
@@ -1066,6 +1067,12 @@ function handleSendMessage(req, res, pathname) {
 			messagesStorage.get(chatHandle).push(message);
 			console.log(`Stored message for chat handle: ${chatHandle} with ID: ${messageId}`);
 
+			// Track last message time per user
+			if (userHeartbeats.has(chatHandle)) {
+				const cu = userHeartbeats.get(chatHandle).get(senderUserId);
+				if (cu) cu.lastMessageTime = now;
+			}
+
 			// Persist to disk
 			appendMessageToDisk(chatHandle, message, messageData.content, false);
 
@@ -1138,23 +1145,24 @@ function handleHeartbeat(req, res, pathname) {
 
 			const chatUsers = userHeartbeats.get(chatHandle);
 
-			// Clean up expired heartbeats (grace period passed)
+			// Clean up expired heartbeats (grace period passed), preserve in lastKnownUsers
 			for (const [uid, userData] of chatUsers.entries()) {
 				if (now - userData.lastHeartbeat > OFFLINE_GRACE_PERIOD) {
+					if (!lastKnownUsers.has(chatHandle)) lastKnownUsers.set(chatHandle, new Map());
+					lastKnownUsers.get(chatHandle).set(uid, {
+						encryptedUserName: userData.encryptedUserName,
+						lastHeartbeat: userData.lastHeartbeat,
+						lastMessageTime: userData.lastMessageTime || 0
+					});
 					chatUsers.delete(uid);
 					console.log(`Removed offline user ${uid} from chat ${chatHandle}`);
 				}
 			}
 
-			// Decrypt encryptedTyping (server-key encrypted by client) to get bool for expiry logic
-			let isTypingBool = false;
+			// Decrypt encryptedTyping — numeric state: 0=idle,1=typing,2=recording,3=uploading
+			let typingState = 0;
 			if (encryptedTyping) {
-				try {
-					const typingVal = decryptTimestamp(encryptedTyping);
-					isTypingBool = typingVal === 1;
-				} catch (e) {
-					// Invalid or missing — treat as not typing
-				}
+				try { typingState = decryptTimestamp(encryptedTyping); } catch (e) {}
 			}
 
 			const prevUser = chatUsers.get(userId);
@@ -1164,12 +1172,12 @@ function handleHeartbeat(req, res, pathname) {
 			const persistedReadId = persistedSeen?.get(userId)?.lastReadId || '';
 			const resolvedReadId = lastReadId || prevUser?.lastReadId || persistedReadId;
 
-			// Update the current user's heartbeat - store encrypted user name
+			// Update the current user's heartbeat
 			chatUsers.set(userId, {
 				lastHeartbeat: now,
 				encryptedUserName: encryptedUserName || 'Unknown',
-				isTyping: isTypingBool,
-				lastTypingTime: isTypingBool ? now : (prevUser?.lastTypingTime || 0),
+				typingState,
+				lastTypingTime: typingState > 0 ? now : (prevUser?.lastTypingTime || 0),
 				lastReadId: resolvedReadId
 			});
 
@@ -1182,20 +1190,33 @@ function handleHeartbeat(req, res, pathname) {
 
 			console.log(`Heartbeat from ${userId} (${encryptedUserName}) in chat ${chatHandle}`);
 
-			// Build online users header
-			// Format: encryptedUserName|status,encryptedUserName|status,...
+			// Build online users header — live users first, then offline known users
 			const onlineUsersArray = Array.from(chatUsers.entries()).map(([uid, userData]) => {
 				const timeSinceHeartbeat = now - userData.lastHeartbeat;
 				const isOnline = timeSinceHeartbeat <= OFFLINE_THRESHOLD;
-				// Typing state expires after 5s of no typing signal
-				const typingActive = userData.isTyping && (now - (userData.lastTypingTime || 0)) < 5000;
+				const typingActive = userData.typingState > 0 && (now - (userData.lastTypingTime || 0)) < 5000;
 
-				// Encrypt status and typing flag with server key so they are opaque in transit
 				const encStatus = encryptTimestamp(isOnline ? 1 : 0);
-				const encTyping = encryptTimestamp(typingActive ? 1 : 0);
+				const encTyping = encryptTimestamp(typingActive ? userData.typingState : 0);
+				const encLastSeen = encryptTimestamp(userData.lastHeartbeat);
+				const encLastMessage = encryptTimestamp(userData.lastMessageTime || 0);
 
-				return `${userData.encryptedUserName}|${encStatus}|${encTyping}`;
+				return `${userData.encryptedUserName}|${encStatus}|${encTyping}|${encLastSeen}|${encLastMessage}`;
 			});
+
+			// Append offline known users (not currently in chatUsers)
+			const knownForChat = lastKnownUsers.get(chatHandle);
+			if (knownForChat) {
+				for (const [uid, kd] of knownForChat.entries()) {
+					if (!chatUsers.has(uid)) {
+						const encStatus = encryptTimestamp(0);
+						const encTyping = encryptTimestamp(0);
+						const encLastSeen = encryptTimestamp(kd.lastHeartbeat);
+						const encLastMessage = encryptTimestamp(kd.lastMessageTime || 0);
+						onlineUsersArray.push(`${kd.encryptedUserName}|${encStatus}|${encTyping}|${encLastSeen}|${encLastMessage}`);
+					}
+				}
+			}
 
 			const onlineUsersHeader = onlineUsersArray.join(',');
 
@@ -1575,6 +1596,12 @@ function handleUploadComplete(req, res, pathname) {
 			}
 			messagesStorage.get(chatHandle).push(message);
 			console.log(`Stored message for chat handle: ${chatHandle} with encrypted ID: ${encryptedTimestamp}`);
+
+			// Track last message time per user
+			if (userHeartbeats.has(chatHandle)) {
+				const cu = userHeartbeats.get(chatHandle).get(senderUserId);
+				if (cu) cu.lastMessageTime = Date.now();
+			}
 
 			// Persist to disk (include binary content for images/voice)
 			appendMessageToDisk(chatHandle, message, encryptedContent, isCompressed || false);
