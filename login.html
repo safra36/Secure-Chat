@@ -1109,25 +1109,6 @@
             border: 1px solid var(--border-color);
         }
 
-        /* Bubble tails */
-        .message.own:not(.sticker-msg)::after {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            right: -7px;
-            border-width: 0 0 8px 8px;
-            border-style: solid;
-            border-color: transparent transparent transparent #8b5cf6;
-        }
-        .message.received:not(.sticker-msg)::before {
-            content: '';
-            position: absolute;
-            bottom: 0;
-            left: -7px;
-            border-width: 0 8px 8px 0;
-            border-style: solid;
-            border-color: transparent var(--bg-received) transparent transparent;
-        }
 
         /* Time inside bubble */
         .bubble-meta {
@@ -1738,7 +1719,7 @@
         }
         .sticker-save-btn:hover { background: rgba(0,0,0,0.8); color: #fff; }
         .sticker-bubble-wrap:hover .sticker-save-btn { display: flex; }
-        .sticker-save-btn.saved { color: #4ade80; pointer-events: none; }
+        .sticker-save-btn.saved { color: #4ade80; }
         .sticker-loading {
             width: 160px;
             height: 160px;
@@ -11140,9 +11121,9 @@
             img.alt = 'Sticker';
             wrap.appendChild(img);
 
-            // Save button (only for others' stickers that have a stickerId)
+            // Save button — shown for all sticker messages so deleted stickers can be re-saved
             let saveBtn = null;
-            if (!isOwn && message.stickerId) {
+            if (message.stickerId) {
                 saveBtn = document.createElement('button');
                 saveBtn.className = 'sticker-save-btn';
                 const alreadySaved = await stickerDB.hasSticker(message.stickerId).catch(() => false);
@@ -11151,11 +11132,16 @@
                     saveBtn.classList.add('saved');
                 } else {
                     saveBtn.innerHTML = '↓ Save';
-                    saveBtn.addEventListener('click', (e) => {
-                        e.stopPropagation();
-                        saveStickerFromMessage(message, saveBtn, encryptionKey);
-                    });
                 }
+                saveBtn.addEventListener('click', async (e) => {
+                    e.stopPropagation();
+                    // Re-check DB live — sticker may have been deleted after render
+                    const stillSaved = await stickerDB.hasSticker(message.stickerId).catch(() => false);
+                    if (stillSaved) return;
+                    saveBtn.classList.remove('saved');
+                    saveBtn.innerHTML = '↓ Save';
+                    saveStickerFromMessage(message, saveBtn, encryptionKey);
+                });
                 wrap.appendChild(saveBtn);
             }
 
