@@ -339,7 +339,17 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	try {
 	// Inject build ID into every response for client-side reload detection
 	const _wh = res.writeHead.bind(res);
-	res.writeHead = (code, headers = {}) => { return _wh(code, { 'X-Server-Build': SERVER_BUILD_HEADER, ...headers }); };
+	res.writeHead = (code, headers = {}) => { return _wh(code, {
+		'X-Server-Build': SERVER_BUILD_HEADER,
+		// CSP: restricts where resources can be loaded from, reducing XSS impact
+		// unsafe-inline is required because scripts/styles are embedded in the HTML file
+		'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' wss: https:; object-src 'none'; frame-ancestors 'none';",
+		// Prevents browsers from MIME-sniffing responses away from declared content-type
+		'X-Content-Type-Options': 'nosniff',
+		// Blocks the page from being embedded in iframes (clickjacking protection)
+		'X-Frame-Options': 'DENY',
+		...headers
+	}); };
 
 	// Log all requests
 	console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
