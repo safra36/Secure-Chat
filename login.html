@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover, interactive-widget=resizes-content">
     <meta name="theme-color" content="#0e0e0e">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -175,13 +175,15 @@
             font-size: 16px;
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            height: 100%;
+            overflow: hidden;
         }
 
         body {
             font-family: var(--font-family);
             background: var(--bg-primary);
             color: var(--text-primary);
-            min-height: 100vh;
+            height: 100%;
             display: flex;
             flex-direction: column;
             overflow: hidden;
@@ -400,6 +402,7 @@
             flex-direction: column;
             height: 100vh;
             height: 100dvh;
+            height: var(--vvh, 100dvh);
             background: var(--bg-primary);
             position: relative;
         }
@@ -817,6 +820,7 @@
             flex-direction: column;
             height: 100vh;
             height: 100dvh;
+            height: var(--vvh, 100dvh);
             background: var(--bg-primary);
             position: relative;
         }
@@ -6776,6 +6780,15 @@
         }
 
         // Initialize the app
+        // visualViewport fallback: keeps --vvh in sync so containers shrink when keyboard opens
+        if (window.visualViewport) {
+            const updateVVH = () => {
+                document.documentElement.style.setProperty('--vvh', window.visualViewport.height + 'px');
+            };
+            window.visualViewport.addEventListener('resize', updateVVH);
+            updateVVH();
+        }
+
         document.addEventListener('DOMContentLoaded', async () => {
             // Check session validity
             if (!validateCredentials()) {
