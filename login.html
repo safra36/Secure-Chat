@@ -2122,22 +2122,20 @@
 
         /* Attachment Menu - Global Styles */
         .attachment-menu {
-            position: absolute;
-            bottom: 70px;
-            left: 12px;
+            position: fixed;
             background: var(--bg-secondary);
             border-radius: 16px;
             padding: 8px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px var(--border-color);
             display: flex;
-            flex-direction: column;
-            gap: 4px;
+            flex-direction: row;
+            align-items: flex-start;
+            gap: 2px;
             opacity: 0;
             transform: translateY(10px) scale(0.95);
             pointer-events: none;
-            transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+            transition: opacity 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
             z-index: 50;
-            min-width: 160px;
         }
 
         .attachment-menu.active {
@@ -2148,17 +2146,18 @@
 
         .attachment-menu-item {
             display: flex;
+            flex-direction: column;
             align-items: center;
-            gap: 12px;
-            padding: 12px 14px;
+            gap: 5px;
+            padding: 8px 10px;
             border: none;
             background: transparent;
             border-radius: 12px;
             cursor: pointer;
             transition: all 0.15s ease;
             color: var(--text-primary);
-            font-size: 15px;
             position: relative;
+            min-width: 58px;
         }
 
         .attachment-menu-item:hover {
@@ -2167,6 +2166,13 @@
 
         .attachment-menu-item:active {
             transform: scale(0.98);
+        }
+
+        .attachment-menu-divider {
+            width: 1px;
+            background: var(--border-color);
+            align-self: stretch;
+            margin: 6px 4px;
         }
 
         .menu-icon {
@@ -2186,8 +2192,11 @@
         }
 
         .menu-label {
+            font-size: 11px;
             font-weight: 500;
-            color: var(--text-primary);
+            color: var(--text-secondary);
+            text-align: center;
+            white-space: nowrap;
         }
 
         .file-message-card {
@@ -2257,10 +2266,10 @@
 
         .menu-badge {
             position: absolute;
-            top: 8px;
-            right: 8px;
-            width: 18px;
-            height: 18px;
+            top: 4px;
+            right: 4px;
+            width: 16px;
+            height: 16px;
             background: var(--accent);
             border-radius: 50%;
             font-size: 10px;
@@ -3051,51 +3060,57 @@
             
             /* Expandable Attachment Menu */
             .attachment-menu {
-                position: absolute;
-                bottom: 70px;
-                left: 12px;
+                position: fixed;
                 background: var(--tg-bg-secondary);
                 border-radius: 16px;
                 padding: 8px;
                 box-shadow: 0 4px 20px rgba(0,0,0,0.4), 0 0 0 1px var(--tg-border);
                 display: flex;
-                flex-direction: column;
-                gap: 4px;
+                flex-direction: row;
+                align-items: flex-start;
+                gap: 2px;
                 opacity: 0;
                 transform: translateY(10px) scale(0.95);
                 pointer-events: none;
-                transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+                transition: opacity 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
                 z-index: 50;
-                min-width: 140px;
             }
-            
+
             .attachment-menu.active {
                 opacity: 1;
                 transform: translateY(0) scale(1);
                 pointer-events: auto;
             }
-            
+
             .attachment-menu-item {
                 display: flex;
+                flex-direction: column;
                 align-items: center;
-                gap: 12px;
-                padding: 12px 14px;
+                gap: 5px;
+                padding: 8px 10px;
                 border: none;
                 background: transparent;
                 border-radius: 12px;
                 cursor: pointer;
                 transition: all 0.15s ease;
                 color: var(--tg-text);
-                font-size: 15px;
                 position: relative;
+                min-width: 58px;
             }
-            
+
             .attachment-menu-item:hover {
                 background: var(--tg-bg-tertiary);
             }
-            
+
             .attachment-menu-item:active {
                 transform: scale(0.98);
+            }
+
+            .attachment-menu-divider {
+                width: 1px;
+                background: var(--tg-border);
+                align-self: stretch;
+                margin: 6px 4px;
             }
             
             .menu-icon {
@@ -3110,16 +3125,19 @@
             }
             
             .menu-label {
+                font-size: 11px;
                 font-weight: 500;
-                color: var(--tg-text);
+                color: var(--tg-text-secondary, var(--tg-text));
+                text-align: center;
+                white-space: nowrap;
             }
-            
+
             .menu-badge {
                 position: absolute;
-                top: 8px;
-                right: 8px;
-                width: 18px;
-                height: 18px;
+                top: 4px;
+                right: 4px;
+                width: 16px;
+                height: 16px;
                 background: var(--tg-accent);
                 border-radius: 50%;
                 font-size: 10px;
@@ -4964,6 +4982,7 @@
                     </span>
                     <span class="menu-label">Upload File</span>
                 </button>
+                <div class="attachment-menu-divider"></div>
                 <button class="attachment-menu-item" id="menu-pending-btn" title="Pending Transfers">
                     <span class="menu-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -7032,6 +7051,7 @@
 
         // Attachment Menu Functions
         let menuOverlay = null;
+        let menuCloseTimer = null;
         
         function toggleAttachmentMenu() {
             const menu = document.getElementById('attachment-menu');
@@ -7047,7 +7067,7 @@
         function openAttachmentMenu() {
             const menu = document.getElementById('attachment-menu');
             const btn = document.getElementById('attachment-btn');
-            
+
             // Create overlay if not exists
             if (!menuOverlay) {
                 menuOverlay = document.createElement('div');
@@ -7055,7 +7075,23 @@
                 menuOverlay.addEventListener('click', closeAttachmentMenu);
                 document.body.appendChild(menuOverlay);
             }
-            
+
+            // Cancel any pending position cleanup from previous close
+            clearTimeout(menuCloseTimer);
+
+            // Anchor menu above the + button, clamped to viewport
+            const r = btn.getBoundingClientRect();
+            menu.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+            const rightVal = window.innerWidth - r.right;
+            const menuW = menu.offsetWidth || 320;
+            if (window.innerWidth - rightVal - menuW < 8) {
+                menu.style.right = 'auto';
+                menu.style.left = '8px';
+            } else {
+                menu.style.right = rightVal + 'px';
+                menu.style.left = 'auto';
+            }
+
             menu.classList.add('active');
             menuOverlay.classList.add('active');
             btn.classList.add('active');
@@ -7066,8 +7102,15 @@
         function closeAttachmentMenu() {
             const menu = document.getElementById('attachment-menu');
             const btn = document.getElementById('attachment-btn');
-            
-            if (menu) menu.classList.remove('active');
+
+            if (menu) {
+                menu.classList.remove('active');
+                menuCloseTimer = setTimeout(() => {
+                    menu.style.bottom = '';
+                    menu.style.right = '';
+                    menu.style.left = '';
+                }, 200);
+            }
             if (menuOverlay) menuOverlay.classList.remove('active');
             if (btn) {
                 btn.classList.remove('active');
