@@ -153,6 +153,48 @@ if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const seenPositions = new Map();
 const SEEN_FILE = path.join(DATA_DIR, '_seen.json');
 
+// Per-chat Ed25519 key pairs for password-locking chats
+const chatKeysStorage = new Map(); // handle → { chatPublicKey, encryptedChatPrivateKey }
+const CHAT_KEYS_FILE = path.join(DATA_DIR, '_chatkeys.json');
+
+function loadChatKeys() {
+	try {
+		if (!fs.existsSync(CHAT_KEYS_FILE)) return;
+		const obj = JSON.parse(fs.readFileSync(CHAT_KEYS_FILE, 'utf8'));
+		for (const [handle, data] of Object.entries(obj)) chatKeysStorage.set(handle, data);
+		originalLog(`[ChatKeys] Loaded keys for ${chatKeysStorage.size} chat(s)`);
+	} catch (e) {
+		originalError('[ChatKeys] Failed to load chat keys:', e);
+	}
+}
+
+function saveChatKeys() {
+	try {
+		const obj = {};
+		for (const [handle, data] of chatKeysStorage.entries()) obj[handle] = data;
+		fs.writeFileSync(CHAT_KEYS_FILE, JSON.stringify(obj));
+	} catch (e) {
+		originalError('[ChatKeys] Failed to save chat keys:', e);
+	}
+}
+
+function verifyChatSignature(handle, encryptedTimestampBase64, signatureBase64) {
+	const keyData = chatKeysStorage.get(handle);
+	if (!keyData) return true; // not locked yet — backward compat
+	if (!signatureBase64) return false;
+	try {
+		const pubKeyBytes = Buffer.from(keyData.chatPublicKey, 'base64');
+		const spkiHeader = Buffer.from('302a300506032b6570032100', 'hex');
+		const spkiDer = Buffer.concat([spkiHeader, pubKeyBytes]);
+		const publicKey = crypto.createPublicKey({ key: spkiDer, format: 'der', type: 'spki' });
+		const data = Buffer.from(encryptedTimestampBase64, 'base64');
+		const sig = Buffer.from(signatureBase64, 'base64');
+		return crypto.verify(null, data, publicKey, sig);
+	} catch (e) {
+		return false;
+	}
+}
+
 function loadSeenPositions() {
 	try {
 		if (!fs.existsSync(SEEN_FILE)) return;
@@ -704,6 +746,45 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	// GET /chat/:handle/key
+	if (req.method === 'GET' && pathname.startsWith('/chat/') && pathname.endsWith('/key')) {
+		const handle = decodeURIComponent(pathname.split('/')[2]);
+		const keyData = chatKeysStorage.get(handle);
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify(keyData
+			? { chatPublicKey: keyData.chatPublicKey, encryptedChatPrivateKey: keyData.encryptedChatPrivateKey }
+			: { chatPublicKey: null }
+		));
+		return;
+	}
+
+	// POST /chat/:handle/register-key
+	if (req.method === 'POST' && pathname.startsWith('/chat/') && pathname.endsWith('/register-key')) {
+		const handle = decodeURIComponent(pathname.split('/')[2]);
+		const existing = chatKeysStorage.get(handle);
+		if (existing) {
+			res.writeHead(409, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ chatPublicKey: existing.chatPublicKey, encryptedChatPrivateKey: existing.encryptedChatPrivateKey }));
+			return;
+		}
+		let body = '';
+		req.on('data', chunk => { body += chunk; });
+		req.on('end', () => {
+			try {
+				const { chatPublicKey, encryptedChatPrivateKey } = JSON.parse(body);
+				if (!chatPublicKey || !encryptedChatPrivateKey) throw new Error('Missing fields');
+				chatKeysStorage.set(handle, { chatPublicKey, encryptedChatPrivateKey });
+				saveChatKeys();
+				res.writeHead(200, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ ok: true }));
+			} catch (e) {
+				res.writeHead(400, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid request' }));
+			}
+		});
+		return;
+	}
+
 	// Default response
 	console.log('404 Not Found');
 	res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -845,6 +926,7 @@ function loadPersistentStorage() {
 
 loadPersistentStorage();
 loadSeenPositions();
+loadChatKeys();
 
 function handleVerify(req) {
 	const authorization = req.headers.authorization;
@@ -1090,6 +1172,13 @@ function handleSendMessage(req, res, pathname) {
 			if (sendChannel && senderUserId !== sendChannel.adminUserId) {
 				res.writeHead(403, { 'Content-Type': 'application/json' });
 				res.end(JSON.stringify({ error: 'Not authorized to post in this channel' }));
+				return;
+			}
+
+			// Chat key signature check (skipped for channels — already guarded by adminUserId)
+			if (!sendChannel && !verifyChatSignature(chatHandle, messageData.encryptedTimestamp, messageData.chatSignature)) {
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid chat signature' }));
 				return;
 			}
 
@@ -1615,7 +1704,7 @@ function handleUploadComplete(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const completeData = JSON.parse(body);
-			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta, stickerId, replyTo, keyFp } = completeData;
+			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta, stickerId, replyTo, keyFp, chatSignature } = completeData;
 			const [senderUserId] = (req.headers.authorization || '').split(':');
 
 			const session = uploadSessions.get(sessionId);
@@ -1662,6 +1751,14 @@ function handleUploadComplete(req, res, pathname) {
 				console.warn('Failed to decrypt timestamp:', err);
 				res.writeHead(400, { 'Content-Type': 'application/json' });
 				res.end(JSON.stringify({ error: 'Invalid encrypted timestamp' }));
+				return;
+			}
+
+			// Chat key signature check
+			const uploadChannel = CHANNEL_MAP.get(chatHandle);
+			if (!uploadChannel && !verifyChatSignature(chatHandle, encryptedTimestamp, chatSignature)) {
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Invalid chat signature' }));
 				return;
 			}
 

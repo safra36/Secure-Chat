@@ -1165,6 +1165,14 @@
             flex-shrink: 0;
             color: var(--text-secondary);
         }
+        .chat-lock-icon { display:none; flex-shrink:0; }
+        .chat-lock-icon.locked { display:inline-flex; color:#4ade80; }
+        .chat-lock-icon.locked-out { display:inline-flex; color:#f87171; }
+        .chat-name-lock-wrap { display:flex; align-items:center; gap:3px; min-width:0; overflow:hidden; }
+        .chat-name-lock-wrap .chat-name { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .chat-item-lock { display:inline-flex; flex-shrink:0; color:#4ade80; opacity:0.85; }
+        .chat-item-lock.locked-out { color:#f87171; }
+        .chat-locked-banner { display:none; padding:10px 16px; background:rgba(248,113,113,0.1); border-top:1px solid rgba(248,113,113,0.25); color:#f87171; font-size:13px; text-align:center; flex-shrink:0; }
         .chat-header .chat-name-row {
             display: flex;
             align-items: center;
@@ -4993,6 +5001,9 @@
                         <svg class="e2e-lock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" title="End-to-end encrypted">
                             <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
                         </svg>
+                        <span id="chat-lock-icon" class="chat-lock-icon" title="">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:11px;height:11px"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+                        </span>
                     </div>
                     <div class="chat-status">
                         <span class="status-dot" id="status-dot" aria-hidden="true"></span>
@@ -5066,6 +5077,8 @@
             </svg>
             <span id="unread-message-count" class="unread-message-count" style="display: none;"></span>
         </button>
+
+        <div id="chat-locked-banner" class="chat-locked-banner">🔒 This chat is locked to a different password</div>
 
         <div class="input-area">
             <div id="image-preview" class="image-preview"></div>
@@ -6372,7 +6385,7 @@
                 }
             }
 
-            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null, replyTo = null, keyFp = null) {
+            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null, replyTo = null, keyFp = null, chatSignature = null) {
                 try {
                     const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
                         method: 'POST',
@@ -6386,7 +6399,8 @@
                             encryptedMeta: encryptedMeta,
                             stickerId: stickerId,
                             replyTo: replyTo,
-                            keyFp: keyFp
+                            keyFp: keyFp,
+                            chatSignature: chatSignature
                         })
                     });
 
@@ -7509,6 +7523,23 @@
                     if (timeEl) timeEl.textContent = timeStr;
                     const lastMsgEl = chatItem.querySelector('.last-message');
                     if (lastMsgEl) lastMsgEl.textContent = chat.lastMessage || 'No messages yet';
+                    // Update lock indicator
+                    let lockEl = chatItem.querySelector('.chat-item-lock');
+                    if (chat.chatLocked) {
+                        if (!lockEl) {
+                            lockEl = document.createElement('span');
+                            lockEl.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:10px;height:10px"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+                            let wrap = chatItem.querySelector('.chat-name-lock-wrap');
+                            if (!wrap) {
+                                const nameEl = chatItem.querySelector('.chat-name');
+                                if (nameEl) { wrap = document.createElement('div'); wrap.className = 'chat-name-lock-wrap'; nameEl.parentNode.insertBefore(wrap, nameEl); wrap.appendChild(nameEl); }
+                            }
+                            if (wrap) wrap.appendChild(lockEl);
+                        }
+                        lockEl.className = `chat-item-lock${chat.chatLockedOut ? ' locked-out' : ''}`;
+                    } else if (lockEl) {
+                        lockEl.remove();
+                    }
                     let badge = chatItem.querySelector('.unread-badge');
                     if (unreadCount > 0) {
                         if (!badge) {
@@ -7529,11 +7560,13 @@
                     const unreadBadge = unreadCount > 0
                         ? `<div class="unread-badge">${unreadCount}</div>`
                         : '';
+                    const lockSvg = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:10px;height:10px"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>`;
+                    const lockBadge = chat.chatLocked ? `<span class="chat-item-lock${chat.chatLockedOut ? ' locked-out' : ''}">${lockSvg}</span>` : '';
                     chatItem.innerHTML = `
                         <div class="chat-avatar"></div>
                         <div class="chat-info">
                             <div class="chat-name-row">
-                                <div class="chat-name">${escapeHtml(displayLabel)}</div>
+                                <div class="chat-name-lock-wrap"><div class="chat-name">${escapeHtml(displayLabel)}</div>${lockBadge}</div>
                                 <div class="chat-time">${timeStr}</div>
                             </div>
                             <div class="chat-preview">
@@ -7704,6 +7737,8 @@
             if (!currentChat.keyFingerprint) {
                 currentChat.keyFingerprint = await getKeyFingerprint(currentChat.encryptionKey);
             }
+            updateChatLockUI();
+            currentChat._keyInitPromise = initChatKey(currentChat);
 
             closeAttachmentMenu();
 
@@ -10139,7 +10174,8 @@
                     encryptedName: await encryptMessage(userName, currentChat.encryptionKey),
                     content: "None",
                     encryptedTimestamp: encryptedTimestamp,
-                    keyFp: await getKeyFingerprint(currentChat.encryptionKey)
+                    keyFp: await getKeyFingerprint(currentChat.encryptionKey),
+                    chatSignature: await signWithChatKey(encryptedTimestamp)
                 };
 
                 try {
@@ -10335,7 +10371,8 @@
                     encryptedMeta,
                     null,
                     pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null,
-                    await getKeyFingerprint(currentChat.encryptionKey)
+                    await getKeyFingerprint(currentChat.encryptionKey),
+                    await signWithChatKey(encryptedTimestamp)
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
@@ -10488,7 +10525,8 @@
                     null,
                     null,
                     pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null,
-                    await getKeyFingerprint(currentChat.encryptionKey)
+                    await getKeyFingerprint(currentChat.encryptionKey),
+                    await signWithChatKey(encryptedTimestamp)
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
@@ -10630,7 +10668,8 @@
                     encryptedMeta,
                     null,
                     pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null,
-                    await getKeyFingerprint(currentChat.encryptionKey)
+                    await getKeyFingerprint(currentChat.encryptionKey),
+                    await signWithChatKey(encryptedTimestamp)
                 );
 
                 uploadSucceeded = true;
@@ -11078,6 +11117,112 @@
         }
 
         // Encryption functions
+        // ==================== CHAT KEY LOCKING ====================
+
+        const _keyInitializedChats = new Set();
+        async function initChatKey(chat) {
+            if (chat._channel || _keyInitializedChats.has(chat.handle)) return;
+            _keyInitializedChats.add(chat.handle);
+            try {
+                const resp = await authenticatedFetch(`/chat/${encodeURIComponent(chat.handle)}/key`);
+                if (!resp.ok) return;
+                const data = await resp.json();
+
+                if (data.chatPublicKey) {
+                    // Key registered — try to decrypt with our password
+                    try {
+                        const privKeyJwkStr = await decryptMessage(data.encryptedChatPrivateKey, chat.encryptionKey);
+                        const privKeyJwk = JSON.parse(privKeyJwkStr);
+                        chat.chatSigningKey = await crypto.subtle.importKey('jwk', privKeyJwk, { name: 'Ed25519' }, false, ['sign']);
+                        chat.chatPublicKey = data.chatPublicKey;
+                        chat.chatLocked = true;
+                        chat.chatLockedOut = false;
+                    } catch (e) {
+                        chat.chatLocked = true;
+                        chat.chatLockedOut = true;
+                        chat.chatSigningKey = null;
+                    }
+                } else {
+                    // No key yet — generate and register
+                    const keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']);
+                    const privKeyJwk = await crypto.subtle.exportKey('jwk', keyPair.privateKey);
+                    const encryptedPrivKey = await encryptMessage(JSON.stringify(privKeyJwk), chat.encryptionKey);
+                    const pubKeyBytes = await crypto.subtle.exportKey('raw', keyPair.publicKey);
+                    const pubKeyBase64 = btoa(String.fromCharCode(...new Uint8Array(pubKeyBytes)));
+
+                    const regResp = await authenticatedFetch(`/chat/${encodeURIComponent(chat.handle)}/register-key`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ chatPublicKey: pubKeyBase64, encryptedChatPrivateKey: encryptedPrivKey })
+                    });
+
+                    if (regResp.ok) {
+                        chat.chatSigningKey = keyPair.privateKey;
+                        chat.chatPublicKey = pubKeyBase64;
+                        chat.chatLocked = true;
+                        chat.chatLockedOut = false;
+                    } else if (regResp.status === 409) {
+                        // Race condition — someone else registered first
+                        const existing = await regResp.json();
+                        try {
+                            const privKeyJwkStr = await decryptMessage(existing.encryptedChatPrivateKey, chat.encryptionKey);
+                            const privKeyJwk = JSON.parse(privKeyJwkStr);
+                            chat.chatSigningKey = await crypto.subtle.importKey('jwk', privKeyJwk, { name: 'Ed25519' }, false, ['sign']);
+                            chat.chatPublicKey = existing.chatPublicKey;
+                            chat.chatLocked = true;
+                            chat.chatLockedOut = false;
+                        } catch (e) {
+                            chat.chatLocked = true;
+                            chat.chatLockedOut = true;
+                            chat.chatSigningKey = null;
+                        }
+                    }
+                }
+            } catch (e) {
+                console.warn('initChatKey failed:', e);
+                _keyInitializedChats.delete(chat.handle); // allow retry
+            }
+            if (currentChat && currentChat.handle === chat.handle) updateChatLockUI();
+            renderChatList();
+        }
+
+        async function signWithChatKey(encryptedTimestamp) {
+            if (!currentChat) return null;
+            if (currentChat._keyInitPromise) await currentChat._keyInitPromise;
+            if (!currentChat.chatSigningKey) return null;
+            try {
+                const data = new Uint8Array(atob(encryptedTimestamp).split('').map(c => c.charCodeAt(0)));
+                const sigBytes = await crypto.subtle.sign('Ed25519', currentChat.chatSigningKey, data);
+                return btoa(String.fromCharCode(...new Uint8Array(sigBytes)));
+            } catch (e) {
+                return null;
+            }
+        }
+
+        function updateChatLockUI() {
+            if (!currentChat) return;
+            const lockIcon = document.getElementById('chat-lock-icon');
+            const e2eLock = document.querySelector('.e2e-lock');
+            const lockedBanner = document.getElementById('chat-locked-banner');
+            const messageInput = document.getElementById('message-input');
+            if (currentChat.chatLocked && !currentChat.chatLockedOut) {
+                if (lockIcon) { lockIcon.className = 'chat-lock-icon locked'; lockIcon.title = 'Password-locked — verified'; }
+                if (e2eLock) e2eLock.style.display = 'none';
+                if (lockedBanner) lockedBanner.style.display = 'none';
+                if (messageInput) messageInput.disabled = false;
+            } else if (currentChat.chatLockedOut) {
+                if (lockIcon) { lockIcon.className = 'chat-lock-icon locked-out'; lockIcon.title = 'Wrong password — locked out'; }
+                if (e2eLock) e2eLock.style.display = 'none';
+                if (lockedBanner) lockedBanner.style.display = '';
+                if (messageInput) messageInput.disabled = true;
+            } else {
+                if (lockIcon) { lockIcon.className = 'chat-lock-icon'; }
+                if (e2eLock) e2eLock.style.display = '';
+                if (lockedBanner) lockedBanner.style.display = 'none';
+                if (messageInput) messageInput.disabled = false;
+            }
+        }
+
         const _keyFpCache = new Map();
         async function getKeyFingerprint(key) {
             if (_keyFpCache.has(key)) return _keyFpCache.get(key);
@@ -11434,7 +11579,7 @@
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
                 await ensureTimeSynced();
                 const encryptedTimestamp = await encryptTimestampWithServerKey(getSyncedServerTime());
-                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId, pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null, await getKeyFingerprint(currentChat.encryptionKey));
+                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId, pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null, await getKeyFingerprint(currentChat.encryptionKey), await signWithChatKey(encryptedTimestamp));
             } catch (err) {
                 window.reportClientError(err, 'send sticker');
                 showToast('Failed to send sticker', 'error');
