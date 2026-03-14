@@ -30,6 +30,15 @@ class ContentCacheDB {
             request.onsuccess = (event) => {
                 this.db = event.target.result;
                 this.isInitialized = true;
+                this.db.onclose = () => {
+                    this.db = null;
+                    this.isInitialized = false;
+                };
+                this.db.onversionchange = () => {
+                    this.db.close();
+                    this.db = null;
+                    this.isInitialized = false;
+                };
                 console.log('✅ IndexedDB initialized successfully');
                 resolve();
             };
