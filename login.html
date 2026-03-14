@@ -1841,6 +1841,31 @@
             white-space: pre-wrap;
         }
 
+        .msg-link {
+            text-decoration: underline;
+            text-decoration-style: dotted;
+            text-underline-offset: 3px;
+            font-weight: 600;
+            transition: color 0.15s;
+        }
+        .message.own .msg-link {
+            color: rgba(255,255,255,0.95);
+            text-decoration-color: rgba(255,255,255,0.5);
+        }
+        .message.own .msg-link:hover {
+            color: #fff;
+            text-decoration-style: solid;
+            text-decoration-color: #fff;
+        }
+        .message.received .msg-link {
+            color: var(--accent-light);
+            text-decoration-color: var(--accent);
+        }
+        .message.received .msg-link:hover {
+            color: #fff;
+            text-decoration-style: solid;
+        }
+
         .message-image {
             max-width: 220px;
             max-height: 220px;
@@ -8219,7 +8244,7 @@
             if (!msgGroup) return;
             const contentEl = msgGroup.querySelector('.message-content');
             if (contentEl && plaintext !== undefined) {
-                contentEl.innerHTML = escapeHtml(plaintext);
+                contentEl.innerHTML = linkifyText(plaintext);
             }
             if (newEncryptedContent) {
                 msgGroup.dataset.encryptedContent = newEncryptedContent;
@@ -8828,7 +8853,7 @@
                         const decrypted = await decryptMessage(message.encryptedContent, encryptionKey);
                         msgDir = detectDir(decrypted);
                         const isLong = decrypted.length > 600;
-                        contentHtml = `<div class="message-content${isLong ? ' msg-collapsed' : ''}">${escapeHtml(decrypted)}</div>`;
+                        contentHtml = `<div class="message-content${isLong ? ' msg-collapsed' : ''}">${linkifyText(decrypted)}</div>`;
                     }
                 } catch (err) {
                     if (err instanceof DOMException && err.name === 'OperationError') { renderedMessageIds.add(message.id); continue; }
@@ -9155,6 +9180,14 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function linkifyText(text) {
+            const escaped = escapeHtml(text);
+            return escaped.replace(
+                /https?:\/\/[^\s<>"']+/g,
+                url => `<a href="${url}" target="_blank" rel="noopener noreferrer" class="msg-link">${url} ↗</a>`
+            );
         }
 
         function handleInputChange() {
