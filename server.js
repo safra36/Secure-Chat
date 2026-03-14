@@ -913,6 +913,7 @@ function serializeMessageForClient(message, requestingUserId) {
 		encryptedContent: message.encryptedContent,
 		encryptedTimestamp: message.encryptedTimestamp,
 		type: message.type,
+		keyFp: message.keyFp || null,
 		stickerId: message.stickerId || null,
 		replyTo: message.replyTo || null,
 		isEdited: (message.edits || []).length > 0,
@@ -1113,6 +1114,7 @@ function handleSendMessage(req, res, pathname) {
 				encryptedTimestamp: messageData.encryptedTimestamp,
 				type: messageData.type || 'text',
 				id: messageId,
+				keyFp: messageData.keyFp || null,
 				senderUserId,          // stored server-side only, never sent to clients
 				reactions: {},         // encryptedEmoji → { userIds: [], encryptedUserNames: {} }
 				edits: [],             // [{ encryptedEditTimestamp }]
@@ -1613,7 +1615,7 @@ function handleUploadComplete(req, res, pathname) {
 	req.on('end', () => {
 		try {
 			const completeData = JSON.parse(body);
-			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta, stickerId, replyTo } = completeData;
+			const { sessionId, encryptedName, encryptedTimestamp, messageType, isCompressed, encryptedMeta, stickerId, replyTo, keyFp } = completeData;
 			const [senderUserId] = (req.headers.authorization || '').split(':');
 
 			const session = uploadSessions.get(sessionId);
@@ -1671,6 +1673,7 @@ function handleUploadComplete(req, res, pathname) {
 				encryptedTimestamp: encryptedTimestamp, // Encrypted timestamp for consistency
 				type: messageType || 'file',
 				id: encryptedTimestamp, // Use encrypted timestamp as ID
+				keyFp: keyFp || null,
 				encryptedMeta: encryptedMeta || null,
 				stickerId: stickerId || null,
 				replyTo: replyTo || null,

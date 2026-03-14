@@ -6372,7 +6372,7 @@
                 }
             }
 
-            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null, replyTo = null) {
+            async finalize(chatHandle, encryptedName, encryptedTimestamp, messageType, isCompressed = false, encryptedMeta = null, stickerId = null, replyTo = null, keyFp = null) {
                 try {
                     const response = await authenticatedFetch(`/upload-complete/${chatHandle}`, {
                         method: 'POST',
@@ -6385,7 +6385,8 @@
                             isCompressed: isCompressed,
                             encryptedMeta: encryptedMeta,
                             stickerId: stickerId,
-                            replyTo: replyTo
+                            replyTo: replyTo,
+                            keyFp: keyFp
                         })
                     });
 
@@ -7700,6 +7701,9 @@
 
             currentChat = chats.find(chat => chat.handle === handle);
             if (!currentChat) return;
+            if (!currentChat.keyFingerprint) {
+                currentChat.keyFingerprint = await getKeyFingerprint(currentChat.encryptionKey);
+            }
 
             closeAttachmentMenu();
 
@@ -7943,7 +7947,7 @@
             const users = await Promise.all(decodedHeaderValue.split(',').map(async (userStr) => {
                 const [encryptedUserName, encryptedStatus, encryptedTyping, encLastSeen, encLastMessage] = userStr.split('|');
                 let decryptedName = null, isOnline = false, typingState = 0, lastSeen = null, lastMessage = null;
-                try { decryptedName = await decryptMessage(encryptedUserName, currentChat.encryptionKey); } catch (err) { window.reportClientError(err, 'decrypt heartbeat username'); }
+                try { decryptedName = await decryptMessage(encryptedUserName, currentChat.encryptionKey); } catch (err) { if (!(err instanceof DOMException && err.name === 'OperationError')) window.reportClientError(err, 'decrypt heartbeat username'); }
                 try { isOnline = (await decryptServerTimestamp(encryptedStatus)) === 1; } catch {}
                 try { typingState = await decryptServerTimestamp(encryptedTyping); } catch {}
                 try { if (encLastSeen) lastSeen = await decryptServerTimestamp(encLastSeen); } catch {}
@@ -8514,7 +8518,9 @@
             const prependIds = [];
             const upgradeStubs = new Map();
 
+            const localFp = chatSnapshot.keyFingerprint;
             for (const message of messages) {
+                if (message.keyFp && localFp && message.keyFp !== localFp) { renderedMessageIds.add(message.id); continue; }
                 if (renderedMessageIds.has(message.id)) {
                     if (!prepend && optimisticIds.has(message.id)) {
                         // Optimistic stub → upgrade to full message.
@@ -8578,6 +8584,7 @@
                 try {
                     senderName = await decryptMessage(message.encryptedName, encryptionKey);
                 } catch (err) {
+                    if (err instanceof DOMException && err.name === 'OperationError') { renderedMessageIds.add(message.id); continue; }
                     window.reportClientError(err, 'decrypt sender name');
                     console.warn('Failed to decrypt sender name for message:', message.id);
                     senderName = 'Unknown';
@@ -8789,6 +8796,7 @@
                         contentHtml = `<div class="message-content${isLong ? ' msg-collapsed' : ''}">${escapeHtml(decrypted)}</div>`;
                     }
                 } catch (err) {
+                    if (err instanceof DOMException && err.name === 'OperationError') { renderedMessageIds.add(message.id); continue; }
                     window.reportClientError(err, 'decrypt message content');
                     // For deferred content, just show the download button
                     if (isVoice || isImage || isVideo || isAudio) {
@@ -10130,7 +10138,8 @@
                 const messageData = {
                     encryptedName: await encryptMessage(userName, currentChat.encryptionKey),
                     content: "None",
-                    encryptedTimestamp: encryptedTimestamp
+                    encryptedTimestamp: encryptedTimestamp,
+                    keyFp: await getKeyFingerprint(currentChat.encryptionKey)
                 };
 
                 try {
@@ -10325,7 +10334,8 @@
                     isCompressed,
                     encryptedMeta,
                     null,
-                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null
+                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null,
+                    await getKeyFingerprint(currentChat.encryptionKey)
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
@@ -10477,7 +10487,8 @@
                     isCompressed,
                     null,
                     null,
-                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null
+                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null,
+                    await getKeyFingerprint(currentChat.encryptionKey)
                 );
 
                 // UPLOAD SUCCESSFUL - Report immediately
@@ -10618,7 +10629,8 @@
                     isCompressed,
                     encryptedMeta,
                     null,
-                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null
+                    pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null,
+                    await getKeyFingerprint(currentChat.encryptionKey)
                 );
 
                 uploadSucceeded = true;
@@ -11066,6 +11078,15 @@
         }
 
         // Encryption functions
+        const _keyFpCache = new Map();
+        async function getKeyFingerprint(key) {
+            if (_keyFpCache.has(key)) return _keyFpCache.get(key);
+            const hash = await crypto.subtle.digest('SHA-256', padKey(key));
+            const fp = Array.from(new Uint8Array(hash)).slice(0, 4).map(b => b.toString(16).padStart(2, '0')).join('');
+            _keyFpCache.set(key, fp);
+            return fp;
+        }
+
         function padKey(keyStr) {
             const encoder = new TextEncoder();
             const data = encoder.encode(keyStr);
@@ -11243,7 +11264,7 @@
                     ciphertext
                 );
             } catch (err) {
-                window.reportClientError(err, 'decryptBinary inner');
+                if (!(err instanceof DOMException && err.name === 'OperationError')) window.reportClientError(err, 'decryptBinary inner');
                 throw err;
             }
         }
@@ -11413,7 +11434,7 @@
                 const encryptedName = await encryptMessage(userName, currentChat.encryptionKey);
                 await ensureTimeSynced();
                 const encryptedTimestamp = await encryptTimestampWithServerKey(getSyncedServerTime());
-                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId, pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null);
+                await uploader.finalize(currentChat.handle, encryptedName, encryptedTimestamp, 'sticker', false, null, sticker.stickerId, pendingReply ? { messageId: pendingReply.messageId, encryptedPreview: pendingReply.encryptedPreview, encryptedSenderName: pendingReply.encryptedSenderName } : null, await getKeyFingerprint(currentChat.encryptionKey));
             } catch (err) {
                 window.reportClientError(err, 'send sticker');
                 showToast('Failed to send sticker', 'error');
