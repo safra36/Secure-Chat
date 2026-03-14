@@ -317,6 +317,33 @@ if (!SERVER_PASSWRD) {
 
 console.log('✅ Password loaded successfully from external file');
 
+// ==================== CHANNELS / ADMIN ====================
+
+function _getChannelBasePath() {
+	try { if (require('node:sea').isSea()) return path.dirname(process.execPath); } catch (_) {}
+	return __dirname;
+}
+
+function loadAdminUserId() {
+	try {
+		const adminPath = path.join(_getChannelBasePath(), '.admin');
+		if (fs.existsSync(adminPath)) return fs.readFileSync(adminPath, 'utf8').trim() || null;
+	} catch (_) {}
+	return null;
+}
+
+const CHANNEL_ADMIN_ID = loadAdminUserId();
+if (CHANNEL_ADMIN_ID) console.log('✅ Channel admin loaded');
+else console.warn('⚠️  No .admin file — System News channel has no admin');
+
+const CHANNELS = [
+	{ handle: 'system-news', displayName: 'System News', type: 'broadcast', adminUserId: CHANNEL_ADMIN_ID, pinned: true },
+];
+const CHANNEL_MAP = new Map(CHANNELS.map(c => [c.handle, c]));
+
+// Per-message view counts: messageId → Set<userId>
+const channelViewCounts = new Map();
+
 // HMAC-signed build ID: clients verify this to prevent forged reload headers
 const _buildHmac = crypto.createHmac('sha256', SERVER_PASSWRD).update(SERVER_BUILD_ID).digest('base64');
 const SERVER_BUILD_HEADER = `${SERVER_BUILD_ID}.${_buildHmac}`;
@@ -665,6 +692,18 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	// GET /channels
+	if (req.method === 'GET' && pathname === '/channels') {
+		handleGetChannels(req, res);
+		return;
+	}
+
+	// POST /channels/:handle/view
+	if (req.method === 'POST' && pathname.startsWith('/channels/') && pathname.endsWith('/view')) {
+		handleChannelView(req, res, pathname);
+		return;
+	}
+
 	// Default response
 	console.log('404 Not Found');
 	res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -867,6 +906,7 @@ function serializeMessageForClient(message, requestingUserId) {
 	const colorToken = crypto.createHash('sha256')
 		.update(message.senderUserId + requestingUserId)
 		.digest('hex').slice(0, 16);
+	const vcSet = channelViewCounts.get(message.id);
 	return {
 		id: message.id,
 		encryptedName: message.encryptedName,
@@ -877,7 +917,8 @@ function serializeMessageForClient(message, requestingUserId) {
 		replyTo: message.replyTo || null,
 		isEdited: (message.edits || []).length > 0,
 		reactions: transformedReactions,
-		colorToken
+		colorToken,
+		viewCount: vcSet ? vcSet.size : null
 	};
 }
 
@@ -1043,6 +1084,14 @@ function handleSendMessage(req, res, pathname) {
 			const authorization = req.headers.authorization || '';
 			const [senderUserId] = authorization.split(':');
 
+			// Channel guard — only admin may post
+			const sendChannel = CHANNEL_MAP.get(chatHandle);
+			if (sendChannel && senderUserId !== sendChannel.adminUserId) {
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Not authorized to post in this channel' }));
+				return;
+			}
+
 			// Rate limit check
 			const rateLimitKey = `${senderUserId}:${chatHandle}`;
 			const now = Date.now();
@@ -1132,6 +1181,14 @@ function handleHeartbeat(req, res, pathname) {
 		console.log('Chat handle is required');
 		res.writeHead(400, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	// Channels have no presence — return immediately to prevent viewer exposure
+	if (CHANNEL_MAP.has(chatHandle)) {
+		req.resume();
+		res.writeHead(204);
+		res.end();
 		return;
 	}
 
@@ -1290,6 +1347,12 @@ function handleReaction(req, res, pathname) {
 	req.on('data', chunk => { body += chunk.toString(); });
 	req.on('end', () => {
 		try {
+			// Channel guard — reactions disabled in channels
+			if (CHANNEL_MAP.has(chatHandle)) {
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Reactions are not supported in channels' }));
+				return;
+			}
 			const { encryptedEmoji, encryptedUserName } = JSON.parse(body);
 			if (!encryptedEmoji) {
 				res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1370,6 +1433,13 @@ function handleEditMessage(req, res, pathname) {
 	req.on('data', chunk => { body += chunk.toString(); });
 	req.on('end', () => {
 		try {
+			// Channel guard — only admin may edit
+			const editChannel = CHANNEL_MAP.get(chatHandle);
+			if (editChannel && userId !== editChannel.adminUserId) {
+				res.writeHead(403, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Not authorized to edit in this channel' }));
+				return;
+			}
 			const { encryptedContent, encryptedEditTimestamp } = JSON.parse(body);
 
 			const chatMessages = messagesStorage.get(chatHandle) || [];
@@ -1425,6 +1495,15 @@ function handleUploadChunk(req, res, pathname) {
 		console.log('Chat handle is required');
 		res.writeHead(400, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Chat handle is required' }));
+		return;
+	}
+
+	// Channel guard — only admin may upload
+	const [chunkUserId] = (req.headers.authorization || '').split(':');
+	const uploadChannel = CHANNEL_MAP.get(chatHandle);
+	if (uploadChannel && chunkUserId !== uploadChannel.adminUserId) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Not authorized to post in this channel' }));
 		return;
 	}
 
@@ -2745,6 +2824,50 @@ function handleTimeSync(req, res) {
 	}
 }
 
+// ==================== CHANNEL HANDLERS ====================
+
+function handleGetChannels(req, res) {
+	const payload = CHANNELS.map(c => ({
+		handle: c.handle,
+		displayName: c.displayName,
+		type: c.type,
+		pinned: c.pinned,
+		adminUserId: c.adminUserId,
+	}));
+	const encrypted = encryption.encryptBlockMessage(JSON.stringify(payload), SERVER_PASSWRD);
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ encrypted }));
+}
+
+function handleChannelView(req, res, pathname) {
+	const parts = pathname.split('/'); // ['', 'channels', handle, 'view']
+	const channelHandle = parts[2];
+	if (!CHANNEL_MAP.has(channelHandle)) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Channel not found' }));
+		return;
+	}
+	const [viewUserId] = (req.headers.authorization || '').split(':');
+	let body = '';
+	req.on('data', chunk => { body += chunk.toString(); });
+	req.on('end', () => {
+		try {
+			const { messageIds } = JSON.parse(body);
+			if (Array.isArray(messageIds) && viewUserId) {
+				for (const msgId of messageIds) {
+					if (!channelViewCounts.has(msgId)) channelViewCounts.set(msgId, new Set());
+					channelViewCounts.get(msgId).add(viewUserId);
+				}
+			}
+			res.writeHead(204);
+			res.end();
+		} catch (e) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid data' }));
+		}
+	});
+}
+
 // ==================== VOICE CALL HANDLERS ====================
 
 function handleCallInitiate(req, res, pathname) {
@@ -2758,6 +2881,14 @@ function handleCallInitiate(req, res, pathname) {
 	}
 
 	const [callerId] = req.headers.authorization.split(':');
+
+	// Channel guard — only admin may initiate calls
+	const callChannel = CHANNEL_MAP.get(chatHandle);
+	if (callChannel && callerId !== callChannel.adminUserId) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Calls are not supported in this channel' }));
+		return;
+	}
 
 	// Check if there's already an active/ringing call in this chat
 	const existingCallId = pendingCalls.get(chatHandle);

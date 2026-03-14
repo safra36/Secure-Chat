@@ -6676,6 +6676,65 @@
             }
         }
 
+        // Decrypt an AES-256-GCM blob encrypted with the server password
+        async function decryptBlockWithServerKey(encryptedBase64) {
+            const serverPassword = getServerEncryptionKey();
+            if (!serverPassword) throw new Error('No server password');
+            const data = new Uint8Array(atob(encryptedBase64).split('').map(c => c.charCodeAt(0)));
+            const iv = data.slice(0, 12);
+            const authTag = data.slice(-16);
+            const encrypted = data.slice(12, -16);
+            const cryptoKey = await crypto.subtle.importKey('raw', padKey(serverPassword), { name: 'AES-GCM' }, false, ['decrypt']);
+            const combined = new Uint8Array(encrypted.length + authTag.length);
+            combined.set(encrypted, 0);
+            combined.set(authTag, encrypted.length);
+            const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, combined);
+            return new TextDecoder().decode(decrypted);
+        }
+
+        // Fetch channel list and merge into chats (channels are never stored to localStorage)
+        async function fetchChannels() {
+            try {
+                const serverPassword = getServerEncryptionKey();
+                if (!serverPassword) return;
+                const response = await authenticatedFetch('/channels', { method: 'GET', headers: { 'Content-Type': 'application/json' } });
+                if (!response.ok) return;
+                const { encrypted } = await response.json();
+                const decrypted = await decryptBlockWithServerKey(encrypted);
+                const channels = JSON.parse(decrypted);
+                const userId = localStorage.getItem('userId');
+                chats = chats.filter(c => !c._channel);
+                for (const ch of [...channels].reverse()) {
+                    chats.unshift({
+                        handle: ch.handle,
+                        displayName: ch.displayName,
+                        encryptionKey: serverPassword,
+                        _channel: true,
+                        _pinned: ch.pinned,
+                        _canPost: ch.adminUserId === userId,
+                        lastMessage: '',
+                        lastMessageTime: null,
+                        unreadCount: 0,
+                    });
+                }
+            } catch (e) {
+                console.warn('fetchChannels failed:', e);
+            }
+        }
+
+        // Post viewed message IDs to the channel view endpoint
+        async function postChannelViews(handle) {
+            try {
+                const messageIds = Array.from(renderedMessageIds);
+                if (!messageIds.length) return;
+                await authenticatedFetch(`/channels/${handle}/view`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ messageIds })
+                });
+            } catch (e) { /* silent */ }
+        }
+
         // Sync time with server
         async function syncServerTime() {
             try {
@@ -7383,10 +7442,11 @@
             showChatList();
         }
 
-        function showChatList() {
+        async function showChatList() {
             closeAttachmentMenu();
             setupContainer.style.display = 'none';
             chatListContainer.style.display = 'flex';
+            await fetchChannels();
             renderChatList();
             startChatListPolling();
         }
@@ -7409,8 +7469,10 @@
                 return;
             }
 
-            // Sort by last message time (most recent first)
+            // Sort: pinned channels first, then by last message time
             filteredChats.sort((a, b) => {
+                if (a._pinned && !b._pinned) return -1;
+                if (!a._pinned && b._pinned) return 1;
                 const timeA = new Date(a.lastMessageTime || 0);
                 const timeB = new Date(b.lastMessageTime || 0);
                 return timeB - timeA;
@@ -7462,6 +7524,7 @@
                     chatItem = document.createElement('div');
                     chatItem.className = 'chat-item';
                     chatItem.dataset.handle = chat.handle;
+                    const displayLabel = chat.displayName || chat.handle;
                     const unreadBadge = unreadCount > 0
                         ? `<div class="unread-badge">${unreadCount}</div>`
                         : '';
@@ -7469,7 +7532,7 @@
                         <div class="chat-avatar"></div>
                         <div class="chat-info">
                             <div class="chat-name-row">
-                                <div class="chat-name">${escapeHtml(chat.handle)}</div>
+                                <div class="chat-name">${escapeHtml(displayLabel)}</div>
                                 <div class="chat-time">${timeStr}</div>
                             </div>
                             <div class="chat-preview">
@@ -7478,12 +7541,19 @@
                             </div>
                         </div>
                     `;
-                    chatItem.querySelector('.chat-avatar').textContent = avatarInitial;
-                    const deleteBtn = document.createElement('button');
-                    deleteBtn.className = 'delete-btn';
-                    deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-                    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteChat(chat.handle); });
-                    chatItem.appendChild(deleteBtn);
+                    const avatarEl = chatItem.querySelector('.chat-avatar');
+                    if (chat._channel) {
+                        avatarEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
+                    } else {
+                        avatarEl.textContent = avatarInitial;
+                    }
+                    if (!chat._channel) {
+                        const deleteBtn = document.createElement('button');
+                        deleteBtn.className = 'delete-btn';
+                        deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
+                        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteChat(chat.handle); });
+                        chatItem.appendChild(deleteBtn);
+                    }
                     chatItem.addEventListener('click', () => openChat(chat.handle));
                 }
 
@@ -7558,6 +7628,8 @@
         }
 
         function deleteChat(handle) {
+            const chat = chats.find(c => c.handle === handle);
+            if (chat && chat._channel) return;
             if (!confirm(`Delete chat "${handle}"? This cannot be undone.`)) {
                 return;
             }
@@ -7645,8 +7717,43 @@
             chatListContainer.style.display = 'none';
             chatContainer.style.display = 'flex';
 
-            chatName.textContent = currentChat.handle;
-            chatAvatar.textContent = currentChat.handle.charAt(0).toUpperCase();
+            const displayLabel = currentChat.displayName || currentChat.handle;
+            chatName.textContent = displayLabel;
+            if (currentChat._channel) {
+                chatAvatar.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/></svg>';
+            } else {
+                chatAvatar.textContent = currentChat.handle.charAt(0).toUpperCase();
+            }
+
+            // Channel UI: hide presence elements, show/hide input
+            const chatStatusEl = document.querySelector('.chat-status');
+            const callBtn = document.getElementById('call-btn');
+            let channelBanner = document.getElementById('channel-readonly-banner');
+            const inputAreaEl = document.querySelector('.input-area');
+            if (currentChat._channel) {
+                if (chatStatusEl) chatStatusEl.style.display = 'none';
+                if (callBtn) callBtn.style.display = currentChat._canPost ? '' : 'none';
+                if (!currentChat._canPost) {
+                    if (inputAreaEl) inputAreaEl.style.display = 'none';
+                    if (!channelBanner) {
+                        channelBanner = document.createElement('div');
+                        channelBanner.id = 'channel-readonly-banner';
+                        channelBanner.style.cssText = 'padding:12px 16px;text-align:center;color:var(--text-muted);font-size:13px;border-top:1px solid var(--border);flex-shrink:0;';
+                        channelBanner.textContent = `${displayLabel} — read only`;
+                        if (inputAreaEl) inputAreaEl.parentNode.insertBefore(channelBanner, inputAreaEl);
+                    } else {
+                        channelBanner.style.display = '';
+                    }
+                } else {
+                    if (inputAreaEl) inputAreaEl.style.display = '';
+                    if (channelBanner) channelBanner.style.display = 'none';
+                }
+            } else {
+                if (chatStatusEl) chatStatusEl.style.display = '';
+                if (callBtn) callBtn.style.display = '';
+                if (inputAreaEl) inputAreaEl.style.display = '';
+                if (channelBanner) channelBanner.style.display = 'none';
+            }
 
             statusDot.className = 'status-dot';
             statusText.textContent = 'Connecting...';
@@ -7704,7 +7811,12 @@
             requestAnimationFrame(() => scrollToBottom(false));
 
             startPolling();
-            startHeartbeat();
+            if (!currentChat._channel) {
+                startHeartbeat();
+            }
+            if (currentChat._channel) {
+                setTimeout(() => { if (currentChat) postChannelViews(currentChat.handle); }, 600);
+            }
         }
 
         function backToChatList() {
@@ -7850,6 +7962,7 @@
         }
 
         function updateConnectionStatus() {
+            if (currentChat && currentChat._channel) return;
             if (connectionStatus === 'connected') {
                 statusDot.className = 'status-dot connected';
                 statusText.textContent = 'Connected';
@@ -8800,6 +8913,13 @@
                     readStatus.textContent = '✓';
                     bubbleMeta.appendChild(readStatus);
                 }
+                if (currentChat && currentChat._channel && message.viewCount !== null && message.viewCount !== undefined) {
+                    const viewEl = document.createElement('span');
+                    viewEl.className = 'view-count';
+                    viewEl.title = `${message.viewCount} view${message.viewCount !== 1 ? 's' : ''}`;
+                    viewEl.textContent = `👁 ${message.viewCount}`;
+                    bubbleMeta.appendChild(viewEl);
+                }
                 messageBubble.appendChild(bubbleMeta);
                 
                 // Action toolbar (react, reply, edit for own) — lives inside the bubble
@@ -8826,9 +8946,13 @@
                     // Encrypt the preview and sender name with chat key for the reply context
                     let encPrev, encSender;
                     try {
-                        const preview = (typeof contentHtml === 'string'
-                            ? ((() => { const d = document.createElement('div'); d.innerHTML = contentHtml; return d.textContent; })())
-                            : '[media]').slice(0, 80);
+                        // Read from DOM so edited messages show current content, not stale closure
+                        const contentEl = messageElement.querySelector('.message-content');
+                        const preview = (contentEl
+                            ? contentEl.textContent
+                            : (typeof contentHtml === 'string'
+                                ? ((() => { const d = document.createElement('div'); d.innerHTML = contentHtml; return d.textContent; })())
+                                : '[media]')).slice(0, 80);
                         encPrev = await encryptMessage(preview, currentChat.encryptionKey);
                         encSender = await encryptMessage(senderName, currentChat.encryptionKey);
                     } catch (e) { return; }
@@ -10642,7 +10766,7 @@
 
         function saveChats() {
             try {
-                setItemWithEviction('chats', JSON.stringify(chats));
+                setItemWithEviction('chats', JSON.stringify(chats.filter(c => !c._channel)));
             } catch (error) {
                 window.reportClientError(error, 'save chats');
                 console.error('Failed to save chats:', error);
