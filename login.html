@@ -1188,9 +1188,10 @@
             background: rgba(0,0,0,0.5);
             z-index: 900;
             opacity: 0;
+            pointer-events: none;
             transition: opacity 0.25s ease;
         }
-        .activity-overlay.visible { opacity: 1; }
+        .activity-overlay.visible { opacity: 1; pointer-events: auto; }
         .activity-sheet {
             position: fixed;
             bottom: 0;
