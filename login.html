@@ -13486,7 +13486,6 @@
                 audioElement: new Audio(),
                 audioQueue: [],
                 lastSeq: -1,
-                pollInterval: null,
                 pollInFlight: false,
                 sourceBufferReady: true,
                 abortController: new AbortController()
@@ -13516,7 +13515,6 @@
             const pipeline = remoteAudioPipelines.get(userId);
             if (!pipeline) return;
 
-            if (pipeline.pollInterval) clearInterval(pipeline.pollInterval);
             if (pipeline.abortController) pipeline.abortController.abort();
 
             if (pipeline.audioElement) {
@@ -13650,7 +13648,6 @@
                 videoElement: videoEl,
                 videoQueue: [],
                 lastSeq: -1,
-                pollInterval: null,
                 pollInFlight: false,
                 sourceBufferReady: true,
                 abortController: new AbortController(),
@@ -13681,7 +13678,6 @@
             const pipeline = remoteVideoPipelines.get(userId);
             if (!pipeline) return;
 
-            if (pipeline.pollInterval) clearInterval(pipeline.pollInterval);
             if (pipeline.abortController) pipeline.abortController.abort();
 
             if (pipeline.videoElement) {
@@ -13704,14 +13700,15 @@
             if (!pipeline) return;
 
             const pollVideo = async () => {
-                if (pipeline.pollInFlight || !activeCallSession || callState !== 'ACTIVE') return;
+                if (pipeline.abortController.signal.aborted || !activeCallSession || callState !== 'ACTIVE') return;
+                if (pipeline.pollInFlight) return;
 
                 pipeline.pollInFlight = true;
                 const currentSeq = pipeline.lastSeq;
 
                 try {
                     const resp = await authenticatedFetch(
-                        `/call/video/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?fromUserId=${encodeURIComponent(userId)}&afterSeq=${currentSeq}&maxWaitMs=100`,
+                        `/call/video/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?fromUserId=${encodeURIComponent(userId)}&afterSeq=${currentSeq}&maxWaitMs=600`,
                         { method: 'GET', signal: pipeline.abortController.signal }
                     );
 
@@ -13741,11 +13738,11 @@
                     if (e.name !== 'AbortError') window.reportClientError(e, 'remote video poll');
                 } finally {
                     pipeline.pollInFlight = false;
+                    pollVideo();
                 }
             };
 
             pollVideo();
-            pipeline.pollInterval = setInterval(pollVideo, 300);
         }
 
         function enqueueRemoteVideo(userId, decryptedArrayBuffer) {
@@ -13797,18 +13794,18 @@
             if (!pipeline) return;
 
             const pollAudio = async () => {
-                if (pipeline.pollInFlight || !activeCallSession || callState !== 'ACTIVE') return;
+                if (pipeline.abortController.signal.aborted || !activeCallSession || callState !== 'ACTIVE') return;
+                if (pipeline.pollInFlight) return;
 
                 pipeline.pollInFlight = true;
                 const currentSeq = pipeline.lastSeq;
 
                 try {
                     const resp = await authenticatedFetch(
-                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?fromUserId=${encodeURIComponent(userId)}&afterSeq=${currentSeq}&maxWaitMs=500`,
+                        `/call/audio/${activeCallSession.chatHandle}/${activeCallSession.callSessionId}?fromUserId=${encodeURIComponent(userId)}&afterSeq=${currentSeq}&maxWaitMs=400`,
                         { method: 'GET', signal: pipeline.abortController.signal }
                     );
 
-                    // Discard if this pipeline was replaced while request was in-flight
                     if (remoteAudioPipelines.get(userId) !== pipeline) return;
 
                     if (resp.status === 200) {
@@ -13824,7 +13821,6 @@
                             pipeline.lastSeq = data.seq;
                             try {
                                 const decrypted = await decryptBinary(data.audioData, currentChat.encryptionKey);
-                                // Guard again after async decrypt
                                 if (remoteAudioPipelines.get(userId) === pipeline) {
                                     enqueueRemoteAudio(userId, decrypted);
                                 }
@@ -13837,11 +13833,11 @@
                     if (e.name !== 'AbortError') window.reportClientError(e, 'remote audio poll');
                 } finally {
                     pipeline.pollInFlight = false;
+                    pollAudio();
                 }
             };
 
             pollAudio();
-            pipeline.pollInterval = setInterval(pollAudio, 500);
         }
 
         function enqueueRemoteAudio(userId, decryptedArrayBuffer) {
