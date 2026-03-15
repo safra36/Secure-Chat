@@ -119,12 +119,14 @@ const SERVER_BUILD_ID = Date.now().toString();
 // ==================== VOICE CALL STORAGE ====================
 const activeCalls = new Map();       // callSessionId -> CallSession
 const callAudioBuffers = new Map();  // callSessionId -> Map<userId, { chunks: [], seq: 0, initChunk: null }>
+const callVideoBuffers = new Map();  // callSessionId -> Map<userId, { chunks: [], seq: 0, initChunk: null }>
 const pendingCalls = new Map();      // chatHandle -> callSessionId
 
 // Voice call constants
 const CALL_RING_TIMEOUT = 30000;     // 30s to answer
 const CALL_MAX_DURATION = 7200000;   // 2h max
 const CALL_AUDIO_BUFFER_SIZE = 20;   // Keep last 20 chunks per user (circular)
+const CALL_VIDEO_BUFFER_SIZE = 50;   // Keep last 50 video chunks per user (circular)
 const CALL_MAX_PARTICIPANTS = 10;    // Max participants per call
 const CALL_HEARTBEAT_TIMEOUT = 30000; // Evict participant after 30s without heartbeat
 
@@ -294,6 +296,9 @@ setInterval(() => {
 					call.lastHeartbeat.delete(uid);
 					const buffers = callAudioBuffers.get(callId);
 					if (buffers) buffers.delete(uid);
+					const vBuffers = callVideoBuffers.get(callId);
+					if (vBuffers) vBuffers.delete(uid);
+					if (call.videoParticipants) call.videoParticipants = call.videoParticipants.filter(p => p !== uid);
 					console.log(`[CALL] Evicted stale participant ${uid} from call ${callId}`);
 				}
 				if (call.participants.length === 0) {
@@ -305,6 +310,7 @@ setInterval(() => {
 		} else if (call.status === 'ENDED' && now - call.endedAt > 30000) {
 			activeCalls.delete(callId);
 			callAudioBuffers.delete(callId);
+			callVideoBuffers.delete(callId);
 			pendingCalls.delete(call.chatHandle);
 		}
 	}
@@ -731,6 +737,18 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	// GET /call/audio/{chatHandle}/{callId}
 	if (req.method === 'GET' && pathname.startsWith('/call/audio/')) {
 		handleCallReceiveAudio(req, res, pathname);
+		return;
+	}
+
+	// POST /call/video/{chatHandle}/{callId}
+	if (req.method === 'POST' && pathname.startsWith('/call/video/')) {
+		handleCallSendVideo(req, res, pathname);
+		return;
+	}
+
+	// GET /call/video/{chatHandle}/{callId}
+	if (req.method === 'GET' && pathname.startsWith('/call/video/')) {
+		handleCallReceiveVideo(req, res, pathname);
 		return;
 	}
 
@@ -3017,6 +3035,8 @@ function handleCallInitiate(req, res, pathname) {
 
 	// Initialize audio buffer for initiator
 	callAudioBuffers.set(callSessionId, new Map([[callerId, { chunks: [], seq: 0, initChunk: null }]]));
+	callVideoBuffers.set(callSessionId, new Map());
+	callSession.videoParticipants = [];
 
 	activeCalls.set(callSessionId, callSession);
 	pendingCalls.set(chatHandle, callSessionId);
@@ -3057,7 +3077,8 @@ function handleCallPoll(req, res, pathname) {
 		status: call.status,
 		initiatorId: call.initiatorId,
 		participants: call.participants,
-		isParticipant: call.participants.includes(userId)
+		isParticipant: call.participants.includes(userId),
+		videoParticipants: call.videoParticipants || []
 	}));
 }
 
@@ -3106,6 +3127,9 @@ function handleCallJoin(req, res, pathname) {
 	// Initialize audio buffer for this participant
 	const buffers = callAudioBuffers.get(callId);
 	if (buffers) buffers.set(userId, { chunks: [], seq: 0, initChunk: null });
+
+	const vBuffers = callVideoBuffers.get(callId);
+	if (vBuffers && !vBuffers.has(userId)) vBuffers.set(userId, { chunks: [], seq: 0, initChunk: null });
 
 	res.writeHead(200, { 'Content-Type': 'application/json' });
 	res.end(JSON.stringify({ callSessionId: callId, status: call.status, participants: call.participants }));
@@ -3159,6 +3183,9 @@ function handleCallLeave(req, res, pathname) {
 	// Clean up this user's audio buffer
 	const buffers = callAudioBuffers.get(callId);
 	if (buffers) buffers.delete(userId);
+	const vBuffers = callVideoBuffers.get(callId);
+	if (vBuffers) vBuffers.delete(userId);
+	if (call.videoParticipants) call.videoParticipants = call.videoParticipants.filter(p => p !== userId);
 
 	if (call.participants.length === 0) {
 		call.status = 'ENDED';
@@ -3372,6 +3399,194 @@ function handleCallReceiveAudio(req, res, pathname) {
 			res.end(JSON.stringify({
 				seq: newChunk.seq,
 				audioData: newChunk.audioData,
+				callStatus: currentCall.status
+			}));
+			return;
+		}
+
+		if (elapsed >= maxWaitMs) {
+			clearInterval(checkInterval);
+			res.writeHead(204);
+			res.end();
+		}
+	}, 50);
+}
+
+function handleCallSendVideo(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+
+	const call = activeCalls.get(callId);
+	if (!call || call.status !== 'ACTIVE') {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call is not active' }));
+		return;
+	}
+
+	const vBuffers = callVideoBuffers.get(callId);
+	const userBuffer = vBuffers?.get(userId);
+	if (!userBuffer) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Video buffer not initialized' }));
+		return;
+	}
+
+	let body = '';
+	req.on('data', (chunk) => {
+		body += chunk.toString();
+	});
+
+	req.on('end', () => {
+		try {
+			const { videoData } = JSON.parse(body);
+
+			const seq = userBuffer.seq++;
+			userBuffer.chunks.push({ seq, videoData, timestamp: Date.now() });
+
+			// Persist the first chunk as the MSE init segment for late joiners
+			if (seq === 0) userBuffer.initChunk = { seq, videoData };
+
+			// Add to videoParticipants if first chunk
+			if (seq === 0 && call.videoParticipants && !call.videoParticipants.includes(userId)) {
+				call.videoParticipants.push(userId);
+			}
+
+			// Circular buffer - keep last N chunks
+			while (userBuffer.chunks.length > CALL_VIDEO_BUFFER_SIZE) {
+				userBuffer.chunks.shift();
+			}
+
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ seq }));
+		} catch (err) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid request body' }));
+		}
+	});
+}
+
+function handleCallReceiveVideo(req, res, pathname) {
+	const parts = pathname.split('/');
+	const chatHandle = parts[3];
+	const callId = parts[4];
+
+	if (!chatHandle || !callId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Chat handle and call ID are required' }));
+		return;
+	}
+
+	const [userId] = req.headers.authorization.split(':');
+	const parsedUrl = url.parse(req.url, true);
+	const fromUserId = parsedUrl.query.fromUserId;
+	const afterSeq = parseInt(parsedUrl.query.afterSeq || '-1', 10);
+	const maxWaitMs = parseInt(parsedUrl.query.maxWaitMs || '100', 10);
+
+	if (!fromUserId) {
+		res.writeHead(400, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'fromUserId is required' }));
+		return;
+	}
+
+	const call = activeCalls.get(callId);
+	if (!call) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Call not found' }));
+		return;
+	}
+
+	const vBuffers = callVideoBuffers.get(callId);
+	const senderBuffer = vBuffers?.get(fromUserId);
+	if (!senderBuffer) {
+		res.writeHead(204);
+		res.end();
+		return;
+	}
+
+	const chunks = senderBuffer.chunks;
+	const nextExpectedSeq = afterSeq + 1;
+
+	// Helper: return oldest available chunk if seq is too old (late joiner catch-up)
+	function serveOldestChunk(chunkArr, currentCall) {
+		const chunk = chunkArr[0];
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ seq: chunk.seq, videoData: chunk.videoData, callStatus: currentCall.status }));
+	}
+
+	// Late joiner: serve init chunk when seq 0 is needed but not in circular buffer
+	if (nextExpectedSeq === 0 && senderBuffer.initChunk && chunks.findIndex(c => c.seq === 0) === -1) {
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ seq: 0, videoData: senderBuffer.initChunk.videoData, callStatus: call.status }));
+		return;
+	}
+
+	// If requested seq is behind the buffer, skip ahead to oldest available chunk
+	if (chunks.length > 0 && chunks[0].seq > nextExpectedSeq) {
+		serveOldestChunk(chunks, call);
+		return;
+	}
+
+	// Find the EXACT chunk with the next expected sequence
+	const chunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
+
+	if (chunkIndex !== -1) {
+		const chunk = chunks[chunkIndex];
+		res.writeHead(200, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({
+			seq: chunk.seq,
+			videoData: chunk.videoData,
+			callStatus: call.status
+		}));
+		return;
+	}
+
+	// Long-poll: wait for the next chunk in sequence
+	const startTime = Date.now();
+	const checkInterval = setInterval(() => {
+		const elapsed = Date.now() - startTime;
+
+		// Check if call ended
+		const currentCall = activeCalls.get(callId);
+		if (!currentCall || currentCall.status === 'ENDED') {
+			clearInterval(checkInterval);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ callStatus: 'ENDED' }));
+			return;
+		}
+
+		// Late joiner: serve init chunk when seq 0 is needed but not in circular buffer
+		if (nextExpectedSeq === 0 && senderBuffer.initChunk && chunks.findIndex(c => c.seq === 0) === -1) {
+			clearInterval(checkInterval);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ seq: 0, videoData: senderBuffer.initChunk.videoData, callStatus: currentCall.status }));
+			return;
+		}
+
+		// Skip ahead if buffer has newer chunks (late joiner)
+		if (chunks.length > 0 && chunks[0].seq > nextExpectedSeq) {
+			clearInterval(checkInterval);
+			serveOldestChunk(chunks, currentCall);
+			return;
+		}
+
+		// Look for the exact next sequence number
+		const newChunkIndex = chunks.findIndex(c => c.seq === nextExpectedSeq);
+		if (newChunkIndex !== -1) {
+			clearInterval(checkInterval);
+			const newChunk = chunks[newChunkIndex];
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({
+				seq: newChunk.seq,
+				videoData: newChunk.videoData,
 				callStatus: currentCall.status
 			}));
 			return;
