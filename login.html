@@ -8128,7 +8128,6 @@
                 return { userName: decryptedName, isOnline, typingState, lastSeen, lastMessage };
             }));
 
-            console.log('Online users:', users);
             currentChat.onlineUsers = users;
             updateMessageStatusIndicators(users);
 
@@ -8159,24 +8158,17 @@
             // Create a map for faster lookup
             const userStatusMap = {};
             onlineUsers.forEach(user => {
-                userStatusMap[user.userName] = user.status;
+                if (user.userName) userStatusMap[user.userName] = user.isOnline ? 'online' : 'offline';
             });
-            
+
             // Update each indicator
             indicators.forEach(indicator => {
                 const userName = indicator.getAttribute('data-status-user');
                 const status = userStatusMap[userName];
-                
-                if (status) {
-                    // Remove existing status classes
-                    indicator.classList.remove('online', 'offline');
 
-                    // Add appropriate class based on status
-                    if (status === 'online') {
-                        indicator.classList.add('online');
-                    } else {
-                        indicator.classList.add('offline');
-                    }
+                if (status) {
+                    indicator.classList.remove('online', 'offline');
+                    indicator.classList.add(status);
                 }
             });
         }
