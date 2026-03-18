@@ -7412,8 +7412,13 @@
             messageInput.addEventListener('input', handleInputChange);
             messageInput.addEventListener('keypress', (e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    sendMessage();
+                    const isMobile = navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0;
+                    if (!isMobile) {
+                        e.preventDefault();
+                        sendMessage();
+                    } else {
+                        e.preventDefault(); // On mobile, only send button should send
+                    }
                 }
             });
 
