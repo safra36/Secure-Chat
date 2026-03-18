@@ -7104,9 +7104,16 @@
                 });
             }
 
-            actionBtn.addEventListener('click', () => {
+            actionBtn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 if (actionBtn.classList.contains('has-text') || selectedMedia) {
                     sendMessage();
+                    // Keep keyboard open on mobile by re-focusing the input
+                    const isMobile = navigator.maxTouchPoints > 0 || navigator.msMaxTouchPoints > 0;
+                    if (isMobile) {
+                        messageInput.focus();
+                    }
                 } else {
                     toggleVoiceRecording();
                 }
