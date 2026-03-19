@@ -6768,6 +6768,47 @@
             }
         }
 
+        // ==================== BADGE STATE TRACKING ====================
+        
+        // Diagnostic logging for badge state changes
+        function logBadgeState(action, chatHandle, unreadCount, lastReadId) {
+            const timestamp = new Date().toISOString();
+            console.log(`[Badge][${timestamp}] ${action}: chat=${chatHandle}, unread=${unreadCount}, lastRead=${lastReadId || 'none'}`);
+        }
+
+        // Read state tracking - maps chatHandle to last read message ID
+        // This tracks which messages the user has actually SEEN, not just fetched
+        let chatReadStates = JSON.parse(localStorage.getItem('chatReadStates') || '{}');
+
+        // Function to persist chat read states to localStorage
+        function saveChatReadStates() {
+            try {
+                setItemWithEviction('chatReadStates', JSON.stringify(chatReadStates));
+            } catch (error) {
+                window.reportClientError(error, 'save chat read states');
+                console.warn('Failed to save chat read states:', error);
+            }
+        }
+
+        // Update read state for a chat
+        function updateChatReadState(chatHandle, messageId) {
+            if (!chatHandle || !messageId) return;
+            
+            const previousState = chatReadStates[chatHandle];
+            chatReadStates[chatHandle] = {
+                lastReadId: messageId,
+                timestamp: Date.now()
+            };
+            saveChatReadStates();
+            
+            logBadgeState('READ_STATE_UPDATED', chatHandle, null, messageId);
+        }
+
+        // Get last read message ID for a chat
+        function getLastReadId(chatHandle) {
+            return chatReadStates[chatHandle]?.lastReadId || '';
+        }
+
         // ==================== TIME SYNCHRONIZATION ====================
 
         // Decrypt timestamp from server
@@ -7950,13 +7991,25 @@
         // Scroll management functions
         function scrollToBottom(smooth = true) {
             if (messagesContainer) {
-                messagesContainer.scrollTo({
-                    top: messagesContainer.scrollHeight,
-                    behavior: smooth ? 'smooth' : 'auto'
-                });
+                if (smooth) {
+                    messagesContainer.scrollTo({
+                        top: messagesContainer.scrollHeight,
+                        behavior: 'smooth'
+                    });
+                } else {
+                    // Instant scroll without animation - set scrollTop directly
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                }
                 // Reset counter when scrolling to bottom
                 unreadMessageCounter = 0;
                 updateScrollButton();
+                
+                // Update read state when scrolling to bottom (indicating user has seen messages)
+                if (currentChat && messageOrder.length > 0) {
+                    const latestMessageId = messageOrder[messageOrder.length - 1];
+                    updateChatReadState(currentChat.handle, latestMessageId);
+                    logBadgeState('SCROLLED_TO_BOTTOM', currentChat.handle, currentChat.unreadCount, latestMessageId);
+                }
             }
         }
 
@@ -8119,12 +8172,29 @@
             // Track the last fetch time for incremental updates
             lastFetchTime = 0;
 
-            // Scroll to bottom after loading messages
-            requestAnimationFrame(() => scrollToBottom(false));
+            // Update read state to latest message in cache
+            // This ensures we track which messages the user has seen when opening a chat
+            if (cachedForHistory.length > 0) {
+                const latestMessageId = cachedForHistory[cachedForHistory.length - 1].id;
+                updateChatReadState(handle, latestMessageId);
+                logBadgeState('CHAT_OPENED', handle, currentChat.unreadCount, latestMessageId);
+            }
+
+            // Scroll to bottom immediately after loading messages (no animation)
+            // Temporarily disable smooth scrolling to prevent animation
+            const prevScrollBehavior = messagesContainer?.style.scrollBehavior;
+            if (messagesContainer) messagesContainer.style.scrollBehavior = 'auto';
+            scrollToBottom(false);
+            if (messagesContainer) messagesContainer.style.scrollBehavior = prevScrollBehavior || '';
 
             startPolling();
             if (!currentChat._channel) {
                 startHeartbeat();
+                // Send immediate heartbeat to sync read state with server
+                // This prevents race condition where background polling runs before heartbeat
+                sendHeartbeat(true).catch(err => {
+                    console.warn('[Heartbeat] Immediate heartbeat after chat switch failed:', err);
+                });
             }
             if (currentChat._channel) {
                 setTimeout(() => { if (currentChat) postChannelViews(currentChat.handle); }, 600);
@@ -8863,7 +8933,7 @@
             return sep;
         }
 
-        async function appendMessages(messages, { prepend = false, knownIds = null } = {}) {
+        async function appendMessages(messages, { prepend = false, knownIds = null, skipAutoScroll = false } = {}) {
             // Snapshot currentChat at entry — currentChat is a mutable global that can
             // change mid-execution if the user switches chats during an async fetch.
             const chatSnapshot = currentChat;
@@ -9426,8 +9496,8 @@
                 return; // history messages: no cache update, no cursor update
             }
 
-            // Auto-scroll handling for new messages
-            if (hasNewMessages) {
+            // Auto-scroll handling for new messages (skip if skipAutoScroll flag is set)
+            if (hasNewMessages && !skipAutoScroll) {
                 setTimeout(() => {
                     if (wasAtBottom) {
                         scrollToBottom(false);
@@ -10307,12 +10377,29 @@
                         }
 
                         if (trulyNew.length > 0) {
-                            chat.unreadCount = (chat.unreadCount || 0) + trulyNew.length;
-                            chat.lastMessage = 'New message...';
-                            chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();
-                            playNotificationSound();
-                            showDesktopNotification(chat.handle, `${trulyNew.length} new message(s)`);
-                            anyNew = true;
+                            // Check read state to avoid counting messages that were already seen
+                            const lastReadId = getLastReadId(chat.handle);
+                            let unreadMessages = trulyNew;
+                            
+                            if (lastReadId) {
+                                // Find the index of the last read message in the trulyNew array
+                                const lastReadIndex = trulyNew.findIndex(m => m.id === lastReadId);
+                                if (lastReadIndex !== -1) {
+                                    // Only count messages after the last read position
+                                    unreadMessages = trulyNew.slice(lastReadIndex + 1);
+                                    logBadgeState('POLL_FILTERED', chat.handle, unreadMessages.length, lastReadId);
+                                }
+                            }
+                            
+                            if (unreadMessages.length > 0) {
+                                chat.unreadCount = (chat.unreadCount || 0) + unreadMessages.length;
+                                chat.lastMessage = 'New message...';
+                                chat.lastMessageTime = new Date(Date.now() + timeOffset).toISOString();
+                                playNotificationSound();
+                                showDesktopNotification(chat.handle, `${unreadMessages.length} new message(s)`);
+                                logBadgeState('UNREAD_INCREMENTED', chat.handle, chat.unreadCount, lastReadId);
+                                anyNew = true;
+                            }
                         }
                     }
                 } catch (error) {
@@ -11416,7 +11503,8 @@
                 console.log(`Loaded ${cachedMessages.length} cached messages for chat: ${chatHandle}`);
 
                 // Await so openChat doesn't start polling until cache is fully rendered
-                await appendMessages(cachedMessages);
+                // Skip auto-scroll to prevent visible scroll animation when opening chat
+                await appendMessages(cachedMessages, { skipAutoScroll: true });
                 if (lastReadReceiptsHeader) updateReadReceipts(lastReadReceiptsHeader);
             } catch (error) {
                 window.reportClientError(error, 'load cached messages');
