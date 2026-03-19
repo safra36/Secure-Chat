@@ -8426,7 +8426,10 @@
 
         async function setReplyContext(messageId, encryptedPreview, encryptedSenderName) {
             replyContext = { messageId, encryptedPreview, encryptedSenderName };
+            // Cancel any active edit, but preserve the current input text
+            const currentText = messageInput.value;
             cancelEdit();
+            messageInput.value = currentText;
 
             let preview = '...';
             let sender = '';
