@@ -1395,7 +1395,7 @@
         .message-actions {
             display: none;
             position: absolute;
-            top: 6px;
+            bottom: calc(100% + 6px);
             gap: 2px;
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
@@ -5463,6 +5463,23 @@
                     <button id="import-chats-btn" class="btn btn-secondary" style="margin:0">Import Chats from File</button>
                     <input type="file" id="import-chats-file" accept=".json" style="display:none">
                 </div>
+            </div>
+
+            <!-- Notifications section -->
+            <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:16px;margin-top:16px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                    <div style="width:36px;height:36px;border-radius:50%;background:var(--accent-gradient);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Notifications</div>
+                        <div id="notification-status" style="font-size:11px;color:var(--text-muted)">Check status...</div>
+                    </div>
+                </div>
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.7;margin-bottom:12px;padding:0 2px">
+                    <div>&#9679; Get notified when you receive new messages while the app is in background.</div>
+                </div>
+                <button id="enable-notifications-btn" class="btn btn-primary" style="margin:0;width:100%">Enable Notifications</button>
             </div>
 
             <div id="settings-msg" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid"></div>
@@ -10259,11 +10276,53 @@
             return _sharedAudioCtx;
         }
 
-        // Notification sound function (Web Audio API beep)
+        // Request notification permission from user
+        async function requestNotificationPermission() {
+            if (!('Notification' in window)) {
+                console.log('[Notifications] Notification API not available');
+                return 'unsupported';
+            }
+            
+            const currentPermission = Notification.permission;
+            console.log('[Notifications] Current permission:', currentPermission);
+            
+            if (currentPermission === 'granted') {
+                return 'granted';
+            }
+            
+            if (currentPermission === 'denied') {
+                console.log('[Notifications] Permission was denied by user. Cannot request again.');
+                return 'denied';
+            }
+            
+            // Permission is 'default' - request it
+            try {
+                const result = await Notification.requestPermission();
+                console.log('[Notifications] Permission request result:', result);
+                return result;
+            } catch (err) {
+                console.error('[Notifications] Permission request failed:', err);
+                return 'error';
+            }
+        }
+
+        // Show desktop notification (system notification)
         function showDesktopNotification(chatHandle, body) {
-            if (!('Notification' in window) || Notification.permission !== 'granted') return;
+            if (!('Notification' in window)) return;
+            if (Notification.permission !== 'granted') return;
             if (document.visibilityState === 'visible' && document.hasFocus()) return;
-            try { new Notification(chatHandle, { body, icon: '/icon-192.png', tag: 'msg-' + chatHandle }); } catch {}
+            try {
+                new Notification(chatHandle, {
+                    body,
+                    icon: '/icons/icon-192x192.png',
+                    badge: '/icons/icon-72x72.png',
+                    tag: 'msg-' + chatHandle,
+                    vibrate: [100, 50, 100],
+                    requireInteraction: false
+                });
+            } catch (err) {
+                console.log('[Notifications] Failed to show notification:', err);
+            }
         }
 
         function updateAppBadge() {
@@ -11284,10 +11343,95 @@
             const userId = localStorage.getItem('userId') || '(no identity)';
             document.getElementById('settings-userid').textContent = userId;
             document.getElementById('settings-msg').style.display = 'none';
+            
+            // Update notification status
+            updateNotificationStatus();
+            
             chatListContainer.style.display = 'none';
             chatContainer.style.display = 'none';
             document.getElementById('settings-container').style.display = 'flex';
         }
+
+        // Update notification permission status display
+        function updateNotificationStatus() {
+            const statusEl = document.getElementById('notification-status');
+            const btn = document.getElementById('enable-notifications-btn');
+            
+            if (!('Notification' in window)) {
+                statusEl.textContent = 'Not supported in this browser';
+                statusEl.style.color = 'var(--error)';
+                btn.style.display = 'none';
+                return;
+            }
+            
+            const permission = Notification.permission;
+            if (permission === 'granted') {
+                statusEl.textContent = '✓ Enabled - You will receive notifications';
+                statusEl.style.color = 'var(--success)';
+                btn.textContent = 'Notifications Enabled';
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'default';
+            } else if (permission === 'denied') {
+                statusEl.textContent = '✗ Blocked - Enable in browser settings';
+                statusEl.style.color = 'var(--error)';
+                btn.textContent = 'Notifications Blocked';
+                btn.disabled = true;
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'default';
+            } else {
+                statusEl.textContent = 'Not enabled';
+                statusEl.style.color = 'var(--text-muted)';
+                btn.textContent = 'Enable Notifications';
+                btn.disabled = false;
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        }
+
+        // Handle enable notifications button click
+        document.getElementById('enable-notifications-btn').addEventListener('click', async () => {
+            const btn = document.getElementById('enable-notifications-btn');
+            const statusEl = document.getElementById('notification-status');
+            
+            if (!('Notification' in window)) {
+                _settingsMsg('Notifications are not supported in this browser.', true);
+                return;
+            }
+            
+            if (Notification.permission === 'granted') {
+                _settingsMsg('Notifications are already enabled!', false);
+                return;
+            }
+            
+            if (Notification.permission === 'denied') {
+                _settingsMsg('Notifications are blocked. Please enable them in your browser settings.', true);
+                return;
+            }
+            
+            // Request permission
+            btn.textContent = 'Requesting...';
+            btn.disabled = true;
+            
+            const result = await requestNotificationPermission();
+            
+            if (result === 'granted') {
+                _settingsMsg('Notifications enabled successfully!', false);
+                // Show a test notification
+                try {
+                    new Notification('Secure Chat', {
+                        body: 'Notifications are now enabled!',
+                        icon: '/icons/icon-192x192.png'
+                    });
+                } catch (e) {}
+            } else if (result === 'denied') {
+                _settingsMsg('Permission denied. Notifications will not work.', true);
+            } else {
+                _settingsMsg('Could not enable notifications.', true);
+            }
+            
+            updateNotificationStatus();
+        });
 
         function closeSettings() {
             document.getElementById('settings-container').style.display = 'none';
