@@ -926,6 +926,16 @@
             background: var(--error);
         }
 
+        .status-dot.reconnecting {
+            background: var(--warning);
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
         .load-more-btn {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
@@ -6699,7 +6709,18 @@
         // Heartbeat and connection status
         let heartbeatInterval = null;
         let connectionStatus = 'disconnected'; // 'connected', 'connecting', 'disconnected'
+        let connectionState = 'disconnected'; // 'connected', 'connecting', 'disconnected', 'reconnecting'
+        let consecutiveHeartbeatFailures = 0;
+        const HEARTBEAT_FAILURE_THRESHOLD = 3;
         const messageDeliveryStatus = new Map(); // Store delivery status by message ID
+
+        // Visibility state tracking for sleep/wake handling
+        let isPageVisible = true;
+        let hiddenTime = 0;
+        let wasHiddenAtLeastOnce = false;
+        let reconnectAttempts = 0;
+        const MAX_RECONNECT_ATTEMPTS = 5;
+        const BASE_RECONNECT_DELAY = 1000;
 
         // Typing indicator state
         let isTyping = false;
@@ -7103,6 +7124,109 @@
                     offlineFileInput.value = '';
                 });
             }
+
+            // ==================== VISIBILITY CHANGE HANDLING ====================
+            // Handle page visibility changes for sleep/wake cycles
+            
+            function handleVisibilityChange() {
+                if (document.hidden) {
+                    // Page is now hidden (sleep/background)
+                    isPageVisible = false;
+                    hiddenTime = Date.now();
+                    console.log('[Visibility] Page hidden, pausing intensive polling');
+                    
+                    // Pause heartbeat and message polling when hidden
+                    // but keep chat list polling slower for notifications
+                    pausePollingForBackground();
+                } else {
+                    // Page is now visible (wake/foreground)
+                    const hiddenDuration = Date.now() - hiddenTime;
+                    console.log(`[Visibility] Page visible after ${Math.round(hiddenDuration / 1000)}s hidden`);
+                    isPageVisible = true;
+                    wasHiddenAtLeastOnce = true;
+                    
+                    // Resume polling and handle reconnection
+                    resumePollingFromBackground(hiddenDuration);
+                }
+            }
+            
+            function pausePollingForBackground() {
+                // Stop heartbeat and message polling - they're not needed when hidden
+                // Chat list polling will continue at a reduced rate via the server
+                if (heartbeatInterval) {
+                    clearInterval(heartbeatInterval);
+                    heartbeatInterval = null;
+                }
+                stopPolling(); // Stops message polling
+                
+                // Note: We DON'T stop chatListPollingInterval - we need it for notifications
+                // But the server-side already throttles based on heartbeat presence
+            }
+            
+            function resumePollingFromBackground(hiddenDuration) {
+                // Reset failure counters since we have a fresh connection attempt
+                consecutiveHeartbeatFailures = 0;
+                reconnectAttempts = 0;
+                
+                // Immediately send a heartbeat to re-establish presence
+                if (currentChat) {
+                    // Small delay to let the browser/network stabilize after wake
+                    setTimeout(() => {
+                        sendHeartbeat(true); // true = this is a wake-from-sleep heartbeat
+                    }, 500);
+                }
+                
+                // Restart heartbeat interval
+                if (currentChat && !heartbeatInterval) {
+                    heartbeatInterval = setInterval(() => sendHeartbeat(false), 5000);
+                }
+                
+                // If we were gone for more than cursor staleness threshold, force a fresh message fetch
+                // to catch any messages we might have missed
+                if (hiddenDuration > 30000) { // 30 seconds
+                    console.log('[Visibility] Long hidden duration, forcing message sync');
+                    if (currentChat) {
+                        // Clear cursor to force full fetch
+                        delete pollingCursors[currentChat.handle];
+                        savePollingCursors();
+                        
+                        // Restart polling with fresh cursor
+                        if (!isPolling) {
+                            startPolling();
+                        } else {
+                            // Trigger immediate fetch
+                            fetchMessages();
+                        }
+                    }
+                }
+            }
+            
+            // Standard visibilitychange event (most browsers)
+            document.addEventListener('visibilitychange', handleVisibilityChange);
+            
+            // pagehide/pageshow for iOS Safari and some mobile browsers
+            window.addEventListener('pagehide', (event) => {
+                console.log('[Visibility] Page hide event');
+                isPageVisible = false;
+                hiddenTime = Date.now();
+                pausePollingForBackground();
+            });
+            
+            window.addEventListener('pageshow', (event) => {
+                console.log('[Visibility] Page show event');
+                if (!isPageVisible) {
+                    isPageVisible = true;
+                    wasHiddenAtLeastOnce = true;
+                    const hiddenDuration = Date.now() - hiddenTime;
+                    resumePollingFromBackground(hiddenDuration);
+                }
+            });
+            
+            // Also handle beforeunload to clean up properly
+            window.addEventListener('beforeunload', () => {
+                // Don't try to resume on close - just log
+                console.log('[Visibility] Page unloading');
+            });
 
             actionBtn.addEventListener('click', (e) => {
                 e.preventDefault();
@@ -8039,6 +8163,12 @@
 
         function startHeartbeat() {
             if (heartbeatInterval) return;
+            
+            // Don't start intensive heartbeat if page is hidden
+            if (!isPageVisible) {
+                console.log('[Heartbeat] Skipping heartbeat start - page is hidden');
+                return;
+            }
 
             // Request notification permission on first heartbeat start
             if ('Notification' in window && Notification.permission === 'default') {
@@ -8048,7 +8178,11 @@
             sendHeartbeat();
 
             // Send heartbeat every 5 seconds
-            heartbeatInterval = setInterval(sendHeartbeat, 5000);
+            heartbeatInterval = setInterval(() => {
+                if (isPageVisible) {
+                    sendHeartbeat(false);
+                }
+            }, 5000);
         }
 
         function stopHeartbeat() {
@@ -8056,14 +8190,20 @@
                 clearInterval(heartbeatInterval);
                 heartbeatInterval = null;
             }
+            // Reset failure counters on explicit stop
+            consecutiveHeartbeatFailures = 0;
+            reconnectAttempts = 0;
         }
 
-        async function sendHeartbeat() {
+        async function sendHeartbeat(isWakeHeartbeat = false) {
             if (!currentChat) return;
 
             try {
-                connectionStatus = 'connecting';
-                updateConnectionStatus();
+                // Only show "connecting" if this is a fresh attempt, not routine interval
+                if (isWakeHeartbeat || connectionStatus !== 'reconnecting') {
+                    connectionStatus = 'connecting';
+                    updateConnectionStatus();
+                }
 
                 // Encrypt the userName before sending
                 const encryptedUserName = await encryptMessage(userName, currentChat.encryptionKey);
@@ -8092,6 +8232,8 @@
 
                 // Reset counter on successful response
                 failedAuthAttempts = 0;
+                consecutiveHeartbeatFailures = 0;
+                reconnectAttempts = 0;
 
                 if (!response.ok) {
                     throw new Error(`Heartbeat failed: ${response.status}`);
@@ -8115,8 +8257,36 @@
             } catch (error) {
                 window.reportClientError(error, 'heartbeat');
                 console.error('Heartbeat error:', error);
-                connectionStatus = 'disconnected';
-                updateConnectionStatus();
+                
+                consecutiveHeartbeatFailures++;
+                
+                // Implement exponential backoff for reconnection
+                if (consecutiveHeartbeatFailures > 1 && consecutiveHeartbeatFailures <= MAX_RECONNECT_ATTEMPTS) {
+                    connectionStatus = 'reconnecting';
+                    updateConnectionStatus();
+                    
+                    const backoffDelay = BASE_RECONNECT_DELAY * Math.pow(2, consecutiveHeartbeatFailures - 1);
+                    console.log(`[Heartbeat] Attempting reconnect ${reconnectAttempts + 1}/${MAX_RECONNECT_ATTEMPTS} after ${backoffDelay}ms`);
+                    
+                    // Schedule retry with backoff
+                    setTimeout(() => {
+                        if (currentChat && isPageVisible) {
+                            reconnectAttempts++;
+                            sendHeartbeat(true);
+                        }
+                    }, backoffDelay);
+                    return;
+                }
+                
+                // After too many failures, show disconnected
+                if (consecutiveHeartbeatFailures > MAX_RECONNECT_ATTEMPTS) {
+                    console.warn('[Heartbeat] Max reconnection attempts reached, showing offline');
+                    connectionStatus = 'disconnected';
+                    updateConnectionStatus();
+                } else {
+                    connectionStatus = 'disconnected';
+                    updateConnectionStatus();
+                }
             }
         }
 
@@ -8156,6 +8326,9 @@
             } else if (connectionStatus === 'connecting') {
                 statusDot.className = 'status-dot';
                 statusText.textContent = 'Connecting...';
+            } else if (connectionStatus === 'reconnecting') {
+                statusDot.className = 'status-dot';
+                statusText.textContent = 'Reconnecting...';
             } else {
                 statusDot.className = 'status-dot disconnected';
                 statusText.textContent = 'Offline';
@@ -8496,10 +8669,20 @@
 
         function startPolling() {
             if (isPolling) return;
+            
+            // Don't start intensive polling if page is hidden
+            if (!isPageVisible) {
+                console.log('[Polling] Skipping polling start - page is hidden');
+                return;
+            }
 
             isPolling = true;
             fetchMessages(); // immediate fetch; interval fires subsequent ones
-            pollingInterval = setInterval(fetchMessages, 2000);
+            pollingInterval = setInterval(() => {
+                if (isPageVisible) {
+                    fetchMessages();
+                }
+            }, 2000);
         }
 
         function stopPolling() {
