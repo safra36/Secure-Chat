@@ -8417,19 +8417,23 @@
         function cancelEdit() {
             editContext = null;
             document.getElementById('edit-context-bar').classList.remove('visible');
-            messageInput.value = '';
+            // Don't clear messageInput.value - preserve user's typed text if any
             messageInput.style.height = 'auto';
-            handleInputChange();
+            // Only call handleInputChange if there's actually text (to preserve has-text state)
+            if (messageInput.value.trim().length > 0) {
+                handleInputChange();
+            }
         }
 
         // ==================== REPLY ====================
 
         async function setReplyContext(messageId, encryptedPreview, encryptedSenderName) {
             replyContext = { messageId, encryptedPreview, encryptedSenderName };
-            // Cancel any active edit, but preserve the current input text
+            // Cancel any active edit, but preserve the current input text and UI state
             const currentText = messageInput.value;
             cancelEdit();
             messageInput.value = currentText;
+            handleInputChange();
 
             let preview = '...';
             let sender = '';
