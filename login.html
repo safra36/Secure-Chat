@@ -6204,11 +6204,10 @@
             return count;
         }
         
-        // Evict the single oldest message across all chats (LRU chat first, oldest msg in that chat).
-        // Messages are stored sorted oldest→newest, so index 0 is always the oldest.
-        // Avoids calling savePollingCursors() to prevent re-entrant eviction.
+        // Evict the entire LRU chat from localStorage to free space in bulk.
+        // Avoids calling savePollingCursors()/setItemWithEviction() to prevent re-entrant eviction.
         function evictOldestMessage() {
-            // Pick the least-recently-fetched chat as proxy for having the globally oldest messages
+            // Pick the least-recently-fetched chat as proxy for LRU
             let lruKey = null, lruTime = Infinity;
             for (let key in localStorage) {
                 if (key.startsWith('messages_')) {
@@ -6221,40 +6220,20 @@
             if (!lruKey) return false;
 
             const handle = lruKey.slice('messages_'.length);
-            let messages;
-            try {
-                messages = JSON.parse(localStorage.getItem(lruKey) || '[]');
-            } catch (e) {
-                localStorage.removeItem(lruKey);
-                return true;
-            }
-
-            const wipeChat = () => {
-                localStorage.removeItem(lruKey);
-                localStorage.removeItem(`lastFetch_${handle}`);
-                if (pollingCursors[handle] !== undefined) {
-                    delete pollingCursors[handle];
-                    // Don't call savePollingCursors() here — would cause re-entrant eviction;
-                    // the deletion will be persisted on the next natural savePollingCursors() call.
-                }
-            };
-
-            if (messages.length <= 1) {
-                wipeChat();
-            } else {
-                messages.shift(); // drop oldest message
-                try {
-                    localStorage.setItem(lruKey, JSON.stringify(messages));
-                } catch (e) {
-                    wipeChat(); // still no space — wipe the whole cache
-                }
+            // Wipe entire chat cache — frees much more space per eviction round
+            localStorage.removeItem(lruKey);
+            localStorage.removeItem(`lastFetch_${handle}`);
+            if (pollingCursors[handle] !== undefined) {
+                delete pollingCursors[handle];
+                // Persist cursor deletion directly to avoid re-entrant setItemWithEviction
+                try { localStorage.setItem('pollingCursors', JSON.stringify(pollingCursors)); } catch (e) {}
             }
             return true;
         }
 
-        // Retry a localStorage setItem, evicting one message at a time on QuotaExceededError
+        // Retry a localStorage setItem, evicting whole LRU chats on QuotaExceededError
         function setItemWithEviction(key, value) {
-            for (let i = 0; i < 500; i++) {
+            for (let i = 0; i < 50; i++) {
                 try {
                     localStorage.setItem(key, value);
                     return true;
@@ -6784,6 +6763,24 @@
                 console.warn('Failed to save polling cursors:', error);
             }
         }
+
+        // Cross-tab sync: when another tab advances cursors or read states, merge them
+        window.addEventListener('storage', (evt) => {
+            if (evt.key === 'pollingCursors' && evt.newValue) {
+                try {
+                    const remote = JSON.parse(evt.newValue);
+                    for (const [handle, cursor] of Object.entries(remote)) {
+                        // Only advance, never go backward
+                        if (!pollingCursors[handle] || cursor > pollingCursors[handle]) {
+                            pollingCursors[handle] = cursor;
+                        }
+                    }
+                } catch (e) {}
+            }
+            if (evt.key === 'chatReadStates' && evt.newValue) {
+                try { chatReadStates = JSON.parse(evt.newValue); } catch (e) {}
+            }
+        });
 
         // ==================== BADGE STATE TRACKING ====================
         
@@ -8821,6 +8818,19 @@
                 const rawData = await response.json();
                 const messages = Array.isArray(rawData) ? rawData : (rawData.messages || []);
                 const serverNextCursor = Array.isArray(rawData) ? null : rawData.nextCursor;
+                const hasGap = !Array.isArray(rawData) && rawData.gap === true;
+
+                // Server couldn't find messages between our cursor and its memory window
+                if (hasGap) {
+                    delete pollingCursors[fetchHandle];
+                    await rearrangeMessages(messages);
+                    if (!currentChat || currentChat.handle !== fetchHandle) return;
+                    if (serverNextCursor) {
+                        pollingCursors[fetchHandle] = serverNextCursor;
+                        savePollingCursors();
+                    }
+                    return;
+                }
 
                 // Detect ordering problem: we fetched from the beginning (no cursor) but already
                 // have rendered messages — this happens when LRU eviction deleted the cursor while
@@ -11660,8 +11670,18 @@
             const cacheKey = `messages_${chatHandle}`;
             const lastFetchKey = `lastFetch_${chatHandle}`;
 
+            // Strip bulky media content before caching (already in IndexedDB via content-cache-db)
+            const MEDIA_TYPES = new Set(['image', 'video', 'voice', 'audio', 'file']);
+            const lightMessages = messages.map(m => {
+                if (MEDIA_TYPES.has(m.type) && m.encryptedContent) {
+                    const { encryptedContent, ...rest } = m;
+                    return rest;
+                }
+                return m;
+            });
+
             // FIFO: keep only latest N messages, shrink if quota still exceeded
-            let messagesToCache = messages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
+            let messagesToCache = lightMessages.slice(-MAX_CACHED_MESSAGES_PER_CHAT);
             while (messagesToCache.length > 0) {
                 try {
                     setItemWithEviction(cacheKey, JSON.stringify(messagesToCache));

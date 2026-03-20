@@ -1023,6 +1023,63 @@ function serializeMessageForClient(message, requestingUserId) {
 	};
 }
 
+// Load messages from NDJSON disk file after a given timestamp (disk fallback for old cursors)
+function loadMessagesFromDisk(chatHandle, afterTimestamp, limit) {
+	const fp = chatToFilePath(chatHandle);
+	if (!fs.existsSync(fp)) return { messages: [], gap: false };
+
+	const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+	const messageMap = new Map();
+	const reactionPatches = [];
+
+	for (const line of rawLines) {
+		try {
+			const entry = JSON.parse(line);
+			if (entry.type === 'reaction_patch') {
+				reactionPatches.push(entry);
+			} else if (entry.msg && entry.msg.id) {
+				messageMap.set(entry.msg.id, entry);
+			}
+		} catch (e) {}
+	}
+
+	// Apply reaction patches
+	for (const patch of reactionPatches) {
+		const entry = messageMap.get(patch.messageId);
+		if (entry) {
+			entry.msg.reactions = patch.reactions;
+			if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
+		}
+	}
+
+	// Filter after timestamp
+	const filtered = [...messageMap.values()].filter(e => {
+		try {
+			const t = decryptTimestamp(e.msg.encryptedTimestamp);
+			return t > afterTimestamp || ((e.msg.lastUpdated || 0) > afterTimestamp);
+		} catch { return false; }
+	});
+
+	// Sort and limit
+	filtered.sort((a, b) => {
+		try { return decryptTimestamp(a.msg.encryptedTimestamp) - decryptTimestamp(b.msg.encryptedTimestamp); }
+		catch { return 0; }
+	});
+
+	const result = filtered.slice(0, limit);
+
+	// Load content into memory for deferred downloads
+	for (const entry of result) {
+		if (entry.content) {
+			const key = `${chatHandle}:${entry.msg.id}`;
+			if (!messageContentStorage.has(key)) messageContentStorage.set(key, entry.content);
+			if (entry.msg.id) messageMetadata.set(entry.msg.id, { isCompressed: entry.isCompressed || false });
+		}
+	}
+
+	return { messages: result.map(e => e.msg), gap: false };
+}
+
 // Handle GET messages request
 function handleGetMessages(req, res, pathname) {
 	console.log(`GET messages request for path: ${pathname}`);
@@ -1054,21 +1111,55 @@ function handleGetMessages(req, res, pathname) {
 	// If an "after" id is provided, filter out earlier messages using chronological comparison
 	let filteredMessages;
 	let afterTimestamp = null;
+	let gapDetected = false;
 	if (after) {
 		try {
 			afterTimestamp = decryptTimestamp(after);
-			filteredMessages = allMessages.filter((msg) => {
+
+			// Check if cursor is older than oldest in-memory message
+			let oldestInMemory = Infinity;
+			for (const msg of allMessages) {
 				try {
-					const msgTimestamp = decryptTimestamp(msg.encryptedTimestamp);
-					// Include new messages OR recently updated messages (reaction/edit after cursor)
-					return msgTimestamp > afterTimestamp || ((msg.lastUpdated || 0) > afterTimestamp);
-				} catch (err) {
-					console.warn('Skipping message with invalid timestamp:', err);
-					return false;
+					const t = decryptTimestamp(msg.encryptedTimestamp);
+					if (t < oldestInMemory) oldestInMemory = t;
+				} catch {}
+			}
+
+			if (afterTimestamp < oldestInMemory && allMessages.length > 0) {
+				// Cursor is older than memory window — fall back to disk
+				const diskResult = loadMessagesFromDisk(chatHandle, afterTimestamp, 200);
+				if (diskResult.messages.length > 0) {
+					// Merge disk + memory, deduplicate by ID
+					const merged = new Map();
+					for (const m of diskResult.messages) merged.set(m.id, m);
+					for (const m of allMessages) {
+						try {
+							if (decryptTimestamp(m.encryptedTimestamp) > afterTimestamp ||
+								(m.lastUpdated || 0) > afterTimestamp) {
+								merged.set(m.id, m);
+							}
+						} catch {}
+					}
+					filteredMessages = [...merged.values()];
+				} else {
+					// Disk also doesn't have it — signal gap to client
+					gapDetected = true;
+					filteredMessages = allMessages;
 				}
-			});
+			} else {
+				// Normal path: cursor is within memory window
+				filteredMessages = allMessages.filter((msg) => {
+					try {
+						const msgTimestamp = decryptTimestamp(msg.encryptedTimestamp);
+						return msgTimestamp > afterTimestamp || ((msg.lastUpdated || 0) > afterTimestamp);
+					} catch (err) {
+						console.warn('Skipping message with invalid timestamp:', err);
+						return false;
+					}
+				});
+			}
 			console.log(
-				`Filtering after timestamp ${afterTimestamp}: ${filteredMessages.length} new messages`,
+				`Filtering after timestamp ${afterTimestamp}: ${filteredMessages.length} new messages${gapDetected ? ' (gap detected)' : ''}`,
 			);
 		} catch (err) {
 			console.warn('Failed to decrypt after parameter, returning all messages:', err);
@@ -1123,7 +1214,7 @@ function handleGetMessages(req, res, pathname) {
 	// Send the (filtered and sorted) list, serialized for client
 	res.writeHead(200, { 'Content-Type': 'application/json' });
 	if (afterTimestamp !== null) {
-		res.end(JSON.stringify({ messages: serializedMessages, nextCursor }));
+		res.end(JSON.stringify({ messages: serializedMessages, nextCursor, gap: gapDetected || false }));
 	} else {
 		res.end(JSON.stringify(serializedMessages));
 	}
