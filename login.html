@@ -97,7 +97,8 @@
             --bg-secondary: #12121a;
             --bg-tertiary: #1a1a24;
             --bg-elevated: #22222e;
-            --bg-glass: rgba(18, 18, 26, 0.85);
+            --bg-surface: #2e2e42;
+            --bg-glass: rgba(18, 18, 26, 0.6);
             
             /* Text Colors */
             --text-primary: #ffffff;
@@ -107,7 +108,7 @@
             /* Accent Colors - Modern Blue-Purple Gradient */
             --accent: #6366f1;
             --accent-light: #818cf8;
-            --accent-glow: rgba(99, 102, 241, 0.4);
+            --accent-glow: rgba(99, 102, 241, 0.25);
             --accent-gradient: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #d946ef 100%);
             
             /* Status Colors */
@@ -152,7 +153,7 @@
             --transition-slow: 350ms ease;
             
             /* Message */
-            --message-radius: 18px;
+            --message-radius: 20px;
             
             /* Layout */
             --header-height: 60px;
@@ -189,9 +190,22 @@
             overflow: hidden;
             /* Modern gradient background */
             background:
-                radial-gradient(ellipse at 20% 0%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
-                radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 20% 0%, rgba(99, 102, 241, 0.22) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.16) 0%, transparent 50%),
                 var(--bg-primary);
+        }
+
+        /* Subtle noise texture for visual richness */
+        body::before {
+            content: '';
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4'/%3E%3CfeColorMatrix type='saturate' values='0.2'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
+            z-index: 0;
         }
 
         /* Scrollbar Styling */
@@ -229,11 +243,11 @@
 
         .setup-card {
             background: var(--bg-glass);
-            backdrop-filter: blur(20px);
-            -webkit-backdrop-filter: blur(20px);
+            backdrop-filter: blur(20px) saturate(180%);
+            -webkit-backdrop-filter: blur(20px) saturate(180%);
             border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: var(--radius-xl);
-            padding: 48px 40px;
+            padding: 40px 36px;
             width: 100%;
             max-width: 420px;
             box-shadow:
@@ -312,7 +326,7 @@
             border-color: var(--accent);
             background: rgba(34, 34, 46, 0.8);
             box-shadow:
-                0 0 0 3px rgba(99, 102, 241, 0.15),
+                0 0 0 3px rgba(99, 102, 241, 0.25),
                 inset 0 1px 2px rgba(0, 0, 0, 0.2);
         }
 
@@ -361,15 +375,14 @@
         }
 
         .btn-primary:hover {
-            transform: translateY(-1px);
+            transform: scale(1.02);
             box-shadow:
-                0 10px 15px -3px rgba(99, 102, 241, 0.35),
-                0 4px 6px -4px rgba(99, 102, 241, 0.25),
+                0 12px 24px rgba(99, 102, 241, 0.3),
                 0 0 0 1px rgba(255, 255, 255, 0.12) inset;
         }
 
         .btn-primary:active {
-            transform: translateY(0);
+            transform: scale(0.98);
             box-shadow:
                 0 2px 4px -1px rgba(99, 102, 241, 0.25),
                 0 0 0 1px rgba(255, 255, 255, 0.08) inset;
@@ -392,8 +405,12 @@
         }
 
         .btn-danger:hover {
-            transform: translateY(-2px);
+            transform: scale(1.02);
             box-shadow: var(--shadow-md), 0 0 20px rgba(239, 68, 68, 0.3);
+        }
+
+        .btn-danger:active {
+            transform: scale(0.98);
         }
 
         /* Chat List Screen - Modern Design */
@@ -415,8 +432,8 @@
             right: 0;
             bottom: 0;
             background:
-                radial-gradient(ellipse at 0% 0%, rgba(99, 102, 241, 0.08) 0%, transparent 40%),
-                radial-gradient(ellipse at 100% 100%, rgba(139, 92, 246, 0.05) 0%, transparent 40%);
+                radial-gradient(ellipse at 0% 0%, rgba(99, 102, 241, 0.14) 0%, transparent 40%),
+                radial-gradient(ellipse at 100% 100%, rgba(139, 92, 246, 0.1) 0%, transparent 40%);
             pointer-events: none;
         }
 
@@ -522,22 +539,22 @@
         .chat-item {
             display: flex;
             align-items: center;
-            padding: 16px;
+            padding: 12px 16px;
             background: transparent;
             border-bottom: 1px solid var(--border-color);
             cursor: pointer;
-            transition: all var(--transition-base);
+            transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
             position: relative;
             animation: slideUp 0.3s ease forwards;
         }
 
         .chat-item:hover {
-            background: var(--bg-secondary);
+            background: var(--bg-tertiary);
         }
 
         .chat-item:active {
-            background: var(--bg-tertiary);
-            transform: scale(0.995);
+            background: var(--bg-elevated);
+            transform: scale(0.99);
         }
 
         .chat-item:nth-child(1) { animation-delay: 0ms; }
@@ -559,7 +576,9 @@
             font-weight: 700;
             flex-shrink: 0;
             margin-right: 14px;
-            box-shadow: 0 4px 12px var(--accent-glow);
+            box-shadow:
+                0 4px 12px rgba(99, 102, 241, 0.3),
+                inset 0 1px 2px rgba(255, 255, 255, 0.2);
             position: relative;
             overflow: hidden;
         }
@@ -571,7 +590,7 @@
             left: 0;
             right: 0;
             bottom: 0;
-            background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, transparent 50%);
+            background: linear-gradient(135deg, rgba(255,255,255,0.25) 0%, transparent 70%);
         }
 
         .chat-info {
@@ -594,9 +613,10 @@
         }
 
         .chat-time {
-            font-size: var(--font-size-xs);
+            font-size: var(--font-size-sm);
             color: var(--text-muted);
-            font-weight: 500;
+            font-weight: 400;
+            font-variant-numeric: tabular-nums;
         }
 
         .chat-preview {
@@ -613,6 +633,8 @@
             overflow: hidden;
             text-overflow: ellipsis;
             line-height: 1.4;
+            mask-image: linear-gradient(to right, black 85%, transparent 100%);
+            -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
         }
 
         /* Modern Unread Badge */
@@ -629,15 +651,17 @@
             justify-content: center;
             padding: 0 8px;
             box-shadow: 0 2px 8px var(--accent-glow);
-            animation: badgePulse 2s ease-in-out infinite;
+            animation: badgePulse 1.2s ease-in-out infinite;
         }
 
         @keyframes badgePulse {
             0%, 100% {
                 transform: scale(1);
+                opacity: 1;
             }
             50% {
-                transform: scale(1.1);
+                transform: scale(1.08);
+                opacity: 0.9;
             }
         }
 
@@ -675,6 +699,12 @@
             font-size: 64px;
             margin-bottom: 20px;
             opacity: 0.5;
+            animation: float 3s ease-in-out infinite;
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-8px); }
         }
 
         .empty-state-title {
@@ -734,8 +764,8 @@
             width: 100%;
             height: 100%;
             background: rgba(0, 0, 0, 0.75);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
             z-index: 200;
             align-items: center;
             justify-content: center;
@@ -749,21 +779,24 @@
         /* Modern Modal Card */
         .modal {
             background: var(--bg-glass);
-            backdrop-filter: blur(24px);
-            -webkit-backdrop-filter: blur(24px);
-            border: 1px solid var(--border-color);
+            backdrop-filter: blur(24px) saturate(180%);
+            -webkit-backdrop-filter: blur(24px) saturate(180%);
+            border: 1px solid rgba(255, 255, 255, 0.12);
             border-radius: var(--radius-xl);
             padding: 32px;
             width: 100%;
             max-width: 420px;
-            box-shadow: var(--shadow-lg), 0 0 40px rgba(99, 102, 241, 0.1);
-            animation: modalIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+            box-shadow:
+                0 20px 60px rgba(0, 0, 0, 0.4),
+                0 0 40px rgba(99, 102, 241, 0.1),
+                0 0 0 1px rgba(255, 255, 255, 0.1) inset;
+            animation: modalIn 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
         }
 
         @keyframes modalIn {
             from {
                 opacity: 0;
-                transform: translateY(-24px) scale(0.95);
+                transform: translateY(-16px) scale(0.95);
             }
             to {
                 opacity: 1;
@@ -801,6 +834,7 @@
         .modal-close:hover {
             background: var(--bg-tertiary);
             color: var(--text-primary);
+            transform: rotate(90deg) scale(1.1);
         }
 
         .modal-actions {
@@ -849,8 +883,8 @@
             right: 0;
             bottom: 0;
             background:
-                radial-gradient(ellipse at 0% 50%, rgba(99, 102, 241, 0.05) 0%, transparent 50%),
-                radial-gradient(ellipse at 100% 50%, rgba(139, 92, 246, 0.03) 0%, transparent 50%);
+                radial-gradient(ellipse at 0% 50%, rgba(99, 102, 241, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 100% 50%, rgba(139, 92, 246, 0.07) 0%, transparent 50%);
             pointer-events: none;
         }
 
@@ -1011,15 +1045,15 @@
             width: 40px;
             height: 40px;
             border-radius: 50%;
-            background: var(--bg-secondary);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
+            background: var(--accent);
+            color: white;
+            border: none;
             cursor: pointer;
             display: none;
             align-items: center;
             justify-content: center;
             z-index: 50;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
             transition: all 0.3s ease;
             opacity: 0;
         }
@@ -1027,6 +1061,7 @@
         .scroll-to-bottom-btn svg {
             width: 18px;
             height: 18px;
+            stroke: white;
         }
 
         .scroll-to-bottom-btn.visible {
@@ -1036,13 +1071,8 @@
         }
 
         .scroll-to-bottom-btn:hover {
-            background: var(--accent);
-            color: #000;
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
             transform: translateX(-50%) scale(1.1);
-        }
-
-        .scroll-to-bottom-btn:hover svg {
-            stroke: #000;
         }
 
         .unread-message-count {
@@ -1065,25 +1095,25 @@
         .message-group {
             display: flex;
             flex-direction: column;
-            margin-bottom: 4px;
+            margin-bottom: 8px;
             min-width: 0;
             width: 100%;
         }
 
         .message {
             max-width: 80%;
-            margin-bottom: 4px;
-            padding: 12px 16px;
+            margin-bottom: 2px;
+            padding: 10px 14px;
             border-radius: var(--message-radius);
             position: relative;
             word-wrap: break-word;
-            animation: messageIn 0.25s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            animation: messageIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         @keyframes messageIn {
             from {
                 opacity: 0;
-                transform: translateY(12px) scale(0.98);
+                transform: translateY(4px) scale(0.995);
             }
             to {
                 opacity: 1;
@@ -1118,21 +1148,47 @@
             }
         }
 
+        /* Message grouping — consecutive same-sender groups chain together */
+        .message-group:has(.message.own) + .message-group:has(.message.own),
+        .message-group:has(.message.received) + .message-group:has(.message.received) {
+            margin-top: -6px; /* collapse the 8px group margin to ~2px gap */
+        }
+
+        .message-group:has(.message.own) + .message-group:has(.message.own) .message.own {
+            border-top-right-radius: 8px;
+        }
+
+        .message-group:has(.message.received) + .message-group:has(.message.received) .message.received {
+            border-top-left-radius: 8px;
+        }
+
+        .message-group:has(.message.own):has(+ .message-group:has(.message.own)) .message.own {
+            border-bottom-right-radius: 8px;
+        }
+
+        .message-group:has(.message.received):has(+ .message-group:has(.message.received)) .message.received {
+            border-bottom-left-radius: 8px;
+        }
+
         /* Modern Message Bubbles */
         .message.own {
             align-self: flex-end;
             background: var(--bg-own);
             color: white;
-            border-bottom-right-radius: 6px;
-            box-shadow: 0 2px 8px rgba(99, 102, 241, 0.2);
+            border-bottom-right-radius: 4px;
+            box-shadow:
+                0 2px 6px rgba(99, 102, 241, 0.25),
+                0 0 1px rgba(99, 102, 241, 0.15) inset;
+            text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
         }
 
         .message.received {
             align-self: flex-start;
             background: var(--bg-received);
             color: var(--text-primary);
-            border-bottom-left-radius: 6px;
+            border-bottom-left-radius: 4px;
             border: 1px solid var(--border-color);
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
         }
 
 
@@ -1143,9 +1199,10 @@
             align-items: center;
             gap: 4px;
             margin-top: 3px;
-            font-size: 10px;
-            opacity: 0.65;
+            font-size: 11px;
+            opacity: 0.72;
             user-select: none;
+            font-variant-numeric: tabular-nums;
         }
 
         /* Long message collapse */
@@ -1314,7 +1371,8 @@
         }
 
         .message-sender {
-            font-weight: 600;
+            font-weight: 700;
+            letter-spacing: -0.3px;
             display: flex;
             align-items: center;
             gap: 4px;
@@ -1357,11 +1415,11 @@
         }
 
         .typing-dots span {
-            width: 5px;
-            height: 5px;
+            width: 4px;
+            height: 4px;
             border-radius: 50%;
             background: var(--text-muted);
-            animation: typingBounce 1.2s infinite ease-in-out;
+            animation: typingBounce 1.4s infinite ease-in-out;
         }
 
         .typing-dots span:nth-child(2) { animation-delay: 0.2s; }
@@ -1464,13 +1522,23 @@
             cursor: pointer;
             border: 1px solid var(--border-color);
             background: var(--bg-secondary);
-            transition: background 0.15s, border-color 0.15s;
+            transition: all 0.15s ease;
             user-select: none;
+        }
+
+        .reaction-pill:hover {
+            background: var(--bg-elevated);
+            border-color: var(--border-light);
+            transform: scale(1.05);
+        }
+
+        .reaction-pill:active {
+            transform: scale(0.95);
         }
 
         .reaction-pill.mine {
             border-color: var(--accent);
-            background: rgba(99, 102, 241, 0.12);
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.15), rgba(139, 92, 246, 0.08));
         }
 
         .reaction-pill .pill-count {
@@ -1481,10 +1549,11 @@
         /* ── Reply quote block ── */
         .reply-quote {
             border-left: 3px solid var(--accent);
-            padding: 4px 8px;
+            padding: 6px 10px;
             margin-bottom: 6px;
-            border-radius: 4px;
-            background: rgba(0,0,0,0.12);
+            border-radius: 6px;
+            background: rgba(99, 102, 241, 0.08);
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.1);
             font-size: var(--font-size-xs);
             cursor: pointer;
         }
@@ -1506,9 +1575,12 @@
         /* ── Edited badge ── */
         .edited-badge {
             font-size: 10px;
-            opacity: 0.55;
-            margin-left: 4px;
-            font-style: italic;
+            opacity: 0.7;
+            margin-left: 6px;
+            font-style: normal;
+            background: rgba(255, 255, 255, 0.08);
+            padding: 1px 5px;
+            border-radius: 4px;
         }
 
         /* ── Context bars (reply / edit) ── */
@@ -1607,7 +1679,7 @@
             border: none;
             cursor: pointer;
             padding: 0 4px;
-            opacity: 0.45;
+            opacity: 0.65;
             transition: opacity 0.15s;
             flex-shrink: 0;
             display: flex;
@@ -1789,7 +1861,7 @@
             border: none;
             cursor: pointer;
             padding: 0 4px;
-            opacity: 0.45;
+            opacity: 0.65;
             transition: opacity 0.15s;
             flex-shrink: 0;
             display: flex;
@@ -1848,7 +1920,8 @@
 
         .message-content {
             font-size: var(--font-size-base);
-            line-height: 1.55;
+            line-height: 1.6;
+            letter-spacing: 0.2px;
             white-space: pre-wrap;
         }
 
@@ -2106,11 +2179,11 @@
         /* Modern Input Area */
         .input-area {
             background: var(--bg-glass);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
+            backdrop-filter: blur(16px) saturate(150%);
+            -webkit-backdrop-filter: blur(16px) saturate(150%);
             border-top: 1px solid var(--border-color);
-            padding: 14px 18px;
-            padding-bottom: max(14px, env(safe-area-inset-bottom));
+            padding: 16px 18px;
+            padding-bottom: max(16px, env(safe-area-inset-bottom));
             position: sticky;
             bottom: 0;
             z-index: 100;
@@ -2127,13 +2200,13 @@
             height: 48px;
             border: none;
             border-radius: 50%;
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--accent);
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: all var(--transition-base);
+            transition: all 0.15s ease;
             flex-shrink: 0;
         }
 
@@ -2143,12 +2216,12 @@
         }
 
         .attachment-btn:hover {
-            background: var(--bg-elevated);
+            background: rgba(99, 102, 241, 0.18);
             transform: scale(1.05);
         }
 
         .attachment-btn.active {
-            background: var(--accent-gradient);
+            background: var(--accent);
             color: white;
         }
 
@@ -2165,6 +2238,7 @@
 
         .input-wrapper:focus-within {
             border-color: var(--accent);
+            background: rgba(99, 102, 241, 0.06);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
 
@@ -2182,7 +2256,7 @@
             align-items: center;
             justify-content: center;
             flex-shrink: 0;
-            opacity: 0.45;
+            opacity: 0.65;
             max-width: 30px;
             overflow: hidden;
             transition: opacity 0.15s ease, max-width 0.25s ease, min-width 0.25s ease, margin 0.25s ease;
@@ -2303,6 +2377,7 @@
 
         .input-action-btn.has-text {
             background: var(--accent);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
         }
 
         .input-action-btn.has-text .icon-mic {
@@ -2870,8 +2945,8 @@
         @media (max-width: 768px) {
             body {
                 background:
-                    radial-gradient(ellipse at 20% 0%, rgba(99, 102, 241, 0.15) 0%, transparent 50%),
-                    radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.1) 0%, transparent 50%),
+                    radial-gradient(ellipse at 20% 0%, rgba(99, 102, 241, 0.22) 0%, transparent 50%),
+                    radial-gradient(ellipse at 80% 100%, rgba(139, 92, 246, 0.16) 0%, transparent 50%),
                     var(--bg-primary);
             }
             
@@ -2941,7 +3016,9 @@
                 background: var(--accent-gradient);
                 font-size: 22px;
                 margin-right: 12px;
-                box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+                box-shadow:
+                    0 4px 12px rgba(99, 102, 241, 0.3),
+                    inset 0 1px 2px rgba(255, 255, 255, 0.2);
             }
             
             .chat-info {
@@ -2966,6 +3043,7 @@
                 font-size: 12px;
                 color: var(--tg-text-secondary);
                 font-weight: 400;
+                font-variant-numeric: tabular-nums;
             }
             
             .chat-preview {
@@ -2982,6 +3060,8 @@
                 overflow: hidden;
                 text-overflow: ellipsis;
                 flex: 1;
+                mask-image: linear-gradient(to right, black 85%, transparent 100%);
+                -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
             }
             
             .unread-badge {
@@ -3115,8 +3195,8 @@
                 padding: 12px 10px;
                 background: var(--tg-bg);
                 background-image:
-                    radial-gradient(circle at 20% 50%, rgba(45, 82, 120, 0.03) 0%, transparent 50%),
-                    radial-gradient(circle at 80% 80%, rgba(45, 82, 120, 0.02) 0%, transparent 50%);
+                    radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.06) 0%, transparent 50%),
+                    radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.04) 0%, transparent 50%);
                 position: relative;
             }
             
@@ -3130,7 +3210,7 @@
             }
             
             .message-group {
-                margin-bottom: 2px;
+                margin-bottom: 6px;
             }
             
             /* Telegram-style Message Bubbles */
@@ -3138,11 +3218,12 @@
                 max-width: 85%;
                 margin-bottom: 2px;
                 padding: 8px 12px;
-                border-radius: 16px;
+                border-radius: 18px;
                 font-size: 15px;
                 line-height: 1.4;
                 position: relative;
-                box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+                box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+                animation: messageIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
             }
             
             .message.own {
@@ -3151,34 +3232,40 @@
                 color: var(--tg-text);
                 border-bottom-right-radius: 4px;
                 margin-left: 20%;
+                text-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+                box-shadow:
+                    0 2px 6px rgba(99, 102, 241, 0.25),
+                    0 0 1px rgba(99, 102, 241, 0.15) inset;
             }
-            
+
             .message.received {
                 align-self: flex-start;
                 background: var(--tg-bubble-received);
                 color: var(--tg-text);
                 border-bottom-left-radius: 4px;
                 margin-right: 20%;
+                box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
             }
             
-            /* Consecutive messages styling */
-            .message.own + .message.own {
+            /* Consecutive same-sender grouping */
+            .message-group:has(.message.own) + .message-group:has(.message.own),
+            .message-group:has(.message.received) + .message-group:has(.message.received) {
+                margin-top: -4px;
+            }
+
+            .message-group:has(.message.own) + .message-group:has(.message.own) .message.own {
                 border-top-right-radius: 8px;
-                border-bottom-right-radius: 4px;
-                margin-top: 1px;
             }
-            
-            .message.received + .message.received {
+
+            .message-group:has(.message.received) + .message-group:has(.message.received) .message.received {
                 border-top-left-radius: 8px;
-                border-bottom-left-radius: 4px;
-                margin-top: 1px;
             }
-            
-            .message.own:has(+ .message.own) {
+
+            .message-group:has(.message.own):has(+ .message-group:has(.message.own)) .message.own {
                 border-bottom-right-radius: 8px;
             }
-            
-            .message.received:has(+ .message.received) {
+
+            .message-group:has(.message.received):has(+ .message-group:has(.message.received)) .message.received {
                 border-bottom-left-radius: 8px;
             }
             
@@ -3200,6 +3287,7 @@
                 color: rgba(255,255,255,0.6);
                 font-size: 11px;
                 font-weight: 400;
+                font-variant-numeric: tabular-nums;
             }
             
             .message-status-icon {
@@ -3210,7 +3298,7 @@
             
             .message-content {
                 font-size: 15px;
-                line-height: 1.4;
+                line-height: 1.55;
                 word-wrap: break-word;
             }
             
@@ -3236,10 +3324,12 @@
 
             /* Input Area - Telegram Style */
             .input-area {
-                background: var(--tg-bg-secondary);
+                background: rgba(18, 18, 26, 0.6);
+                backdrop-filter: blur(16px) saturate(150%);
+                -webkit-backdrop-filter: blur(16px) saturate(150%);
                 border-top: 1px solid var(--tg-border);
-                padding: 8px 12px;
-                padding-bottom: max(8px, env(safe-area-inset-bottom));
+                padding: 10px 12px;
+                padding-bottom: max(10px, env(safe-area-inset-bottom));
                 position: sticky;
                 bottom: 0;
                 z-index: 100;
@@ -3251,14 +3341,13 @@
                 bottom: 90px;
                 width: 44px;
                 height: 44px;
-                background: var(--tg-bg-secondary);
-                border: 1px solid var(--tg-border);
-                box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+                background: var(--tg-accent);
+                border: none;
+                box-shadow: 0 4px 16px rgba(99, 102, 241, 0.4);
             }
 
             .scroll-to-bottom-btn:hover {
-                background: var(--tg-accent);
-                color: #fff;
+                box-shadow: 0 6px 20px rgba(99, 102, 241, 0.5);
             }
             
             /* Expandable Attachment Menu */
@@ -3677,7 +3766,7 @@
         /* Extra small devices */
         @media (max-width: 480px) {
             .chat-item {
-                padding: 10px 12px;
+                padding: 10px 14px;
             }
             
             .chat-avatar {
@@ -6206,12 +6295,15 @@
         
         // Evict the entire LRU chat from localStorage to free space in bulk.
         // Avoids calling savePollingCursors()/setItemWithEviction() to prevent re-entrant eviction.
+        // Never evicts the currently open chat to prevent cursor loss and re-render loops.
         function evictOldestMessage() {
-            // Pick the least-recently-fetched chat as proxy for LRU
+            const currentHandle = currentChat ? currentChat.handle : null;
+            // Pick the least-recently-fetched chat as proxy for LRU, skipping current chat
             let lruKey = null, lruTime = Infinity;
             for (let key in localStorage) {
                 if (key.startsWith('messages_')) {
                     const handle = key.slice('messages_'.length);
+                    if (handle === currentHandle) continue; // never evict active chat
                     const lastFetch = localStorage.getItem(`lastFetch_${handle}`);
                     const time = lastFetch ? new Date(lastFetch).getTime() : 0;
                     if (time < lruTime) { lruTime = time; lruKey = key; }
@@ -6223,11 +6315,7 @@
             // Wipe entire chat cache — frees much more space per eviction round
             localStorage.removeItem(lruKey);
             localStorage.removeItem(`lastFetch_${handle}`);
-            if (pollingCursors[handle] !== undefined) {
-                delete pollingCursors[handle];
-                // Persist cursor deletion directly to avoid re-entrant setItemWithEviction
-                try { localStorage.setItem('pollingCursors', JSON.stringify(pollingCursors)); } catch (e) {}
-            }
+            // Keep cursor intact — server will handle gap detection when chat is reopened
             return true;
         }
 
@@ -6742,7 +6830,7 @@
         const AUTH_FAILURE_THRESHOLD = 3; // Redirect to login after 3 consecutive 401s
 
         // Message caching with localStorage
-        const MAX_CACHED_MESSAGES_PER_CHAT = 50;
+        const MAX_CACHED_MESSAGES_PER_CHAT = 200;
         let lastFetchTime = 0; // Track last successful fetch timestamp for incremental updates
 
         // Global polling cursors - maps chatHandle to last polled message timestamp
@@ -7236,22 +7324,14 @@
                     heartbeatInterval = setInterval(() => sendHeartbeat(false), 5000);
                 }
                 
-                // If we were gone for more than cursor staleness threshold, force a fresh message fetch
-                // to catch any messages we might have missed
-                if (hiddenDuration > 30000) { // 30 seconds
-                    console.log('[Visibility] Long hidden duration, forcing message sync');
-                    if (currentChat) {
-                        // Clear cursor to force full fetch
-                        delete pollingCursors[currentChat.handle];
-                        savePollingCursors();
-                        
-                        // Restart polling with fresh cursor
-                        if (!isPolling) {
-                            startPolling();
-                        } else {
-                            // Trigger immediate fetch
-                            fetchMessages();
-                        }
+                // Resume polling — server will detect gaps via cursor age and signal gap: true
+                // Don't delete cursor; keep it so server can return only missed messages
+                if (currentChat) {
+                    if (!isPolling) {
+                        startPolling();
+                    } else if (hiddenDuration > 5000) {
+                        // Trigger immediate fetch if we were hidden for more than 5s
+                        fetchMessages();
                     }
                 }
             }
@@ -8817,8 +8897,8 @@
 
                 const rawData = await response.json();
                 const messages = Array.isArray(rawData) ? rawData : (rawData.messages || []);
-                const serverNextCursor = Array.isArray(rawData) ? null : rawData.nextCursor;
-                const hasGap = !Array.isArray(rawData) && rawData.gap === true;
+                const serverNextCursor = rawData.nextCursor || null;
+                const hasGap = rawData.gap === true;
 
                 // Server couldn't find messages between our cursor and its memory window
                 if (hasGap) {
@@ -8852,16 +8932,10 @@
                 await appendMessages(messages, { knownIds: knownIdsBefore });
                 if (!currentChat || currentChat.handle !== fetchHandle) return;
 
-                // Advance cursor: server nextCursor covers both new messages and recent updates
+                // Advance cursor: server always returns nextCursor when there are messages
                 if (serverNextCursor) {
                     pollingCursors[fetchHandle] = serverNextCursor;
                     savePollingCursors();
-                } else {
-                    const trulyNew = messages.filter(m => !m.isUpdate && !knownIdsBefore.has(m.id));
-                    if (trulyNew.length > 0) {
-                        pollingCursors[fetchHandle] = trulyNew[trulyNew.length - 1].id;
-                        savePollingCursors();
-                    }
                 }
             } catch (error) {
                 window.reportClientError(error, 'fetch messages');
@@ -8890,6 +8964,9 @@
                 // Persist sorted cache BEFORE appendMessages reads it, so its own merge stays sorted
                 saveCachedMessages(currentChat.handle, sortedMessages);
 
+                // Preserve scroll position: remember distance from bottom before clearing
+                const scrollFromBottom = messagesContainer.scrollHeight - messagesContainer.scrollTop - messagesContainer.clientHeight;
+
                 // Clear rendered state and re-render from sorted set
                 renderedMessageIds.clear();
                 renderedDateSeparators.clear();
@@ -8898,7 +8975,20 @@
                 optimisticMeta.clear();
                 messagesContainer.innerHTML = '';
 
-                await appendMessages(sortedMessages);
+                await appendMessages(sortedMessages, { skipAutoScroll: true });
+
+                // Restore scroll position: keep user at same distance from bottom
+                const prevBehavior = messagesContainer.style.scrollBehavior;
+                messagesContainer.style.scrollBehavior = 'auto';
+                if (scrollFromBottom < 80) {
+                    // User was at/near bottom — stay at bottom
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                } else {
+                    // Restore distance from bottom
+                    messagesContainer.scrollTop = messagesContainer.scrollHeight - messagesContainer.clientHeight - scrollFromBottom;
+                }
+                messagesContainer.style.scrollBehavior = prevBehavior || '';
+
                 savePollingCursors();
             } catch (err) {
                 window.reportClientError(err, 'rearrange messages');
@@ -8998,42 +9088,28 @@
                     } else {
                         // Normal already-rendered message: sync reactions and edits only
                         updateReactionBar(message.id, message.reactions || {});
-                        // Persist updated reactions to cache so they survive chat switches
-                        if (message.reactions && Object.keys(message.reactions).length > 0) {
-                            try {
-                                const cacheKey = `messages_${handle}`;
-                                const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-                                const idx = cached.findIndex(m => m.id === message.id);
-                                if (idx !== -1 && JSON.stringify(cached[idx].reactions) !== JSON.stringify(message.reactions)) {
-                                    cached[idx] = { ...cached[idx], reactions: message.reactions };
-                                    setItemWithEviction(cacheKey, JSON.stringify(cached));
-                                }
-                            } catch (e) { /* non-fatal */ }
-                        }
                         if (message.isEdited) {
                             const msgGroup = messagesContainer.querySelector(`.message-group[data-message-id="${CSS.escape(message.id)}"]`);
                             if (msgGroup && msgGroup.dataset.encryptedContent !== message.encryptedContent) {
                                 decryptMessage(message.encryptedContent, encryptionKey)
                                     .then(plaintext => patchRenderedMessage(message.id, plaintext, true, message.encryptedContent))
                                     .catch(() => {});
-                                // Persist edited content to cache so it survives chat switches
-                                try {
-                                    const cacheKey = `messages_${handle}`;
-                                    const cached = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-                                    const idx = cached.findIndex(m => m.id === message.id);
-                                    if (idx !== -1) {
-                                        cached[idx] = { ...cached[idx], encryptedContent: message.encryptedContent, isEdited: true };
-                                        setItemWithEviction(cacheKey, JSON.stringify(cached));
-                                    }
-                                } catch (e) { /* non-fatal */ }
                             }
+                        }
+                        // Collect updates for batched cache persist (avoid per-message JSON parse)
+                        if ((message.reactions && Object.keys(message.reactions).length > 0) || message.isEdited) {
+                            allMessages.push(message);
                         }
                         continue;
                     }
                 }
 
-                // Skip update messages for evicted (non-rendered) messages to prevent out-of-order insertion
-                if (message.isUpdate) continue;
+                // Skip rendering update messages for evicted (non-rendered) messages
+                // but still collect them for cache merge so edits/reactions persist
+                if (message.isUpdate) {
+                    allMessages.push(message);
+                    continue;
+                }
 
                 hasNewMessages = true;
                 newMessageCount++;
@@ -9516,7 +9592,7 @@
                 } else {
                     messagesContainer.appendChild(prependFragment);
                 }
-                // Insert IDs at front of messageOrder in chronological order
+                // Insert IDs at front of messageOrder in chronological order (oldest first)
                 messageOrder.unshift(...prependIds);
                 // Preserve scroll position (new content added above)
                 messagesContainer.scrollTop += messagesContainer.scrollHeight - prevScrollHeight;
@@ -10407,7 +10483,7 @@
 
                     const rawBgData = await response.json();
                     const messages = Array.isArray(rawBgData) ? rawBgData : (rawBgData.messages || []);
-                    const bgNextCursor = Array.isArray(rawBgData) ? null : rawBgData.nextCursor;
+                    const bgNextCursor = rawBgData.nextCursor || null;
 
                     if (messages.length > 0) {
                         const cacheKey = `messages_${chat.handle}`;
@@ -10556,6 +10632,8 @@
             messagesContainer.appendChild(messageEl);
             renderedMessageIds.add(id);
             optimisticIds.add(id);
+            messageOrder.push(id);
+            lastReadId = id;
             optimisticMeta.set(id, { text, handle: currentChat.handle, isoTimestamp });
             if (isAtBottom) scrollToBottom(false);
         }

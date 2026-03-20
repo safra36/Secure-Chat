@@ -838,6 +838,15 @@ function appendReactionPatchToDisk(chatHandle, messageId, reactions, lastUpdated
 	}
 }
 
+function appendEditPatchToDisk(chatHandle, messageId, encryptedContent, edits, lastUpdated) {
+	try {
+		const entry = { h: chatHandle, type: 'edit_patch', messageId, encryptedContent, edits, lastUpdated };
+		fs.appendFileSync(chatToFilePath(chatHandle), JSON.stringify(entry) + '\n');
+	} catch (e) {
+		console.error('Failed to persist edit patch:', e);
+	}
+}
+
 function getTotalDataSizeBytes() {
 	let total = 0;
 	try {
@@ -893,15 +902,15 @@ function loadPersistentStorage() {
 			if (!chatHandle) continue;
 
 			// Two-pass: collect messages (Map deduplicates by id, preserving insertion order)
-			// and collect reaction patches to apply after.
+			// and collect patches (reactions + edits) to apply after.
 			const messageMap = new Map(); // id → { msg, content, isCompressed }
-			const reactionPatches = [];   // { messageId, reactions }
+			const patches = [];           // reaction_patch | edit_patch
 
 			for (const line of rawLines) {
 				try {
 					const entry = JSON.parse(line);
-					if (entry.type === 'reaction_patch') {
-						reactionPatches.push(entry);
+					if (entry.type === 'reaction_patch' || entry.type === 'edit_patch') {
+						patches.push(entry);
 					} else if (entry.msg && entry.msg.id) {
 						const existing = messageMap.get(entry.msg.id);
 						messageMap.set(entry.msg.id, {
@@ -913,13 +922,17 @@ function loadPersistentStorage() {
 				} catch (e) {}
 			}
 
-			// Apply reaction patches to their messages
-			for (const patch of reactionPatches) {
+			// Apply patches (reactions + edits) to their messages
+			for (const patch of patches) {
 				const entry = messageMap.get(patch.messageId);
-				if (entry) {
+				if (!entry) continue;
+				if (patch.type === 'reaction_patch') {
 					entry.msg.reactions = patch.reactions;
-					if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
+				} else if (patch.type === 'edit_patch') {
+					entry.msg.encryptedContent = patch.encryptedContent;
+					entry.msg.edits = patch.edits;
 				}
+				if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
 			}
 
 			// Keep last 100 unique messages
@@ -1004,7 +1017,7 @@ function serializeMessageForClient(message, requestingUserId) {
 		};
 	}
 	const colorToken = crypto.createHash('sha256')
-		.update(message.senderUserId + requestingUserId)
+		.update((message.senderUserId || 'unknown') + requestingUserId)
 		.digest('hex').slice(0, 16);
 	const vcSet = channelViewCounts.get(message.id);
 	return {
@@ -1032,24 +1045,29 @@ function loadMessagesFromDisk(chatHandle, afterTimestamp, limit) {
 	const messageMap = new Map();
 	const reactionPatches = [];
 
+	const patches = []; // reaction + edit patches
 	for (const line of rawLines) {
 		try {
 			const entry = JSON.parse(line);
-			if (entry.type === 'reaction_patch') {
-				reactionPatches.push(entry);
+			if (entry.type === 'reaction_patch' || entry.type === 'edit_patch') {
+				patches.push(entry);
 			} else if (entry.msg && entry.msg.id) {
 				messageMap.set(entry.msg.id, entry);
 			}
 		} catch (e) {}
 	}
 
-	// Apply reaction patches
-	for (const patch of reactionPatches) {
+	// Apply patches (reactions + edits)
+	for (const patch of patches) {
 		const entry = messageMap.get(patch.messageId);
-		if (entry) {
+		if (!entry) continue;
+		if (patch.type === 'reaction_patch') {
 			entry.msg.reactions = patch.reactions;
-			if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
+		} else if (patch.type === 'edit_patch') {
+			entry.msg.encryptedContent = patch.encryptedContent;
+			entry.msg.edits = patch.edits;
 		}
+		if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
 	}
 
 	// Filter after timestamp
@@ -1199,8 +1217,8 @@ function handleGetMessages(req, res, pathname) {
 
 	// nextCursor = max(all timestamps + lastUpdated) so client cursor advances past updates too
 	let nextCursor = null;
-	if (afterTimestamp !== null && filteredMessages.length > 0) {
-		let maxTime = afterTimestamp;
+	if (filteredMessages.length > 0) {
+		let maxTime = afterTimestamp || 0;
 		filteredMessages.forEach(msg => {
 			try {
 				const t = decryptTimestamp(msg.encryptedTimestamp);
@@ -1208,16 +1226,12 @@ function handleGetMessages(req, res, pathname) {
 			} catch {}
 			if ((msg.lastUpdated || 0) > maxTime) maxTime = msg.lastUpdated;
 		});
-		if (maxTime > afterTimestamp) nextCursor = encryptTimestamp(maxTime);
+		if (maxTime > 0) nextCursor = encryptTimestamp(maxTime);
 	}
 
 	// Send the (filtered and sorted) list, serialized for client
 	res.writeHead(200, { 'Content-Type': 'application/json' });
-	if (afterTimestamp !== null) {
-		res.end(JSON.stringify({ messages: serializedMessages, nextCursor, gap: gapDetected || false }));
-	} else {
-		res.end(JSON.stringify(serializedMessages));
-	}
+	res.end(JSON.stringify({ messages: serializedMessages, nextCursor, gap: gapDetected || false }));
 }
 
 // Generate UUID v4
@@ -1671,6 +1685,7 @@ function handleEditMessage(req, res, pathname) {
 			message.encryptedContent = encryptedContent;
 			message.edits.push({ encryptedEditTimestamp });
 			message.lastUpdated = Date.now();
+			appendEditPatchToDisk(chatHandle, messageId, encryptedContent, message.edits, message.lastUpdated);
 
 			res.writeHead(200, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ success: true }));
@@ -2065,13 +2080,37 @@ function handleGetHistory(req, res, pathname) {
 	}
 
 	const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
-	const entries = [];
+	const messageMap = new Map(); // preserve order, deduplicate
+	const patches = [];
+	const orderedIds = []; // track insertion order
+
 	for (const line of rawLines) {
 		try {
 			const parsed = JSON.parse(line);
-			if (parsed && parsed.msg) entries.push(parsed);
+			if (parsed.type === 'reaction_patch' || parsed.type === 'edit_patch') {
+				patches.push(parsed);
+			} else if (parsed && parsed.msg && parsed.msg.id) {
+				if (!messageMap.has(parsed.msg.id)) orderedIds.push(parsed.msg.id);
+				messageMap.set(parsed.msg.id, parsed);
+			}
 		} catch (e) {}
 	}
+
+	// Apply patches (reactions + edits)
+	for (const patch of patches) {
+		const entry = messageMap.get(patch.messageId);
+		if (!entry) continue;
+		if (patch.type === 'reaction_patch') {
+			entry.msg.reactions = patch.reactions;
+		} else if (patch.type === 'edit_patch') {
+			entry.msg.encryptedContent = patch.encryptedContent;
+			entry.msg.edits = patch.edits;
+		}
+		if (patch.lastUpdated) entry.msg.lastUpdated = patch.lastUpdated;
+	}
+
+	// Rebuild ordered entries array
+	const entries = orderedIds.map(id => messageMap.get(id));
 
 	// Find the index of the message with beforeId; default to end of array
 	let beforeIndex = entries.length;
