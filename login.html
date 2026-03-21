@@ -1305,6 +1305,91 @@
         .activity-name { font-size: 14px; font-weight: 500; color: var(--text-primary); }
         .activity-meta { font-size: 12px; color: var(--text-muted); }
 
+        /* Chat header right group */
+        .chat-header-right {
+            margin-left: auto;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            position: relative;
+        }
+        .chat-header-right .call-btn { margin-left: 0; }
+
+        /* Chat header dropdown menu */
+        .chat-menu-dropdown {
+            display: none;
+            position: absolute;
+            top: calc(100% + 8px);
+            right: 0;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 6px;
+            min-width: 190px;
+            z-index: 500;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }
+        .chat-menu-dropdown.open { display: block; }
+        .chat-menu-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            width: 100%;
+            padding: 10px 12px;
+            background: transparent;
+            border: none;
+            border-radius: 8px;
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+            text-align: left;
+            transition: background var(--transition-base);
+        }
+        .chat-menu-item:hover { background: rgba(255,255,255,0.06); }
+        .chat-menu-item--danger { color: #f87171; }
+        .chat-menu-item--danger:hover { background: rgba(248,113,113,0.1); }
+        .chat-menu-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+
+        /* Wallpaper picker */
+        .wallpaper-swatches {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 16px;
+        }
+        .wallpaper-swatch {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: 2px solid var(--border-color);
+            cursor: pointer;
+            transition: transform 0.15s ease, border-color 0.15s ease;
+        }
+        .wallpaper-swatch:hover { transform: scale(1.1); border-color: var(--accent); }
+        .wallpaper-swatch--none {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            font-size: 16px;
+        }
+        .wallpaper-img-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 14px;
+            cursor: pointer;
+            transition: background var(--transition-base);
+        }
+        .wallpaper-img-btn:hover { background: rgba(255,255,255,0.06); }
+
         /* Key change warning */
         .key-warning-icon {
             display: inline-flex;
@@ -5240,11 +5325,31 @@
                     </div>
                 </div>
             </div>
-            <button id="call-btn" class="call-btn" title="Voice Call">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
-                    <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
-                </svg>
-            </button>
+            <div class="chat-header-right">
+                <button id="call-btn" class="call-btn" title="Voice Call">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+                        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
+                    </svg>
+                </button>
+                <button id="chat-menu-btn" class="call-btn" title="More options" onclick="toggleChatMenu(event)">
+                    <svg viewBox="0 0 24 24" fill="currentColor" style="width:18px;height:18px"><circle cx="12" cy="5" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="19" r="1.5"/></svg>
+                </button>
+                <div id="chat-menu-dropdown" class="chat-menu-dropdown" onclick="event.stopPropagation()">
+                    <button class="chat-menu-item" onclick="openWallpaperPicker()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+                        Change Wallpaper
+                    </button>
+                    <button class="chat-menu-item" onclick="clearHistoryMenu()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/></svg>
+                        Clear History
+                    </button>
+                    <div class="chat-menu-divider"></div>
+                    <button class="chat-menu-item chat-menu-item--danger" onclick="deleteChatMenu()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
+                        Delete Chat
+                    </button>
+                </div>
+            </div>
         </div>
 
         <!-- Activity Sheet -->
@@ -5253,6 +5358,28 @@
             <div class="activity-sheet-handle"></div>
             <div class="activity-sheet-title">Participants</div>
             <div id="activity-list" class="activity-list"></div>
+        </div>
+
+        <!-- Wallpaper Sheet -->
+        <div id="wallpaper-overlay" class="activity-overlay" onclick="closeWallpaperPicker()" style="display:none"></div>
+        <div id="wallpaper-sheet" class="activity-sheet">
+            <div class="activity-sheet-handle"></div>
+            <div class="activity-sheet-title">Chat Wallpaper</div>
+            <div class="wallpaper-swatches">
+                <button class="wallpaper-swatch wallpaper-swatch--none" onclick="setWallpaperColor('')" title="Default">✕</button>
+                <button class="wallpaper-swatch" style="background:#0f1724" onclick="setWallpaperColor('#0f1724')"></button>
+                <button class="wallpaper-swatch" style="background:#1a1a2e" onclick="setWallpaperColor('#1a1a2e')"></button>
+                <button class="wallpaper-swatch" style="background:#0d1b2a" onclick="setWallpaperColor('#0d1b2a')"></button>
+                <button class="wallpaper-swatch" style="background:#1c2b1a" onclick="setWallpaperColor('#1c2b1a')"></button>
+                <button class="wallpaper-swatch" style="background:#2b1a1a" onclick="setWallpaperColor('#2b1a1a')"></button>
+                <button class="wallpaper-swatch" style="background:#1a0d2e" onclick="setWallpaperColor('#1a0d2e')"></button>
+                <button class="wallpaper-swatch" style="background:#000000" onclick="setWallpaperColor('#000000')"></button>
+            </div>
+            <button class="wallpaper-img-btn" onclick="triggerWallpaperImage()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                Upload Image
+            </button>
+            <input type="file" id="wallpaper-file-input" accept="image/*" style="display:none" onchange="handleWallpaperImage(event)">
         </div>
 
         <div id="active-call-banner" class="active-call-banner" style="display:none">
@@ -8002,13 +8129,6 @@
                     } else {
                         avatarEl.textContent = avatarInitial;
                     }
-                    if (!chat._channel) {
-                        const deleteBtn = document.createElement('button');
-                        deleteBtn.className = 'delete-btn';
-                        deleteBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';
-                        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); deleteChat(chat.handle); });
-                        chatItem.appendChild(deleteBtn);
-                    }
                     chatItem.addEventListener('click', () => openChat(chat.handle));
                 }
 
@@ -8093,6 +8213,111 @@
             saveChats();
             renderChatList();
             showToast('Chat deleted', 'success');
+        }
+
+        // Chat header menu
+        function toggleChatMenu(e) {
+            e && e.stopPropagation();
+            document.getElementById('chat-menu-dropdown').classList.toggle('open');
+        }
+        document.addEventListener('click', () => {
+            document.getElementById('chat-menu-dropdown')?.classList.remove('open');
+        });
+
+        function clearHistoryMenu() {
+            document.getElementById('chat-menu-dropdown').classList.remove('open');
+            if (!currentChat) return;
+            clearChatCache(currentChat.handle);
+        }
+
+        function deleteChatMenu() {
+            document.getElementById('chat-menu-dropdown').classList.remove('open');
+            if (!currentChat) return;
+            const handle = currentChat.handle;
+            deleteChat(handle);
+            if (!chats.find(c => c.handle === handle)) backToChatList();
+        }
+
+        function openWallpaperPicker() {
+            document.getElementById('chat-menu-dropdown').classList.remove('open');
+            const overlay = document.getElementById('wallpaper-overlay');
+            const sheet = document.getElementById('wallpaper-sheet');
+            overlay.style.display = '';
+            overlay.classList.add('visible');
+            sheet.classList.add('open');
+        }
+
+        function closeWallpaperPicker() {
+            const overlay = document.getElementById('wallpaper-overlay');
+            const sheet = document.getElementById('wallpaper-sheet');
+            overlay.classList.remove('visible');
+            sheet.classList.remove('open');
+            setTimeout(() => { overlay.style.display = 'none'; }, 300);
+        }
+
+        async function setWallpaperColor(color) {
+            if (!currentChat) return;
+            const handle = currentChat.handle;
+            try {
+                if (color) {
+                    await contentCacheDB.setWallpaper(handle, { type: 'color', value: color });
+                    localStorage.setItem('wallpaper_ref_' + handle, '1');
+                } else {
+                    await contentCacheDB.deleteWallpaper(handle);
+                    localStorage.removeItem('wallpaper_ref_' + handle);
+                }
+            } catch(err) { console.warn('Wallpaper IDB error:', err); }
+            await applyWallpaper(handle);
+            closeWallpaperPicker();
+        }
+
+        function triggerWallpaperImage() {
+            document.getElementById('wallpaper-file-input').click();
+        }
+
+        function handleWallpaperImage(e) {
+            if (!currentChat) return;
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (ev) => {
+                const handle = currentChat.handle;
+                try {
+                    await contentCacheDB.setWallpaper(handle, { type: 'image', value: ev.target.result });
+                    localStorage.setItem('wallpaper_ref_' + handle, '1');
+                } catch(err) { console.warn('Wallpaper IDB error:', err); }
+                await applyWallpaper(handle);
+                closeWallpaperPicker();
+            };
+            reader.readAsDataURL(file);
+            e.target.value = '';
+        }
+
+        async function applyWallpaper(handle) {
+            const msgs = document.getElementById('messages');
+            if (!msgs) return;
+            if (!localStorage.getItem('wallpaper_ref_' + handle)) {
+                msgs.style.background = '';
+                msgs.style.backgroundImage = '';
+                return;
+            }
+            try {
+                const wp = await contentCacheDB.getWallpaper(handle);
+                if (!wp) {
+                    msgs.style.background = '';
+                    msgs.style.backgroundImage = '';
+                    localStorage.removeItem('wallpaper_ref_' + handle);
+                    return;
+                }
+                if (wp.type === 'color') {
+                    msgs.style.background = wp.value;
+                    msgs.style.backgroundImage = '';
+                } else if (wp.type === 'image') {
+                    msgs.style.backgroundImage = `url(${wp.value})`;
+                    msgs.style.backgroundSize = 'cover';
+                    msgs.style.backgroundPosition = 'center';
+                }
+            } catch(err) {}
         }
 
         // Scroll management functions
@@ -8202,9 +8427,11 @@
             const callBtn = document.getElementById('call-btn');
             let channelBanner = document.getElementById('channel-readonly-banner');
             const inputAreaEl = document.querySelector('.input-area');
+            const menuBtn = document.getElementById('chat-menu-btn');
             if (currentChat._channel) {
                 if (chatStatusEl) chatStatusEl.style.display = 'none';
                 if (callBtn) callBtn.style.display = currentChat._canPost ? '' : 'none';
+                if (menuBtn) menuBtn.style.display = currentChat._canPost ? '' : 'none';
                 if (!currentChat._canPost) {
                     if (inputAreaEl) inputAreaEl.style.display = 'none';
                     if (!channelBanner) {
@@ -8223,6 +8450,7 @@
             } else {
                 if (chatStatusEl) chatStatusEl.style.display = '';
                 if (callBtn) callBtn.style.display = '';
+                if (menuBtn) menuBtn.style.display = '';
                 if (inputAreaEl) inputAreaEl.style.display = '';
                 if (channelBanner) channelBanner.style.display = 'none';
             }
@@ -8233,6 +8461,7 @@
             renderedMessageIds.clear();
             renderedDateSeparators.clear();
             messagesContainer.innerHTML = '';
+            await applyWallpaper(handle);
             messageDeliveryStatus.clear();
             messageOrder.length = 0;
             optimisticIds.clear();

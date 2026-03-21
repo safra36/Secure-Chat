@@ -7,7 +7,7 @@
 class ContentCacheDB {
     constructor() {
         this.dbName = 'SecureChatDB';
-        this.dbVersion = 1;
+        this.dbVersion = 2;
         this.storeName = 'content';
         this.db = null;
         this.isInitialized = false;
@@ -64,6 +64,10 @@ class ContentCacheDB {
                     store.createIndex('chatHandle', 'chatHandle', { unique: false });
 
                     console.log('✅ IndexedDB schema created with indexes');
+                }
+
+                if (!db.objectStoreNames.contains('wallpaper')) {
+                    db.createObjectStore('wallpaper', { keyPath: 'handle' });
                 }
             };
         });
@@ -471,6 +475,36 @@ class ContentCacheDB {
             console.error('Migration error:', error);
             return migrated;
         }
+    }
+
+    async setWallpaper(handle, data) {
+        await this.init();
+        const tx = this.db.transaction(['wallpaper'], 'readwrite');
+        tx.objectStore('wallpaper').put({ handle, ...data });
+        return new Promise((resolve, reject) => {
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => reject(tx.error);
+        });
+    }
+
+    async getWallpaper(handle) {
+        await this.init();
+        const tx = this.db.transaction(['wallpaper'], 'readonly');
+        const req = tx.objectStore('wallpaper').get(handle);
+        return new Promise((resolve) => {
+            req.onsuccess = () => resolve(req.result || null);
+            req.onerror = () => resolve(null);
+        });
+    }
+
+    async deleteWallpaper(handle) {
+        await this.init();
+        const tx = this.db.transaction(['wallpaper'], 'readwrite');
+        tx.objectStore('wallpaper').delete(handle);
+        return new Promise((resolve) => {
+            tx.oncomplete = () => resolve(true);
+            tx.onerror = () => resolve(false);
+        });
     }
 
     /**
