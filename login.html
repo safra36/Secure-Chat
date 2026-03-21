@@ -1450,6 +1450,15 @@
         /* ── Message action toolbar ── */
         /* Toolbar lives INSIDE .message (which already has position:relative),
            so it never causes layout overflow of the full-width .message-group. */
+        .message-actions::after {
+            content: '';
+            position: absolute;
+            top: 100%;
+            left: -10px;
+            right: -10px;
+            height: 10px;
+        }
+
         .message-actions {
             display: none;
             position: absolute;
