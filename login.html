@@ -5239,6 +5239,99 @@
             }
         }
     </style>
+    <style>
+        /* ── Bot UI ───────────────────────────────────────── */
+        @keyframes botDotBounce {
+            0%, 60%, 100% { transform: translateY(0); opacity: .4; }
+            30% { transform: translateY(-5px); opacity: 1; }
+        }
+        .bot-dot {
+            width: 6px; height: 6px; border-radius: 50%;
+            background: var(--text-muted);
+            display: inline-block;
+            animation: botDotBounce 1.1s infinite ease-in-out;
+        }
+        #bot-input-wrap:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+        .bot-msg-row { display: flex; align-items: flex-end; gap: 8px; margin-bottom: 2px; }
+        .bot-msg-row.user { flex-direction: row-reverse; }
+        .bot-bubble {
+            max-width: 100%;
+            padding: 9px 13px;
+            font-size: 14px;
+            line-height: 1.5;
+            overflow-wrap: break-word;
+            word-break: normal;
+            position: relative;
+        }
+        .bot-bubble.bot-side {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px 16px 16px 4px;
+            color: var(--text-primary);
+        }
+        .bot-bubble.user-side {
+            background: var(--bg-own);
+            border-radius: 16px 16px 4px 16px;
+            color: #fff;
+        }
+        .bot-ts {
+            font-size: 10px;
+            color: var(--text-muted);
+            margin-top: 3px;
+            padding: 0 4px;
+        }
+        .bot-ts.user { text-align: right; }
+        .bot-avatar-sm {
+            width: 26px; height: 26px; border-radius: 8px;
+            background: var(--accent-gradient);
+            flex-shrink: 0;
+            display: flex; align-items: center; justify-content: center;
+            align-self: flex-end;
+        }
+        .bot-card {
+            display: flex; align-items: center; gap: 14px;
+            padding: 14px 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: 16px;
+            cursor: pointer;
+            transition: background var(--transition-fast), border-color var(--transition-fast), transform var(--transition-fast), box-shadow var(--transition-fast);
+        }
+        .bot-card:hover {
+            background: var(--bg-elevated);
+            border-color: rgba(99,102,241,.35);
+            box-shadow: 0 4px 20px rgba(99,102,241,.12);
+            transform: translateY(-1px);
+        }
+        .bot-card:active { transform: scale(0.99); }
+        .bot-card-icon {
+            width: 52px; height: 52px; border-radius: 15px;
+            background: var(--accent-gradient);
+            display: flex; align-items: center; justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 4px 12px rgba(99,102,241,.3);
+        }
+        .bot-cmd-item { display:flex; align-items:baseline; gap:10px; padding:9px 14px; cursor:pointer; transition:background .1s; }
+        .bot-cmd-item:hover, .bot-cmd-item.active { background:rgba(99,102,241,.15); }
+        .bot-cmd-item .cmd-name { font-size:13px; font-weight:600; color:var(--accent); white-space:nowrap; }
+        .bot-cmd-item .cmd-desc { font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+        .bot-btn-row { display:flex; flex-wrap:wrap; gap:7px; margin-top:10px; max-width:300px; }
+        .bot-btn {
+            padding: 7px 15px; border-radius: 12px;
+            border: 1px solid rgba(99,102,241,.4);
+            background: rgba(99,102,241,.12);
+            backdrop-filter: blur(12px);
+            color: var(--text-primary); font-size: 13px; font-weight: 500;
+            cursor: pointer; transition: all .15s; white-space: nowrap;
+        }
+        .bot-btn:hover { background:rgba(99,102,241,.28); border-color:rgba(99,102,241,.7);
+            transform:translateY(-1px); box-shadow:0 4px 14px rgba(99,102,241,.2); }
+        .bot-btn:active { transform:scale(0.97); }
+        .bot-btn:disabled { opacity:0.45; cursor:default; transform:none; box-shadow:none; }
+    </style>
 </head>
 <body>
     <!-- Setup Screen (First Time User) -->
@@ -5261,6 +5354,15 @@
         <div class="header">
             <div class="header-title">Chats</div>
             <div class="header-actions">
+                <button id="bots-btn" class="header-btn" title="Bots">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
+                        <rect x="3" y="11" width="18" height="10" rx="2"/>
+                        <path d="M9 11V8a3 3 0 0 1 6 0v3"/>
+                        <circle cx="9" cy="16" r="1" fill="currentColor" stroke="none"/>
+                        <circle cx="15" cy="16" r="1" fill="currentColor" stroke="none"/>
+                        <path d="M12 2v3"/>
+                    </svg>
+                </button>
                 <button id="settings-btn" class="header-btn" title="Settings">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width: 20px; height: 20px;">
                         <circle cx="12" cy="12" r="3"/>
@@ -5708,6 +5810,118 @@
             </div>
 
             <div id="settings-msg" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid"></div>
+        </div>
+    </div>
+
+    <!-- Bots Screen -->
+    <div id="bots-container" class="settings-container" style="display:none">
+        <div class="header">
+            <button id="bots-back-btn" class="back-btn">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+            </button>
+            <span class="header-title">Bots</span>
+            <button id="bots-add-btn" class="header-btn" title="Create bot invite" style="display:none">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            </button>
+        </div>
+
+        <!-- Hero banner -->
+        <div style="margin:0;padding:28px 20px 24px;background:linear-gradient(160deg,rgba(99,102,241,.18) 0%,rgba(139,92,246,.12) 60%,transparent 100%);border-bottom:1px solid var(--border-color);text-align:center">
+            <div style="width:56px;height:56px;border-radius:18px;background:var(--accent-gradient);margin:0 auto 12px;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(99,102,241,.35)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:28px;height:28px"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/><circle cx="9" cy="16" r="1" fill="white" stroke="none"/><circle cx="15" cy="16" r="1" fill="white" stroke="none"/><path d="M12 2v3"/></svg>
+            </div>
+            <div style="font-size:17px;font-weight:700;color:var(--text-primary);margin-bottom:4px">AI Bots</div>
+            <div style="font-size:13px;color:var(--text-muted)">Extensible bot integrations for this server</div>
+        </div>
+
+        <div class="settings-content" style="padding-top:16px">
+            <div id="bots-list" style="display:flex;flex-direction:column;gap:8px"></div>
+            <div id="bots-empty" style="display:none;padding:48px 20px;text-align:center">
+                <div style="width:64px;height:64px;border-radius:50%;background:var(--bg-elevated);border:1px solid var(--border-color);margin:0 auto 16px;display:flex;align-items:center;justify-content:center">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="1.5" style="width:28px;height:28px"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/><circle cx="9" cy="16" r="1" fill="var(--text-muted)" stroke="none"/><circle cx="15" cy="16" r="1" fill="var(--text-muted)" stroke="none"/><path d="M12 2v3"/></svg>
+                </div>
+                <div style="font-size:15px;font-weight:600;color:var(--text-secondary);margin-bottom:6px">No bots yet</div>
+                <div style="font-size:13px;color:var(--text-muted);line-height:1.6">Bots appear here once they self-register<br>using an invite token from the admin.</div>
+            </div>
+        </div>
+
+        <!-- Admin: create bot result modal -->
+        <div id="bot-invite-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);z-index:999;align-items:center;justify-content:center;padding:20px">
+            <div style="background:var(--bg-secondary);border:1px solid var(--border-light);border-radius:20px;padding:0;max-width:420px;width:100%;max-height:85vh;overflow:hidden;box-shadow:var(--shadow-lg)">
+                <div style="padding:20px 20px 16px;border-bottom:1px solid var(--border-color);display:flex;align-items:center;gap:12px">
+                    <div style="width:36px;height:36px;border-radius:10px;background:var(--accent-gradient);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:18px;height:18px"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-size:15px;font-weight:700;color:var(--text-primary)">Bot Invite Created</div>
+                        <div style="font-size:12px;color:var(--text-muted)">Share these credentials with the bot developer</div>
+                    </div>
+                </div>
+                <div style="padding:20px;overflow-y:auto;max-height:calc(85vh - 140px)">
+                    <div style="background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:10px;padding:10px 12px;margin-bottom:16px;display:flex;align-items:flex-start;gap:8px">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="var(--error)" stroke-width="2" style="width:15px;height:15px;flex-shrink:0;margin-top:1px"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+                        <div style="font-size:12px;color:var(--error-light);line-height:1.5">These credentials are shown <strong>once only</strong>. Copy them before closing.</div>
+                    </div>
+                    <div style="margin-bottom:14px">
+                        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Invite Token</div>
+                        <div id="bot-invite-token" style="font-family:'SF Mono',Consolas,monospace;font-size:11px;word-break:break-all;background:var(--bg-elevated);padding:10px 12px;border-radius:10px;border:1px solid var(--border-color);color:var(--accent-light);line-height:1.6"></div>
+                    </div>
+                    <div style="margin-bottom:20px">
+                        <div style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Shared Key</div>
+                        <div id="bot-invite-key" style="font-family:'SF Mono',Consolas,monospace;font-size:11px;word-break:break-all;background:var(--bg-elevated);padding:10px 12px;border-radius:10px;border:1px solid var(--border-color);color:var(--accent-light);line-height:1.6"></div>
+                    </div>
+                    <button id="bot-invite-copy-btn" class="btn btn-primary" style="margin:0 0 8px;width:100%">Copy as JSON</button>
+                    <button id="bot-invite-close-btn" class="btn btn-secondary" style="margin:0;width:100%">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bot Chat Screen -->
+    <div id="bot-chat-container" style="display:none;position:fixed;inset:0;background:var(--bg-primary);z-index:100;flex-direction:column">
+        <!-- Header -->
+        <div class="chat-header" style="background:var(--bg-glass);backdrop-filter:blur(20px);border-bottom:1px solid var(--border-color)">
+            <div class="chat-header-left">
+                <button id="bot-chat-back-btn" class="back-btn">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                </button>
+                <div id="bot-chat-avatar" style="width:38px;height:38px;border-radius:12px;overflow:hidden;display:flex;align-items:center;justify-content:center;background:var(--accent-gradient);flex-shrink:0;box-shadow:0 2px 8px rgba(99,102,241,.3)"></div>
+                <div class="chat-info">
+                    <div style="display:flex;align-items:center;gap:7px">
+                        <div class="chat-name" id="bot-chat-name">Bot</div>
+                        <span style="font-size:10px;font-weight:600;color:var(--accent-light);background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.25);border-radius:4px;padding:1px 6px;letter-spacing:.3px">BOT</span>
+                    </div>
+                    <div style="display:flex;align-items:center;gap:5px;margin-top:1px">
+                        <span style="width:6px;height:6px;border-radius:50%;background:var(--success);flex-shrink:0"></span>
+                        <span id="bot-status-text" style="font-size:12px;color:var(--success)">Online</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Messages -->
+        <div id="bot-messages" style="flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:4px"></div>
+
+        <!-- Typing indicator -->
+        <div id="bot-typing" style="display:none;padding:0 16px 8px;align-items:center;gap:8px">
+            <div style="display:flex;align-items:center;gap:4px;background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:16px 16px 16px 4px;padding:8px 14px">
+                <span class="bot-dot"></span>
+                <span class="bot-dot" style="animation-delay:.18s"></span>
+                <span class="bot-dot" style="animation-delay:.36s"></span>
+            </div>
+        </div>
+
+        <!-- Command suggestions popup -->
+        <div id="bot-cmd-popup" style="display:none;position:absolute;bottom:70px;left:12px;right:12px;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:14px;overflow:hidden;box-shadow:0 8px 32px rgba(0,0,0,.35);z-index:10"></div>
+
+        <!-- Input bar -->
+        <div style="padding:10px 12px 12px;border-top:1px solid var(--border-color);background:var(--bg-glass);backdrop-filter:blur(20px);display:flex;align-items:center;gap:8px">
+            <div style="flex:1;display:flex;align-items:center;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:var(--radius-full);padding:0 4px 0 16px;transition:border-color var(--transition-fast)" id="bot-input-wrap">
+                <input id="bot-input" type="text" placeholder="Message the bot..." style="flex:1;background:transparent;border:none;padding:11px 0;font-size:14px;color:var(--text-primary);outline:none;font-family:var(--font-family)">
+                <button id="bot-send-btn" style="width:34px;height:34px;border-radius:50%;background:var(--accent-gradient);border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:opacity var(--transition-fast);box-shadow:0 2px 8px rgba(99,102,241,.3)">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;transform:translateX(1px)"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                </button>
+            </div>
         </div>
     </div>
 
@@ -7129,6 +7343,20 @@
             }
         }
 
+        // Encrypt an object as AES-256-GCM with the server password
+        async function encryptWithServerKey(obj) {
+            const serverPassword = getServerEncryptionKey();
+            if (!serverPassword) throw new Error('No server password');
+            const data = new TextEncoder().encode(JSON.stringify(obj));
+            const iv = crypto.getRandomValues(new Uint8Array(12));
+            const cryptoKey = await crypto.subtle.importKey('raw', padKey(serverPassword), { name: 'AES-GCM' }, false, ['encrypt']);
+            const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, cryptoKey, data);
+            const result = new Uint8Array(12 + encrypted.byteLength);
+            result.set(iv, 0);
+            result.set(new Uint8Array(encrypted), 12);
+            return btoa(String.fromCharCode(...result));
+        }
+
         // Decrypt an AES-256-GCM blob encrypted with the server password
         async function decryptBlockWithServerKey(encryptedBase64) {
             const serverPassword = getServerEncryptionKey();
@@ -7329,6 +7557,7 @@
             newChatBtn.addEventListener('click', openNewChatModal);
             logoutBtn.addEventListener('click', logout);
             settingsBtn.addEventListener('click', openSettings);
+            document.getElementById('bots-btn').addEventListener('click', openBots);
             backBtn.addEventListener('click', backToChatList);
             
             // Attachment menu toggle
@@ -14744,6 +14973,389 @@
             _origBackToChatList();
         };
 
+    </script>
+    <script>
+        // ==================== BOT SYSTEM ====================
+        (function() {
+            let _currentBotId = null;
+            let _currentBotName = null;
+            let _currentBotSvgIcon = null;
+            let _currentBotCommands = [];
+            let _botPollInterval = null;
+            let _botLastMsgId = null;
+            let _botAwaitingReply = false;
+            let _botPollCount = 0;
+
+            const botsContainer = document.getElementById('bots-container');
+            const botChatContainer = document.getElementById('bot-chat-container');
+
+            // ── Navigation ──────────────────────────────────────────────
+            async function openBots() {
+                document.getElementById('chat-list-container').style.display = 'none';
+                document.getElementById('chat-container').style.display = 'none';
+                document.getElementById('settings-container').style.display = 'none';
+                botsContainer.style.display = 'flex';
+                await loadBotsList();
+            }
+
+            function closeBots() {
+                botsContainer.style.display = 'none';
+                document.getElementById('chat-list-container').style.display = 'flex';
+            }
+
+            function openBotChat(botId, botName, svgIcon, online, commands) {
+                _currentBotId = botId;
+                _currentBotName = botName;
+                _currentBotSvgIcon = svgIcon;
+                _currentBotCommands = commands || [];
+                _botLastMsgId = null;
+                _botAwaitingReply = false;
+                _botPollCount = 0;
+                botsContainer.style.display = 'none';
+                document.getElementById('bot-chat-name').textContent = botName;
+                const avatarEl = document.getElementById('bot-chat-avatar');
+                avatarEl.innerHTML = svgIcon
+                    ? `<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;padding:6px">${svgIcon}</div>`
+                    : '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:20px;height:20px"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/><circle cx="9" cy="16" r="1" fill="white" stroke="none"/><circle cx="15" cy="16" r="1" fill="white" stroke="none"/></svg>';
+                document.getElementById('bot-messages').innerHTML = '';
+                document.getElementById('bot-typing').style.display = 'none';
+                const _stEl = document.getElementById('bot-status-text');
+                const _stDot = _stEl.previousElementSibling;
+                _stEl.textContent = online ? 'Online' : 'Offline';
+                _stEl.style.color = online ? 'var(--success)' : 'var(--text-muted)';
+                if (_stDot) _stDot.style.background = online ? 'var(--success)' : 'var(--text-muted)';
+                botChatContainer.style.display = 'flex';
+                _loadAllBotMessages().then(() => { _startBotPoll(); });
+            }
+
+            function closeBotChat() {
+                _stopBotPoll();
+                _currentBotId = null;
+                botChatContainer.style.display = 'none';
+                botsContainer.style.display = 'flex';
+            }
+
+            // ── Bots List ────────────────────────────────────────────────
+            async function loadBotsList() {
+                const listEl = document.getElementById('bots-list');
+                const emptyEl = document.getElementById('bots-empty');
+                const addBtn = document.getElementById('bots-add-btn');
+                listEl.innerHTML = '<div style="color:var(--text-muted);font-size:13px;text-align:center;padding:32px">Loading...</div>';
+                emptyEl.style.display = 'none';
+                try {
+                    const resp = await authenticatedFetch('/bots', { method: 'GET' });
+                    if (!resp.ok) throw new Error('Failed');
+                    const { encrypted } = await resp.json();
+                    const data = JSON.parse(await decryptBlockWithServerKey(encrypted));
+                    const { bots, adminUserId } = data;
+                    const myId = localStorage.getItem('userId');
+                    addBtn.style.display = (myId && adminUserId && myId === adminUserId) ? '' : 'none';
+                    listEl.innerHTML = '';
+                    if (!bots || bots.length === 0) { emptyEl.style.display = 'block'; return; }
+                    for (const bot of bots) {
+                        const card = document.createElement('div');
+                        card.className = 'bot-card';
+                        const iconWrap = document.createElement('div');
+                        iconWrap.className = 'bot-card-icon';
+                        iconWrap.innerHTML = bot.svgIcon
+                            ? `<div style="width:28px;height:28px;display:flex;align-items:center;justify-content:center">${bot.svgIcon}</div>`
+                            : '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:26px;height:26px"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/><circle cx="9" cy="16" r="1" fill="white" stroke="none"/><circle cx="15" cy="16" r="1" fill="white" stroke="none"/></svg>';
+                        const info = document.createElement('div');
+                        info.style.cssText = 'flex:1;min-width:0';
+                        const onlineColor = bot.online ? 'var(--success)' : 'var(--text-muted)';
+                        const onlineLabel = bot.online ? 'Online' : 'Offline';
+                        info.innerHTML = `<div style="display:flex;align-items:center;gap:7px;margin-bottom:3px"><span style="font-size:15px;font-weight:700;color:var(--text-primary)">${_escHtml(bot.name)}</span><span style="font-size:10px;font-weight:600;color:var(--accent-light);background:rgba(99,102,241,.15);border:1px solid rgba(99,102,241,.25);border-radius:4px;padding:1px 5px">BOT</span></div><div style="display:flex;align-items:center;gap:5px;font-size:12px;color:${onlineColor}"><span style="width:6px;height:6px;border-radius:50%;background:${onlineColor};flex-shrink:0"></span>${onlineLabel} · ${_escHtml(bot.description || 'No description')}</div>`;
+                        const arrow = document.createElement('div');
+                        arrow.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><polyline points="9 18 15 12 9 6"/></svg>';
+                        card.appendChild(iconWrap);
+                        card.appendChild(info);
+                        card.appendChild(arrow);
+                        card.addEventListener('click', () => openBotChat(bot.botId, bot.name, bot.svgIcon, bot.online, bot.commands));
+                        listEl.appendChild(card);
+                    }
+                } catch (e) {
+                    listEl.innerHTML = '<div style="color:var(--error);font-size:13px;text-align:center;padding:32px">Failed to load bots.</div>';
+                }
+            }
+
+            // ── Messaging ────────────────────────────────────────────────
+            async function _loadAllBotMessages() {
+                try {
+                    const resp = await authenticatedFetch(`/bot/${_currentBotId}/messages`, { method: 'GET' });
+                    if (!resp.ok) return;
+                    const { encrypted } = await resp.json();
+                    const { messages } = JSON.parse(await decryptBlockWithServerKey(encrypted));
+                    document.getElementById('bot-messages').innerHTML = '';
+                    _botLastMsgId = null;
+                    for (const msg of (messages || [])) {
+                        _appendBotMessage(msg);
+                        _botLastMsgId = msg.id;
+                    }
+                    _scrollBotToBottom();
+                } catch (e) {}
+            }
+
+            async function _pollBotMessages() {
+                if (!_currentBotId) return;
+                try {
+                    const url = _botLastMsgId
+                        ? `/bot/${_currentBotId}/messages?after=${_botLastMsgId}`
+                        : `/bot/${_currentBotId}/messages`;
+                    const resp = await authenticatedFetch(url, { method: 'GET' });
+                    if (!resp.ok) return;
+                    const { encrypted } = await resp.json();
+                    const { messages } = JSON.parse(await decryptBlockWithServerKey(encrypted));
+                    let gotBotReply = false;
+                    let appended = false;
+                    for (const msg of (messages || [])) {
+                        // skip if already rendered (optimistic send)
+                        if (document.querySelector(`[data-msg-id="${msg.id}"]`)) {
+                            _botLastMsgId = msg.id;
+                            continue;
+                        }
+                        _appendBotMessage(msg);
+                        _botLastMsgId = msg.id;
+                        appended = true;
+                        if (msg.role === 'bot') gotBotReply = true;
+                        if (msg.role === 'user' && _botAwaitingReply) _showBotTyping();
+                    }
+                    if (gotBotReply) { _botAwaitingReply = false; _hideBotTyping(); }
+                    if (appended) _scrollBotToBottom();
+                } catch (e) {}
+                _botPollCount++;
+                if (_botPollCount % 10 === 0) _refreshBotStatus();
+            }
+
+            function _startBotPoll() {
+                _stopBotPoll();
+                _botPollInterval = setInterval(_pollBotMessages, 2000);
+            }
+
+            function _stopBotPoll() {
+                if (_botPollInterval) { clearInterval(_botPollInterval); _botPollInterval = null; }
+            }
+
+            async function sendBotMessage(overrideContent) {
+                if (!_currentBotId) return;
+                let content;
+                if (overrideContent !== undefined) {
+                    content = overrideContent;
+                } else {
+                    const input = document.getElementById('bot-input');
+                    content = input.value.trim();
+                    if (!content) return;
+                    input.value = '';
+                }
+                _botAwaitingReply = true;
+                try {
+                    const encrypted = await encryptWithServerKey({ content });
+                    const resp = await authenticatedFetch(`/bot/${_currentBotId}/send`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'text/plain' },
+                        body: encrypted,
+                    });
+                    if (resp.ok) {
+                        const { id } = await resp.json();
+                        // render immediately with the real server ID so poll deduplicates it
+                        _appendBotMessage({ id, role: 'user', content, ts: Date.now() });
+                        _botLastMsgId = id;
+                        _showBotTyping();
+                        _scrollBotToBottom();
+                    }
+                } catch (e) { _botAwaitingReply = false; }
+            }
+
+            function _fmtTime(ts) {
+                const d = new Date(ts);
+                return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            }
+
+            function _appendBotMessage(msg) {
+                const isUser = msg.role === 'user';
+                // Wrapper row
+                const row = document.createElement('div');
+                row.className = 'bot-msg-row' + (isUser ? ' user' : '');
+                row.dataset.msgId = msg.id;
+                // Bot avatar (only on bot side)
+                if (!isUser) {
+                    const av = document.createElement('div');
+                    av.className = 'bot-avatar-sm';
+                    av.innerHTML = _currentBotSvgIcon
+                        ? `<div style="width:16px;height:16px;display:flex;align-items:center;justify-content:center">${_currentBotSvgIcon}</div>`
+                        : '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:14px;height:14px"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M9 11V8a3 3 0 0 1 6 0v3"/></svg>';
+                    row.appendChild(av);
+                }
+                // Bubble + timestamp column
+                const col = document.createElement('div');
+                col.style.cssText = 'display:flex;flex-direction:column;max-width:78%';
+                const bubble = document.createElement('div');
+                bubble.className = 'bot-bubble ' + (isUser ? 'user-side' : 'bot-side');
+                bubble.textContent = msg.content;
+                const ts = document.createElement('div');
+                ts.className = 'bot-ts' + (isUser ? ' user' : '');
+                ts.textContent = _fmtTime(msg.ts);
+                col.appendChild(bubble);
+                col.appendChild(ts);
+                if (!isUser && msg.richContent && Array.isArray(msg.richContent.buttons)) {
+                    const btnRow = document.createElement('div');
+                    btnRow.className = 'bot-btn-row';
+                    for (const btn of msg.richContent.buttons) {
+                        const b = document.createElement('button');
+                        b.className = 'bot-btn';
+                        b.textContent = btn.label;
+                        b.onclick = () => {
+                            btnRow.querySelectorAll('.bot-btn').forEach(x => { x.disabled = true; });
+                            sendBotMessage(btn.value);
+                        };
+                        btnRow.appendChild(b);
+                    }
+                    col.appendChild(btnRow);
+                }
+                row.appendChild(col);
+                document.getElementById('bot-messages').appendChild(row);
+            }
+
+            function _showBotTyping() {
+                document.getElementById('bot-typing').style.display = 'flex';
+                document.getElementById('bot-status-text').textContent = 'Thinking...';
+                document.getElementById('bot-status-text').style.color = 'var(--text-muted)';
+                _scrollBotToBottom();
+            }
+
+            function _hideBotTyping() {
+                document.getElementById('bot-typing').style.display = 'none';
+                // restore to Online (bot just replied, so it's clearly online)
+                const el = document.getElementById('bot-status-text');
+                el.textContent = 'Online';
+                el.style.color = 'var(--success)';
+                const dot = el.previousElementSibling;
+                if (dot) dot.style.background = 'var(--success)';
+            }
+
+            async function _refreshBotStatus() {
+                if (_botAwaitingReply) return;
+                try {
+                    const resp = await authenticatedFetch('/bots', { method: 'GET' });
+                    if (!resp.ok) return;
+                    const { encrypted } = await resp.json();
+                    const data = JSON.parse(await decryptBlockWithServerKey(encrypted));
+                    const bot = (data.bots || []).find(b => b.botId === _currentBotId);
+                    if (!bot) return;
+                    const el = document.getElementById('bot-status-text');
+                    if (!el || el.textContent === 'Thinking...') return;
+                    const dot = el.previousElementSibling;
+                    el.textContent = bot.online ? 'Online' : 'Offline';
+                    el.style.color = bot.online ? 'var(--success)' : 'var(--text-muted)';
+                    if (dot) dot.style.background = bot.online ? 'var(--success)' : 'var(--text-muted)';
+                } catch (e) {}
+            }
+
+            function _scrollBotToBottom() {
+                const el = document.getElementById('bot-messages');
+                el.scrollTop = el.scrollHeight;
+            }
+
+            // ── Admin: create bot invite ─────────────────────────────────
+            document.getElementById('bots-add-btn').addEventListener('click', async () => {
+                if (!confirm('Generate a new bot invite token and shared key?')) return;
+                try {
+                    const resp = await authenticatedFetch('/admin/bots', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                    });
+                    if (!resp.ok) { alert('Failed to create bot invite.'); return; }
+                    const { inviteToken, sharedKey } = await resp.json();
+                    document.getElementById('bot-invite-token').textContent = inviteToken;
+                    document.getElementById('bot-invite-key').textContent = sharedKey;
+                    const modal = document.getElementById('bot-invite-modal');
+                    modal.style.display = 'flex';
+                } catch (e) { alert('Error creating bot invite.'); }
+            });
+
+            document.getElementById('bot-invite-copy-btn').addEventListener('click', () => {
+                const token = document.getElementById('bot-invite-token').textContent;
+                const key = document.getElementById('bot-invite-key').textContent;
+                navigator.clipboard.writeText(JSON.stringify({ inviteToken: token, sharedKey: key }, null, 2))
+                    .then(() => document.getElementById('bot-invite-copy-btn').textContent = 'Copied!')
+                    .catch(() => {});
+            });
+
+            document.getElementById('bot-invite-close-btn').addEventListener('click', () => {
+                document.getElementById('bot-invite-modal').style.display = 'none';
+                document.getElementById('bot-invite-copy-btn').textContent = 'Copy as JSON';
+            });
+
+            // ── Wiring ───────────────────────────────────────────────────
+            document.getElementById('bots-back-btn').addEventListener('click', closeBots);
+            document.getElementById('bot-chat-back-btn').addEventListener('click', closeBotChat);
+            document.getElementById('bot-send-btn').addEventListener('click', sendBotMessage);
+
+            // ── Command autocomplete ─────────────────────────────────────
+            const _cmdPopup = document.getElementById('bot-cmd-popup');
+            let _cmdActiveIdx = -1;
+
+            function _closeCmdPopup() {
+                _cmdPopup.style.display = 'none';
+                _cmdPopup.innerHTML = '';
+                _cmdActiveIdx = -1;
+            }
+
+            function _selectCmdItem(name) {
+                document.getElementById('bot-input').value = name + ' ';
+                _closeCmdPopup();
+                document.getElementById('bot-input').focus();
+            }
+
+            function _renderCmdPopup(items) {
+                if (!items.length) { _closeCmdPopup(); return; }
+                _cmdActiveIdx = -1;
+                _cmdPopup.innerHTML = '';
+                items.forEach((cmd, i) => {
+                    const row = document.createElement('div');
+                    row.className = 'bot-cmd-item';
+                    row.innerHTML = `<span class="cmd-name">/${cmd.name}</span><span class="cmd-desc">${cmd.description}</span>`;
+                    row.addEventListener('mousedown', e => { e.preventDefault(); _selectCmdItem('/' + cmd.name); });
+                    _cmdPopup.appendChild(row);
+                });
+                _cmdPopup.style.display = 'block';
+            }
+
+            function _setCmdActive(idx) {
+                const rows = _cmdPopup.querySelectorAll('.bot-cmd-item');
+                rows.forEach((r, i) => r.classList.toggle('active', i === idx));
+                _cmdActiveIdx = idx;
+            }
+
+            document.getElementById('bot-input').addEventListener('input', () => {
+                const val = document.getElementById('bot-input').value;
+                if (!val.startsWith('/') || !_currentBotCommands.length) { _closeCmdPopup(); return; }
+                const query = val.slice(1).toLowerCase();
+                const matches = _currentBotCommands.filter(c => c.name.toLowerCase().startsWith(query));
+                _renderCmdPopup(matches);
+            });
+
+            document.getElementById('bot-input').addEventListener('keydown', e => {
+                if (_cmdPopup.style.display !== 'none') {
+                    const rows = _cmdPopup.querySelectorAll('.bot-cmd-item');
+                    if (e.key === 'ArrowDown') { e.preventDefault(); _setCmdActive((_cmdActiveIdx + 1) % rows.length); return; }
+                    if (e.key === 'ArrowUp') { e.preventDefault(); _setCmdActive((_cmdActiveIdx - 1 + rows.length) % rows.length); return; }
+                    if (e.key === 'Enter' && _cmdActiveIdx >= 0) { e.preventDefault(); _selectCmdItem('/' + _currentBotCommands.filter(c => c.name.toLowerCase().startsWith(document.getElementById('bot-input').value.slice(1).toLowerCase()))[_cmdActiveIdx].name); return; }
+                    if (e.key === 'Escape') { _closeCmdPopup(); return; }
+                }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendBotMessage(); }
+            });
+
+            document.addEventListener('click', e => {
+                if (!_cmdPopup.contains(e.target) && e.target.id !== 'bot-input') _closeCmdPopup();
+            });
+
+            // Expose openBots globally for the main script wire-up
+            window.openBots = openBots;
+
+            function _escHtml(s) {
+                return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+            }
+        })();
     </script>
     <script>
         // Register PWA service worker

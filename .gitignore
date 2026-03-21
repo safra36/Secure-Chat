@@ -8,3 +8,6 @@ plan.md
 data
 bin
 requirements.md
+.admin
+bot-keys.json
+bot-keys-state.json

@@ -197,6 +197,76 @@ function verifyChatSignature(handle, encryptedTimestampBase64, signatureBase64) 
 	}
 }
 
+// ==================== BOT SYSTEM STORAGE ====================
+const botsRegistry = new Map(); // botId (or 'pending:hash') -> bot record
+const botConversations = new Map(); // `${botId}:${userId}` -> Message[]
+const pendingBotMessages = new Map(); // botId -> Message[]
+const botLastSeen = new Map(); // botId -> timestamp (updated on every /inbox or /reply)
+const BOTS_FILE = path.join(DATA_DIR, '_bots.json');
+const BOT_CONVS_FILE = path.join(DATA_DIR, '_botconvs.ndjson');
+
+function loadBots() {
+	try {
+		if (!fs.existsSync(BOTS_FILE)) return;
+		const arr = JSON.parse(fs.readFileSync(BOTS_FILE, 'utf8'));
+		for (const bot of arr) botsRegistry.set(bot.botId || bot.pendingId, bot);
+		originalLog(`[Bots] Loaded ${botsRegistry.size} bot(s)`);
+	} catch (e) { originalError('[Bots] Failed to load:', e); }
+}
+
+function saveBots() {
+	try {
+		fs.writeFileSync(BOTS_FILE, JSON.stringify([...botsRegistry.values()]));
+	} catch (e) { originalError('[Bots] Failed to save:', e); }
+}
+
+function loadBotConversations() {
+	try {
+		if (!fs.existsSync(BOT_CONVS_FILE)) return;
+		const lines = fs.readFileSync(BOT_CONVS_FILE, 'utf8').split('\n').filter(Boolean);
+		for (const line of lines) {
+			const { key, msg } = JSON.parse(line);
+			if (!botConversations.has(key)) botConversations.set(key, []);
+			botConversations.get(key).push(msg);
+		}
+		originalLog(`[Bots] Loaded conversations for ${botConversations.size} thread(s)`);
+	} catch (e) { originalError('[Bots] Failed to load conversations:', e); }
+}
+
+function appendBotConvToDisk(key, msg) {
+	try { fs.appendFileSync(BOT_CONVS_FILE, JSON.stringify({ key, msg }) + '\n'); } catch (e) {}
+}
+
+function botEncrypt(obj, sharedKeyHex) {
+	const key = Buffer.from(sharedKeyHex, 'hex');
+	const iv = crypto.randomBytes(12);
+	const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+	let enc = cipher.update(JSON.stringify(obj), 'utf8', 'binary');
+	enc += cipher.final('binary');
+	const tag = cipher.getAuthTag();
+	return Buffer.concat([iv, Buffer.from(enc, 'binary'), tag]).toString('base64');
+}
+
+function botDecrypt(base64, sharedKeyHex) {
+	const key = Buffer.from(sharedKeyHex, 'hex');
+	const data = Buffer.from(base64, 'base64');
+	const iv = data.slice(0, 12);
+	const tag = data.slice(-16);
+	const enc = data.slice(12, -16);
+	const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+	decipher.setAuthTag(tag);
+	let dec = decipher.update(enc, 'binary', 'utf8');
+	dec += decipher.final('utf8');
+	return JSON.parse(dec);
+}
+
+function verifyBotAuth(req) {
+	if (!handleVerify(req)) return null;
+	const [userId] = (req.headers.authorization || '').split(':');
+	const bot = botsRegistry.get(userId);
+	return (bot && bot.activated) ? bot : null;
+}
+
 function loadSeenPositions() {
 	try {
 		if (!fs.existsSync(SEEN_FILE)) return;
@@ -527,6 +597,17 @@ const server = https.createServer(tlsOptions, (req, res) => {
 	}
 
 
+	// Bot public routes (own auth mechanisms, not Ed25519)
+	if (req.method === 'GET' && pathname === '/bots') {
+		handleGetBots(req, res);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname === '/bots/activate') {
+		handleBotActivate(req, res);
+		return;
+	}
+
 	// All other routes require authentication
 	if (!handleVerify(req)) {
 		console.log('Authentication failed for:', pathname);
@@ -803,6 +884,43 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	// ==================== BOT ENDPOINTS ====================
+
+	if (req.method === 'POST' && pathname === '/admin/bots') {
+		handleAdminCreateBot(req, res);
+		return;
+	}
+
+	if (req.method === 'DELETE' && pathname.startsWith('/admin/bots/')) {
+		handleAdminDeleteBot(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/bot/') && pathname.endsWith('/send')) {
+		handleBotSend(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'GET' && pathname.startsWith('/bot/') && pathname.endsWith('/messages')) {
+		handleBotMessages(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'GET' && pathname.startsWith('/bot/') && pathname.endsWith('/inbox')) {
+		handleBotInbox(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/bot/') && pathname.endsWith('/reply')) {
+		handleBotReply(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/bot/') && pathname.endsWith('/commands')) {
+		handleBotSetCommands(req, res, pathname);
+		return;
+	}
+
 	// Default response
 	console.log('404 Not Found');
 	res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -958,6 +1076,8 @@ function loadPersistentStorage() {
 loadPersistentStorage();
 loadSeenPositions();
 loadChatKeys();
+loadBots();
+loadBotConversations();
 
 function handleVerify(req) {
 	const authorization = req.headers.authorization;
@@ -3070,6 +3190,295 @@ function handleTimeSync(req, res) {
 		res.writeHead(500, { 'Content-Type': 'application/json' });
 		res.end(JSON.stringify({ error: 'Failed to sync time' }));
 	}
+}
+
+// ==================== BOT HANDLERS ====================
+
+function handleAdminCreateBot(req, res) {
+	const [requesterId] = (req.headers.authorization || '').split(':');
+	if (!handleVerify(req) || requesterId !== CHANNEL_ADMIN_ID) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Forbidden' }));
+		return;
+	}
+	const inviteToken = crypto.randomBytes(32).toString('hex');
+	const sharedKey = crypto.randomBytes(32).toString('hex');
+	const inviteTokenHash = crypto.createHash('sha256').update(inviteToken).digest('hex');
+	const pendingId = 'pending:' + inviteTokenHash;
+	botsRegistry.set(pendingId, { pendingId, inviteTokenHash, sharedKey, activated: false, createdAt: Date.now() });
+	saveBots();
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ inviteToken, sharedKey }));
+}
+
+function handleAdminDeleteBot(req, res, pathname) {
+	const [requesterId] = (req.headers.authorization || '').split(':');
+	if (!handleVerify(req) || requesterId !== CHANNEL_ADMIN_ID) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Forbidden' }));
+		return;
+	}
+	const botId = pathname.split('/')[3];
+	if (!botsRegistry.has(botId)) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Bot not found' }));
+		return;
+	}
+	botsRegistry.delete(botId);
+	for (const key of botConversations.keys()) {
+		if (key.startsWith(botId + ':')) botConversations.delete(key);
+	}
+	pendingBotMessages.delete(botId);
+	saveBots();
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ ok: true }));
+}
+
+function handleBotActivate(req, res) {
+	const authHeader = req.headers.authorization || '';
+	if (!authHeader.startsWith('Invite ')) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Missing invite token' }));
+		return;
+	}
+	const inviteToken = authHeader.slice(7).trim();
+	const inviteTokenHash = crypto.createHash('sha256').update(inviteToken).digest('hex');
+	const pendingId = 'pending:' + inviteTokenHash;
+	const pendingBot = botsRegistry.get(pendingId);
+	if (!pendingBot) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Invalid or used invite token' }));
+		return;
+	}
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const payload = botDecrypt(body.trim(), pendingBot.sharedKey);
+			const { publicKey, name, description, svgIcon } = payload;
+			if (!publicKey || !name) throw new Error('Missing required fields');
+			const rawPubKeyBytes = Buffer.from(publicKey, 'base64');
+			const botId = crypto.createHash('sha256').update(rawPubKeyBytes).digest('hex');
+			if (botsRegistry.has(botId)) {
+				res.writeHead(409, { 'Content-Type': 'application/json' });
+				res.end(JSON.stringify({ error: 'Bot already registered' }));
+				return;
+			}
+			botsRegistry.delete(pendingId);
+			botsRegistry.set(botId, {
+				botId,
+				publicKey,
+				name: String(name).slice(0, 64),
+				description: String(description || '').slice(0, 256),
+				svgIcon: String(svgIcon || '').slice(0, 16384),
+				sharedKey: pendingBot.sharedKey,
+				activated: true,
+				createdAt: Date.now(),
+			});
+			saveBots();
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ botId }));
+		} catch (e) {
+			originalError('[Bots] Activation error:', e);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid payload' }));
+		}
+	});
+}
+
+const BOT_ONLINE_TTL = 20000; // bot considered online if seen within 20s
+
+function handleGetBots(req, res) {
+	const now = Date.now();
+	const bots = [...botsRegistry.values()]
+		.filter(b => b.activated)
+		.map(b => ({
+			botId: b.botId,
+			name: b.name,
+			description: b.description,
+			svgIcon: b.svgIcon,
+			commands: b.commands || [],
+			online: (now - (botLastSeen.get(b.botId) || 0)) < BOT_ONLINE_TTL,
+		}));
+	const encrypted = encryption.encryptBlockMessage(
+		JSON.stringify({ bots, adminUserId: CHANNEL_ADMIN_ID }),
+		SERVER_PASSWRD
+	);
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ encrypted }));
+}
+
+function handleBotSend(req, res, pathname) {
+	if (!handleVerify(req)) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const [userId] = req.headers.authorization.split(':');
+	const botId = pathname.split('/')[2];
+	const bot = botsRegistry.get(botId);
+	if (!bot || !bot.activated) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Bot not found' }));
+		return;
+	}
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const { content } = JSON.parse(encryption.decryptBlockMessage(body.trim(), SERVER_PASSWRD));
+			if (!content || typeof content !== 'string') throw new Error('Missing content');
+			const msg = {
+				id: crypto.randomBytes(8).toString('hex'),
+				role: 'user',
+				userId,
+				content: content.slice(0, 4096),
+				ts: Date.now(),
+			};
+			const convKey = `${botId}:${userId}`;
+			if (!botConversations.has(convKey)) botConversations.set(convKey, []);
+			botConversations.get(convKey).push(msg);
+			appendBotConvToDisk(convKey, msg);
+			if (!pendingBotMessages.has(botId)) pendingBotMessages.set(botId, []);
+			pendingBotMessages.get(botId).push(msg);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true, id: msg.id }));
+		} catch (e) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid payload' }));
+		}
+	});
+}
+
+function handleBotMessages(req, res, pathname) {
+	if (!handleVerify(req)) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const [userId] = req.headers.authorization.split(':');
+	const botId = pathname.split('/')[2];
+	if (!botsRegistry.has(botId) || !botsRegistry.get(botId).activated) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Bot not found' }));
+		return;
+	}
+	const urlObj = new URL(req.url, 'https://localhost');
+	const afterId = urlObj.searchParams.get('after');
+	const msgs = botConversations.get(`${botId}:${userId}`) || [];
+	let result = msgs;
+	if (afterId) {
+		const idx = msgs.findLastIndex(m => m.id === afterId);
+		result = idx >= 0 ? msgs.slice(idx + 1) : msgs;
+	}
+	const encrypted = encryption.encryptBlockMessage(
+		JSON.stringify({ messages: result.map(m => ({ id: m.id, role: m.role, content: m.content, ts: m.ts, richContent: m.richContent })) }),
+		SERVER_PASSWRD
+	);
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ encrypted }));
+}
+
+function handleBotInbox(req, res, pathname) {
+	const bot = verifyBotAuth(req);
+	if (!bot) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const botId = pathname.split('/')[2];
+	if (bot.botId !== botId) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Forbidden' }));
+		return;
+	}
+	botLastSeen.set(botId, Date.now());
+	const urlObj = new URL(req.url, 'https://localhost');
+	const afterId = urlObj.searchParams.get('after');
+	const pending = pendingBotMessages.get(botId) || [];
+	let result = pending;
+	if (afterId) {
+		const idx = pending.findLastIndex(m => m.id === afterId);
+		result = idx >= 0 ? pending.slice(idx + 1) : pending;
+	}
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ encrypted: botEncrypt({ messages: result }, bot.sharedKey) }));
+}
+
+function handleBotReply(req, res, pathname) {
+	const bot = verifyBotAuth(req);
+	if (!bot) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const botId = pathname.split('/')[2];
+	if (bot.botId !== botId) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Forbidden' }));
+		return;
+	}
+	botLastSeen.set(botId, Date.now());
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const payload = botDecrypt(body.trim(), bot.sharedKey);
+			const { userId, content, richContent } = payload;
+			if (!userId || !content) throw new Error('Missing fields');
+			const msg = {
+				id: crypto.randomBytes(8).toString('hex'),
+				role: 'bot',
+				content: String(content).slice(0, 4096),
+				ts: Date.now(),
+			};
+			if (richContent) msg.richContent = richContent;
+			const convKey = `${botId}:${userId}`;
+			if (!botConversations.has(convKey)) botConversations.set(convKey, []);
+			botConversations.get(convKey).push(msg);
+			appendBotConvToDisk(convKey, msg);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true, id: msg.id }));
+		} catch (e) {
+			originalError('[Bots] Reply error:', e);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid payload' }));
+		}
+	});
+}
+
+function handleBotSetCommands(req, res, pathname) {
+	const bot = verifyBotAuth(req);
+	if (!bot) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const botId = pathname.split('/')[2];
+	if (bot.botId !== botId) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Forbidden' }));
+		return;
+	}
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const { commands } = botDecrypt(body.trim(), bot.sharedKey);
+			if (!Array.isArray(commands)) throw new Error('commands must be array');
+			const record = botsRegistry.get(botId);
+			record.commands = commands.slice(0, 50).map(c => ({
+				name: String(c.name || '').slice(0, 32),
+				description: String(c.description || '').slice(0, 128),
+			}));
+			saveBots();
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true }));
+		} catch (e) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid payload' }));
+		}
+	});
 }
 
 // ==================== CHANNEL HANDLERS ====================
