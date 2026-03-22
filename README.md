@@ -29,8 +29,10 @@ A self-hosted, end-to-end encrypted chat application built for environments with
   - [How Bot Messaging Works](#how-bot-messaging-works)
   - [Creating a Bot](#creating-a-bot)
   - [BotClient API](#botclient-api)
+  - [Bot in Regular Chats](#bot-in-regular-chats)
   - [Rich Messages (Glass Buttons)](#rich-messages-glass-buttons)
   - [Slash Command Autocomplete](#slash-command-autocomplete)
+  - [TypeScript Support](#typescript-support)
   - [Example Bot](#example-bot)
 - [Project Structure](#project-structure)
 
@@ -479,16 +481,112 @@ const bot = new BotClient({
 });
 ```
 
+**Lifecycle**
+
 | Method | Description |
 |---|---|
-| `bot.activate({ inviteToken, name, description, svgIcon })` | One-time registration. Generates Ed25519 keys and registers with server. |
+| `bot.activate({ inviteToken, name, description, svgIcon })` | One-time registration. Generates Ed25519 + P-256 ECDH keys and registers with server. |
 | `bot.start()` | Load keys and begin polling the inbox. |
 | `bot.stop()` | Stop polling. |
-| `bot.onMessage(async (userId, content, messageId) => {})` | Register the message handler. Called for every user message. |
-| `bot.onError((err) => {})` | Register an error handler. |
+| `bot.name` | The bot's display name (read-only, available after `start()`/`activate()`). |
+
+**Direct Messages**
+
+| Method | Description |
+|---|---|
+| `bot.onMessage(async (userId, content, messageId) => {})` | Called for each direct message from a user. |
 | `bot.reply(userId, content)` | Send a plain text reply to a user. |
 | `bot.replyRich(userId, content, buttons)` | Send a reply with interactive glass buttons. |
+
+**Regular Chat (Group)**
+
+| Method | Description |
+|---|---|
+| `bot.onJoin(async (chatHandle, encryptionKey) => {})` | Called when the bot is added to a chat. Persist `encryptionKey` for later use. |
+| `bot.onLeave(async (chatHandle) => {})` | Called when the bot is removed from a chat. |
+| `bot.onChatMessage(async (chatHandle, content, senderUserId, messageId) => {})` | Called for each message in a chat the bot has joined. |
+| `bot.onMention(async (chatHandle, content, senderUserId, messageId) => {})` | Called when the bot is @mentioned. Falls back to `onChatMessage` if not set. |
+| `bot.sendToChat(chatHandle, content, encryptionKey)` | Send a plain text message to a group chat. |
+| `bot.sendRichToChat(chatHandle, content, buttons, encryptionKey)` | Send a message with glass buttons to a group chat. |
+| `bot.setTyping(chatHandle, isTyping)` | Show/hide the bot's typing indicator in a chat (auto-clears after 6 s). |
+| `bot.setChatKey(chatHandle, encryptionKey)` | Pre-load a chat key on restart (before messages arrive). |
+
+**Other**
+
+| Method | Description |
+|---|---|
 | `bot.setCommands(commands)` | Register slash commands shown in the client autocomplete. |
+| `bot.onError((err) => {})` | Register an error handler. |
+
+### Bot in Regular Chats
+
+Bots can be added to any group chat by a member via **Chat Settings → Add Bot**. Once added:
+
+1. The server sends a `join` event to the bot's inbox containing the chat's `encryptionKey` — wrapped with the bot's P-256 ECDH public key so only the bot can unwrap it.
+2. The bot stores the key (e.g. to disk) and uses it to encrypt/decrypt all messages in that chat.
+3. When the bot is removed, a `leave` event is delivered.
+
+```js
+const fs = require('fs');
+const CHATS_FILE = './bot-chats.json';
+
+bot.onJoin(async (chatHandle, encryptionKey) => {
+    // Persist the key — you'll need it after restarts
+    const keys = JSON.parse(fs.readFileSync(CHATS_FILE, 'utf8') || '{}');
+    keys[chatHandle] = encryptionKey;
+    fs.writeFileSync(CHATS_FILE, JSON.stringify(keys, null, 2));
+    await bot.sendToChat(chatHandle, '👋 Hello! Type /help to see what I can do.', encryptionKey);
+});
+
+bot.onLeave(async (chatHandle) => {
+    const keys = JSON.parse(fs.readFileSync(CHATS_FILE, 'utf8') || '{}');
+    delete keys[chatHandle];
+    fs.writeFileSync(CHATS_FILE, JSON.stringify(keys, null, 2));
+});
+
+bot.onChatMessage(async (chatHandle, content, senderUserId, messageId) => {
+    const keys = JSON.parse(fs.readFileSync(CHATS_FILE, 'utf8') || '{}');
+    const encryptionKey = keys[chatHandle];
+    if (!encryptionKey) return;
+    await bot.sendToChat(chatHandle, `Echo: ${content}`, encryptionKey);
+});
+```
+
+After a restart, restore saved keys before calling `start()`:
+
+```js
+for (const [chatHandle, encryptionKey] of Object.entries(savedChats)) {
+    bot.setChatKey(chatHandle, encryptionKey);
+}
+await bot.start();
+```
+
+#### @Mentions
+
+When a user types `@BotName` in a chat message, the server routes a `mention` event to that bot. Register `onMention` to handle it separately from regular chat messages (strip the `@BotName` prefix before processing):
+
+```js
+bot.onMention(async (chatHandle, content, senderUserId, messageId) => {
+    const encryptionKey = savedKeys[chatHandle];
+    if (!encryptionKey) return;
+    // content still includes "@BotName ..." — strip it:
+    const prefix = '@' + bot.name;
+    const text = content.toLowerCase().startsWith(prefix.toLowerCase())
+        ? content.slice(prefix.length).trimStart()
+        : content.trim();
+    await bot.sendToChat(chatHandle, `You said: ${text}`, encryptionKey);
+});
+```
+
+#### Typing Indicator
+
+Call `setTyping` to show the bot's name in the chat's typing indicator. It auto-expires after 6 seconds if not refreshed, so call it periodically for long operations and call it with `false` when done:
+
+```js
+await bot.setTyping(chatHandle, true);
+// ... do work ...
+await bot.setTyping(chatHandle, false);
+```
 
 ### Rich Messages (Glass Buttons)
 
@@ -522,6 +620,31 @@ await bot.setCommands([
 - Arrow up/down to navigate, Enter or click to select, Escape to dismiss
 - Commands are stored server-side and returned with the bot listing — no extra round-trip at chat open time
 
+### TypeScript Support
+
+`bot/bot-sdk.d.ts` ships with the SDK. Import it in TypeScript projects:
+
+```ts
+import { BotClient, BotClientOptions, Button, BotCommand,
+         MessageHandler, ChatMessageHandler, MentionHandler,
+         JoinHandler, LeaveHandler } from './bot-sdk';
+
+const bot = new BotClient({
+    serverUrl: 'https://localhost:3000',
+    sharedKey:  process.env.BOT_SHARED_KEY!,
+});
+
+bot.onMessage(async (userId, content) => {
+    await bot.reply(userId, `Echo: ${content}`);
+});
+```
+
+Or in CommonJS with type assertions:
+
+```js
+const { BotClient } = /** @type {typeof import('./bot-sdk')} */ (require('./bot-sdk'));
+```
+
 ### Example Bot
 
 `bot/example.js` is a fully-featured demo bot:
@@ -533,8 +656,9 @@ await bot.setCommands([
 | `/calc <expr>` | Safe math evaluator (`/calc 12*34`, `2^10`, `(5+3)/2`) |
 | `/roll [N]` | Roll an N-sided die (default d6) |
 | `/score` | Show your quiz history |
+| `/delay [N]` | Show typing indicator for N seconds (1–10, default 3). Chat only. |
 
-Quiz sessions are tracked per-user in memory. The calculator uses a regex whitelist — no `eval` on untrusted input.
+The example bot works in both **direct conversations** and **group chats** (including @mention support). Quiz sessions are tracked per-user in memory. The calculator uses a regex whitelist — no `eval` on untrusted input.
 
 ---
 
@@ -554,9 +678,10 @@ chatapp/
 ├── .admin                   # Channel admin User ID — you create this (optional)
 ├── bot/
 │   ├── bot-sdk.js           # BotClient SDK (require this in your bot)
-│   ├── example.js           # Demo bot: quiz, calc, dice, slash commands
+│   ├── bot-sdk.d.ts         # TypeScript type definitions for bot-sdk.js
+│   ├── example.js           # Demo bot: quiz, calc, dice, slash commands, @mentions
 │   ├── encryption.js        # Encryption helpers (copy of root encryption.js)
-│   ├── bot-keys.json        # Ed25519 keys — auto-generated on first activate
+│   ├── bot-keys.json        # Ed25519 + P-256 ECDH keys — auto-generated on first activate
 │   └── bot-keys-state.json  # Last-seen inbox ID — auto-managed
 ├── assets/
 │   ├── cert/                # TLS certificates
