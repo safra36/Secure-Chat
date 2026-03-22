@@ -92,6 +92,36 @@ function _request(serverUrl, method, pathname, body, headers = {}) {
     });
 }
 
+// ── Chat key helpers (matches client's encryptMessage / decryptMessage) ────────
+
+function _padChatKey(keyStr) {
+    const data = Buffer.from(keyStr, 'utf8');
+    const padded = Buffer.alloc(32);
+    data.copy(padded, 0, 0, Math.min(data.length, 32));
+    return padded;
+}
+
+function _encryptWithChatKey(text, encryptionKey) {
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', _padChatKey(encryptionKey), iv);
+    let enc = cipher.update(text, 'utf8', 'binary');
+    enc += cipher.final('binary');
+    const tag = cipher.getAuthTag();
+    return Buffer.concat([iv, Buffer.from(enc, 'binary'), tag]).toString('base64');
+}
+
+function _decryptWithChatKey(base64, encryptionKey) {
+    const data = Buffer.from(base64, 'base64');
+    const iv = data.slice(0, 12);
+    const tag = data.slice(-16);
+    const enc = data.slice(12, -16);
+    const decipher = crypto.createDecipheriv('aes-256-gcm', _padChatKey(encryptionKey), iv);
+    decipher.setAuthTag(tag);
+    let dec = decipher.update(enc, 'binary', 'utf8');
+    dec += decipher.final('utf8');
+    return dec;
+}
+
 // ── BotClient ─────────────────────────────────────────────────────────────────
 
 class BotClient {
@@ -112,13 +142,21 @@ class BotClient {
         this.pollInterval = pollInterval;
 
         this.botId = null;
-        this._privateKey = null;    // crypto.KeyObject
-        this._publicKeyRaw = null;  // Buffer (32 bytes)
+        this._privateKey = null;      // Ed25519 crypto.KeyObject
+        this._publicKeyRaw = null;    // Buffer (32 bytes)
+        this._ecdhPrivKey = null;      // Buffer (32-byte P-256 scalar)
+        this._ecdhPubKeyRaw = null;    // Buffer (65-byte uncompressed P-256 point)
+        this._botName = null;
         this._messageHandler = null;
+        this._joinHandler = null;
+        this._leaveHandler = null;
+        this._chatMessageHandler = null;
+        this._mentionHandler = null;
         this._errorHandler = (e) => console.error('[BotClient]', e);
         this._pollTimer = null;
-        this._lastInboxId = null;   // persisted in stateFile
+        this._lastInboxId = null;     // persisted in stateFile
         this._running = false;
+        this._chatKeys = new Map();   // chatHandle -> encryptionKey (plaintext)
     }
 
     // ── Registration ───────────────────────────────────────────────────────
@@ -140,8 +178,13 @@ class BotClient {
 
         await this._loadOrGenerateKeys();
 
+        this._botName = name;
         const payload = _botEncrypt(
-            { publicKey: this._publicKeyRaw.toString('base64'), name, description, svgIcon },
+            {
+                publicKey: this._publicKeyRaw.toString('base64'),
+                ecdhPublicKey: this._ecdhPubKeyRaw.toString('base64'),
+                name, description, svgIcon,
+            },
             this.sharedKey
         );
 
@@ -155,6 +198,13 @@ class BotClient {
 
         if (!result.botId) throw new Error('Activation failed: ' + JSON.stringify(result));
         if (result.botId !== this.botId) throw new Error(`botId mismatch: got ${result.botId}, expected ${this.botId}`);
+
+        // Persist name for use in sendToChat
+        try {
+            const saved = JSON.parse(fs.readFileSync(this.keysFile, 'utf8'));
+            saved.name = name;
+            fs.writeFileSync(this.keysFile, JSON.stringify(saved, null, 2));
+        } catch (e) {}
 
         console.log(`[BotClient] Activated. botId: ${this.botId}`);
         return { botId: this.botId };
@@ -176,6 +226,69 @@ class BotClient {
      */
     onError(fn) {
         this._errorHandler = fn;
+    }
+
+    /**
+     * Pre-load a chat key (e.g. restored from persistent storage on restart).
+     * Must be called before start() or after start() before messages arrive.
+     * @param {string} chatHandle
+     * @param {string} encryptionKey
+     */
+    setChatKey(chatHandle, encryptionKey) {
+        this._chatKeys.set(chatHandle, encryptionKey);
+    }
+
+    /**
+     * Called when bot is added to a chat. fn receives the chat handle and the
+     * plaintext encryptionKey — store it however you need (memory, encrypted file, etc).
+     * @param {function} fn - async (chatHandle, encryptionKey) => void
+     */
+    onJoin(fn) {
+        this._joinHandler = fn;
+    }
+
+    /**
+     * Called when bot is removed from a chat (forwarding stops; key is not revoked).
+     * @param {function} fn - async (chatHandle) => void
+     */
+    onLeave(fn) {
+        this._leaveHandler = fn;
+    }
+
+    /**
+     * Called for each message received in a chat the bot has joined.
+     * @param {function} fn - async (chatHandle, content, senderUserId, messageId) => void
+     */
+    onChatMessage(fn) {
+        this._chatMessageHandler = fn;
+    }
+
+    /** The bot's display name (available after start/activate). */
+    get name() { return this._botName || ''; }
+
+    /**
+     * Signal typing state in a chat. Clears automatically after 6s if not refreshed.
+     * @param {string} chatHandle
+     * @param {boolean} isTyping
+     */
+    async setTyping(chatHandle, isTyping) {
+        const payload = _botEncrypt({ typing: !!isTyping }, this.sharedKey);
+        await _request(
+            this.serverUrl,
+            'POST',
+            `/bot/${this.botId}/typing/${encodeURIComponent(chatHandle)}`,
+            payload,
+            { 'Authorization': await this._getAuthHeader(), 'Content-Type': 'text/plain' }
+        );
+    }
+
+    /**
+     * Called when the bot is @mentioned in a chat message.
+     * Falls back to onChatMessage if not registered.
+     * @param {function} fn - async (chatHandle, content, senderUserId, messageId) => void
+     */
+    onMention(fn) {
+        this._mentionHandler = fn;
     }
 
     /**
@@ -248,6 +361,46 @@ class BotClient {
     }
 
     /**
+     * Send a message to a regular chat the bot has joined.
+     * @param {string} chatHandle
+     * @param {string} content
+     * @param {string} encryptionKey - the chat's encryption key (from onJoin or stored)
+     */
+    async sendToChat(chatHandle, content, encryptionKey) {
+        const encryptedContent = _encryptWithChatKey(content, encryptionKey);
+        const encryptedName = _encryptWithChatKey(this._botName || 'Bot', encryptionKey);
+        const payload = _botEncrypt({ encryptedContent, encryptedName }, this.sharedKey);
+        await _request(
+            this.serverUrl,
+            'POST',
+            `/bot/${this.botId}/send-to-chat/${encodeURIComponent(chatHandle)}`,
+            payload,
+            { 'Authorization': await this._getAuthHeader(), 'Content-Type': 'text/plain' }
+        );
+    }
+
+    /**
+     * Send a rich message (with glass buttons) to a regular chat the bot has joined.
+     * @param {string} chatHandle
+     * @param {string} content
+     * @param {Array<{label:string,value:string}>} buttons
+     * @param {string} encryptionKey
+     */
+    async sendRichToChat(chatHandle, content, buttons, encryptionKey) {
+        const encryptedContent = _encryptWithChatKey(content, encryptionKey);
+        const encryptedName = _encryptWithChatKey(this._botName || 'Bot', encryptionKey);
+        const encryptedRichContent = buttons ? _encryptWithChatKey(JSON.stringify({ buttons }), encryptionKey) : null;
+        const payload = _botEncrypt({ encryptedContent, encryptedName, encryptedRichContent }, this.sharedKey);
+        await _request(
+            this.serverUrl,
+            'POST',
+            `/bot/${this.botId}/send-to-chat/${encodeURIComponent(chatHandle)}`,
+            payload,
+            { 'Authorization': await this._getAuthHeader(), 'Content-Type': 'text/plain' }
+        );
+    }
+
+    /**
      * Fetch conversation history with a user.
      * @param {string} userId
      * @param {string} [afterId]
@@ -270,8 +423,20 @@ class BotClient {
                 const saved = JSON.parse(fs.readFileSync(this.keysFile, 'utf8'));
                 const privDer = Buffer.from(saved.privateKey, 'base64');
                 this._privateKey = crypto.createPrivateKey({ key: privDer, format: 'der', type: 'pkcs8' });
-                this._publicKeyRaw = Buffer.from(saved.publicKey, 'base64'); // raw 32 bytes
+                this._publicKeyRaw = Buffer.from(saved.publicKey, 'base64');
                 this.botId = saved.botId;
+                if (saved.name) this._botName = saved.name;
+                if (saved.ecdhPrivateKey) {
+                    this._ecdhPrivKey = Buffer.from(saved.ecdhPrivateKey, 'base64');
+                    this._ecdhPubKeyRaw = Buffer.from(saved.ecdhPublicKey, 'base64');
+                } else {
+                    // Existing bot without P-256 ECDH keys — generate and save
+                    this._generateECDHKeys();
+                    const existing = JSON.parse(fs.readFileSync(this.keysFile, 'utf8'));
+                    existing.ecdhPrivateKey = this._ecdhPrivKey.toString('base64');
+                    existing.ecdhPublicKey = this._ecdhPubKeyRaw.toString('base64');
+                    fs.writeFileSync(this.keysFile, JSON.stringify(existing, null, 2));
+                }
                 console.log(`[BotClient] Loaded keys from ${this.keysFile}. botId: ${this.botId}`);
                 return;
             } catch (e) {
@@ -279,7 +444,7 @@ class BotClient {
             }
         }
 
-        // Generate new Ed25519 key pair
+        // Generate new Ed25519 + X25519 key pairs
         const { privateKey, publicKey } = crypto.generateKeyPairSync('ed25519');
         const privDer = privateKey.export({ type: 'pkcs8', format: 'der' });
         const pubSpkiDer = publicKey.export({ type: 'spki', format: 'der' });
@@ -289,13 +454,39 @@ class BotClient {
         this._privateKey = privateKey;
         this._publicKeyRaw = rawPub;
         this.botId = botId;
+        this._generateECDHKeys();
 
         fs.writeFileSync(this.keysFile, JSON.stringify({
             botId,
             publicKey: rawPub.toString('base64'),
             privateKey: privDer.toString('base64'),
+            ecdhPublicKey: this._ecdhPubKeyRaw.toString('base64'),
+            ecdhPrivateKey: this._ecdhPrivKey.toString('base64'),
         }, null, 2));
         console.log(`[BotClient] Generated new keys. botId: ${botId}`);
+    }
+
+    _generateECDHKeys() {
+        const ecdh = crypto.createECDH('prime256v1');
+        ecdh.generateKeys();
+        this._ecdhPrivKey = ecdh.getPrivateKey();       // 32 bytes
+        this._ecdhPubKeyRaw = ecdh.getPublicKey();      // 65 bytes uncompressed
+    }
+
+    _ecdhDecrypt(encryptedKeyBlob, ephemeralPubKeyBase64) {
+        const ecdh = crypto.createECDH('prime256v1');
+        ecdh.setPrivateKey(this._ecdhPrivKey);
+        const ephemeralPubKeyBytes = Buffer.from(ephemeralPubKeyBase64, 'base64');
+        const sharedSecret = ecdh.computeSecret(ephemeralPubKeyBytes); // 32 bytes (x-coord)
+        const data = Buffer.from(encryptedKeyBlob, 'base64');
+        const iv = data.slice(0, 12);
+        const tag = data.slice(-16);
+        const enc = data.slice(12, -16);
+        const decipher = crypto.createDecipheriv('aes-256-gcm', sharedSecret, iv);
+        decipher.setAuthTag(tag);
+        let dec = decipher.update(enc, 'binary', 'utf8');
+        dec += decipher.final('utf8');
+        return dec;
     }
 
     async _getAuthHeader() {
@@ -329,7 +520,7 @@ class BotClient {
     }
 
     async _pollInbox() {
-        const qs = this._lastInboxId ? `?after=${this._lastInboxId}` : '';
+        const qs = this._lastInboxId ? `?after=${encodeURIComponent(this._lastInboxId)}` : '';
         const result = await _request(
             this.serverUrl,
             'GET',
@@ -343,9 +534,35 @@ class BotClient {
         for (const msg of (messages || [])) {
             this._lastInboxId = msg.id;
             changed = true;
-            if (this._messageHandler) {
-                try { await this._messageHandler(msg.userId, msg.content, msg.id); }
-                catch (e) { this._errorHandler(e); }
+            if (msg.type === 'join') {
+                try {
+                    const encryptionKey = this._ecdhDecrypt(msg.encryptedKeyBlob, msg.ephemeralPubKey);
+                    this._chatKeys.set(msg.chatHandle, encryptionKey);
+                    if (this._joinHandler) await this._joinHandler(msg.chatHandle, encryptionKey);
+                } catch (e) { this._errorHandler(e); }
+            } else if (msg.type === 'leave') {
+                try {
+                    if (this._leaveHandler) await this._leaveHandler(msg.chatHandle);
+                } catch (e) { this._errorHandler(e); }
+            } else if (msg.type === 'chat_message' || msg.type === 'mention') {
+                const handler = msg.type === 'mention'
+                    ? (this._mentionHandler || this._chatMessageHandler)
+                    : this._chatMessageHandler;
+                if (handler) {
+                    const encryptionKey = this._chatKeys.get(msg.chatHandle);
+                    if (encryptionKey) {
+                        try {
+                            const content = _decryptWithChatKey(msg.message.encryptedContent, encryptionKey);
+                            await handler(msg.chatHandle, content, msg.message.senderUserId, msg.message.id);
+                        } catch (e) { this._errorHandler(e); }
+                    }
+                }
+            } else {
+                // Direct bot message (no type)
+                if (this._messageHandler) {
+                    try { await this._messageHandler(msg.userId, msg.content, msg.id); }
+                    catch (e) { this._errorHandler(e); }
+                }
             }
         }
         if (changed) this._saveState();

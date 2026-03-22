@@ -11,3 +11,4 @@ requirements.md
 .admin
 bot-keys.json
 bot-keys-state.json
+bot-chats.json

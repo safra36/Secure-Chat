@@ -202,8 +202,27 @@ const botsRegistry = new Map(); // botId (or 'pending:hash') -> bot record
 const botConversations = new Map(); // `${botId}:${userId}` -> Message[]
 const pendingBotMessages = new Map(); // botId -> Message[]
 const botLastSeen = new Map(); // botId -> timestamp (updated on every /inbox or /reply)
+const botChatMemberships = new Map(); // `${botId}:${chatHandle}` -> { botId, chatHandle, encryptedKeyBlob, ephemeralPubKey }
+const botTypingState = new Map();    // `${botId}:${chatHandle}` -> { name, ts }
+const BOT_TYPING_TTL = 6000;
 const BOTS_FILE = path.join(DATA_DIR, '_bots.json');
 const BOT_CONVS_FILE = path.join(DATA_DIR, '_botconvs.ndjson');
+const BOT_MEMBERS_FILE = path.join(DATA_DIR, '_botmembers.json');
+
+function loadBotMemberships() {
+	try {
+		if (!fs.existsSync(BOT_MEMBERS_FILE)) return;
+		const arr = JSON.parse(fs.readFileSync(BOT_MEMBERS_FILE, 'utf8'));
+		for (const m of arr) botChatMemberships.set(`${m.botId}:${m.chatHandle}`, m);
+		originalLog(`[Bots] Loaded ${botChatMemberships.size} chat membership(s)`);
+	} catch (e) { originalError('[Bots] Failed to load memberships:', e); }
+}
+
+function saveBotMemberships() {
+	try {
+		fs.writeFileSync(BOT_MEMBERS_FILE, JSON.stringify([...botChatMemberships.values()]));
+	} catch (e) { originalError('[Bots] Failed to save memberships:', e); }
+}
 
 function loadBots() {
 	try {
@@ -921,6 +940,31 @@ const server = https.createServer(tlsOptions, (req, res) => {
 		return;
 	}
 
+	if (req.method === 'POST' && pathname.startsWith('/bot/') && pathname.includes('/join/')) {
+		handleBotJoinChat(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'DELETE' && pathname.startsWith('/bot/') && pathname.includes('/join/')) {
+		handleBotLeaveChat(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/bot/') && pathname.includes('/send-to-chat/')) {
+		handleBotSendToChat(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'POST' && pathname.startsWith('/bot/') && pathname.includes('/typing/')) {
+		handleBotSetTyping(req, res, pathname);
+		return;
+	}
+
+	if (req.method === 'GET' && pathname.startsWith('/chat/') && pathname.endsWith('/bots')) {
+		handleGetChatBots(req, res, pathname);
+		return;
+	}
+
 	// Default response
 	console.log('404 Not Found');
 	res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -1078,6 +1122,7 @@ loadSeenPositions();
 loadChatKeys();
 loadBots();
 loadBotConversations();
+loadBotMemberships();
 
 function handleVerify(req) {
 	const authorization = req.headers.authorization;
@@ -1152,7 +1197,9 @@ function serializeMessageForClient(message, requestingUserId) {
 		isEdited: (message.edits || []).length > 0,
 		reactions: transformedReactions,
 		colorToken,
-		viewCount: vcSet ? vcSet.size : null
+		viewCount: vcSet ? vcSet.size : null,
+		encryptedRichContent: message.encryptedRichContent || null,
+		isBot: !!(message.senderUserId && botsRegistry.get(message.senderUserId)?.activated),
 	};
 }
 
@@ -1451,6 +1498,7 @@ function handleSendMessage(req, res, pathname) {
 				reactions: {},         // encryptedEmoji → { userIds: [], encryptedUserNames: {} }
 				edits: [],             // [{ encryptedEditTimestamp }]
 				replyTo: messageData.replyTo || null, // { messageId, encryptedPreview, encryptedSenderName }
+				richContent: messageData.richContent || null,
 			};
 
 			// Store message
@@ -1464,6 +1512,26 @@ function handleSendMessage(req, res, pathname) {
 			if (userHeartbeats.has(chatHandle)) {
 				const cu = userHeartbeats.get(chatHandle).get(senderUserId);
 				if (cu) cu.lastMessageTime = now;
+			}
+
+			// Forward ciphertext to bots in this chat
+			const mentionedBotIds = Array.isArray(messageData.mentionedBotIds) ? messageData.mentionedBotIds : [];
+			for (const [, membership] of botChatMemberships) {
+				if (membership.chatHandle !== chatHandle) continue;
+				if (membership.botId === senderUserId) continue; // no echo
+				if (!pendingBotMessages.has(membership.botId)) pendingBotMessages.set(membership.botId, []);
+				pendingBotMessages.get(membership.botId).push({
+					id: message.id,
+					type: mentionedBotIds.includes(membership.botId) ? 'mention' : 'chat_message',
+					chatHandle,
+					message: {
+						id: message.id,
+						encryptedContent: message.encryptedContent,
+						encryptedName: message.encryptedName,
+						senderUserId: message.senderUserId,
+					},
+					ts: Date.now(),
+				});
 			}
 
 			// Persist to disk
@@ -1648,8 +1716,14 @@ function handleHeartbeat(req, res, pathname) {
 				responseHeaders['X-Read-Receipts'] = encodedReadReceiptsHeader;
 			}
 
+			const botTyping = [];
+			for (const [key, val] of botTypingState) {
+				if (!key.endsWith(`:${chatHandle}`)) continue;
+				if (now - val.ts > BOT_TYPING_TTL) continue;
+				botTyping.push(val.name);
+			}
 			res.writeHead(200, responseHeaders);
-			res.end(JSON.stringify({ success: true }));
+			res.end(JSON.stringify({ success: true, botTyping }));
 		} catch (error) {
 			console.error('Error processing heartbeat:', error);
 			res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -3255,7 +3329,7 @@ function handleBotActivate(req, res) {
 	req.on('end', () => {
 		try {
 			const payload = botDecrypt(body.trim(), pendingBot.sharedKey);
-			const { publicKey, name, description, svgIcon } = payload;
+			const { publicKey, name, description, svgIcon, ecdhPublicKey } = payload;
 			if (!publicKey || !name) throw new Error('Missing required fields');
 			const rawPubKeyBytes = Buffer.from(publicKey, 'base64');
 			const botId = crypto.createHash('sha256').update(rawPubKeyBytes).digest('hex');
@@ -3268,6 +3342,7 @@ function handleBotActivate(req, res) {
 			botsRegistry.set(botId, {
 				botId,
 				publicKey,
+				ecdhPublicKey: ecdhPublicKey || null,
 				name: String(name).slice(0, 64),
 				description: String(description || '').slice(0, 256),
 				svgIcon: String(svgIcon || '').slice(0, 16384),
@@ -3298,6 +3373,7 @@ function handleGetBots(req, res) {
 			description: b.description,
 			svgIcon: b.svgIcon,
 			commands: b.commands || [],
+			ecdhPublicKey: b.ecdhPublicKey || null,
 			online: (now - (botLastSeen.get(b.botId) || 0)) < BOT_ONLINE_TTL,
 		}));
 	const encrypted = encryption.encryptBlockMessage(
@@ -3477,6 +3553,178 @@ function handleBotSetCommands(req, res, pathname) {
 		} catch (e) {
 			res.writeHead(400, { 'Content-Type': 'application/json' });
 			res.end(JSON.stringify({ error: 'Invalid payload' }));
+		}
+	});
+}
+
+function handleBotJoinChat(req, res, pathname) {
+	if (!handleVerify(req)) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const parts = pathname.split('/');
+	const botId = parts[2];
+	const chatHandle = decodeURIComponent(parts[4]);
+	const bot = botsRegistry.get(botId);
+	if (!bot || !bot.activated) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Bot not found' }));
+		return;
+	}
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const { encryptedKeyBlob, ephemeralPubKey } = JSON.parse(body);
+			if (!encryptedKeyBlob || !ephemeralPubKey) throw new Error('Missing fields');
+			const key = `${botId}:${chatHandle}`;
+			botChatMemberships.set(key, { botId, chatHandle, encryptedKeyBlob, ephemeralPubKey });
+			saveBotMemberships();
+			if (!pendingBotMessages.has(botId)) pendingBotMessages.set(botId, []);
+			pendingBotMessages.get(botId).push({
+				id: crypto.randomBytes(8).toString('hex'),
+				type: 'join',
+				chatHandle,
+				encryptedKeyBlob,
+				ephemeralPubKey,
+				ts: Date.now(),
+			});
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true }));
+		} catch (e) {
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid request' }));
+		}
+	});
+}
+
+function handleBotLeaveChat(req, res, pathname) {
+	if (!handleVerify(req)) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const parts = pathname.split('/');
+	const botId = parts[2];
+	const chatHandle = decodeURIComponent(parts[4]);
+	const key = `${botId}:${chatHandle}`;
+	if (!botChatMemberships.has(key)) {
+		res.writeHead(404, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Bot not in this chat' }));
+		return;
+	}
+	botChatMemberships.delete(key);
+	saveBotMemberships();
+	if (!pendingBotMessages.has(botId)) pendingBotMessages.set(botId, []);
+	pendingBotMessages.get(botId).push({
+		id: crypto.randomBytes(8).toString('hex'),
+		type: 'leave',
+		chatHandle,
+		ts: Date.now(),
+	});
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ ok: true }));
+}
+
+function handleGetChatBots(req, res, pathname) {
+	if (!handleVerify(req)) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const chatHandle = decodeURIComponent(pathname.split('/')[2]);
+	const bots = [...botChatMemberships.values()]
+		.filter(m => m.chatHandle === chatHandle)
+		.map(m => {
+			const bot = botsRegistry.get(m.botId);
+			if (!bot || !bot.activated) return null;
+			return { botId: bot.botId, name: bot.name, svgIcon: bot.svgIcon };
+		})
+		.filter(Boolean);
+	res.writeHead(200, { 'Content-Type': 'application/json' });
+	res.end(JSON.stringify({ bots }));
+}
+
+function handleBotSendToChat(req, res, pathname) {
+	const bot = verifyBotAuth(req);
+	if (!bot) {
+		res.writeHead(401, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Unauthorized' }));
+		return;
+	}
+	const parts = pathname.split('/');
+	const botId = parts[2];
+	const chatHandle = decodeURIComponent(parts[4]);
+	if (bot.botId !== botId) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Forbidden' }));
+		return;
+	}
+	if (!botChatMemberships.has(`${botId}:${chatHandle}`)) {
+		res.writeHead(403, { 'Content-Type': 'application/json' });
+		res.end(JSON.stringify({ error: 'Bot not in this chat' }));
+		return;
+	}
+	botLastSeen.set(botId, Date.now());
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const payload = botDecrypt(body.trim(), bot.sharedKey);
+			const { encryptedContent, encryptedName, encryptedRichContent } = payload;
+			if (!encryptedContent || !encryptedName) throw new Error('Missing fields');
+			const encryptedTimestamp = encryptTimestamp(Date.now());
+			const message = {
+				encryptedName,
+				encryptedContent,
+				encryptedTimestamp,
+				type: 'text',
+				id: encryptedTimestamp,
+				keyFp: null,
+				senderUserId: botId,
+				reactions: {},
+				edits: [],
+				replyTo: null,
+				encryptedRichContent: encryptedRichContent || null,
+			};
+			if (!messagesStorage.has(chatHandle)) messagesStorage.set(chatHandle, []);
+			messagesStorage.get(chatHandle).push(message);
+			appendMessageToDisk(chatHandle, message, encryptedContent, false);
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true, id: message.id }));
+		} catch (e) {
+			originalError('[Bots] sendToChat error:', e);
+			res.writeHead(400, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ error: 'Invalid payload' }));
+		}
+	});
+}
+
+function handleBotSetTyping(req, res, pathname) {
+	const bot = verifyBotAuth(req);
+	if (!bot) { res.writeHead(401); res.end(JSON.stringify({ error: 'Unauthorized' })); return; }
+	const parts = pathname.split('/');
+	const botId = parts[2];
+	const chatHandle = decodeURIComponent(parts[4]);
+	if (bot.botId !== botId || !botChatMemberships.has(`${botId}:${chatHandle}`)) {
+		res.writeHead(403); res.end(JSON.stringify({ error: 'Forbidden' })); return;
+	}
+	let body = '';
+	req.on('data', chunk => { body += chunk; });
+	req.on('end', () => {
+		try {
+			const { typing } = botDecrypt(body.trim(), bot.sharedKey);
+			const key = `${botId}:${chatHandle}`;
+			if (typing) {
+				botTypingState.set(key, { name: bot.name, ts: Date.now() });
+			} else {
+				botTypingState.delete(key);
+			}
+			res.writeHead(200, { 'Content-Type': 'application/json' });
+			res.end(JSON.stringify({ ok: true }));
+		} catch (e) {
+			res.writeHead(400); res.end(JSON.stringify({ error: 'Invalid payload' }));
 		}
 	});
 }
