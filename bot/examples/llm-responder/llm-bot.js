@@ -21,13 +21,13 @@ const path  = require('path');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const SERVER_URL   = process.env.BOT_SERVER_URL   || '';
-const SHARED_KEY   = process.env.BOT_SHARED_KEY   || '';
-const INVITE_TOKEN = process.env.BOT_INVITE_TOKEN || '';
+const SERVER_URL   = process.env.BOT_SERVER_URL   || 'https://chat.amirwhocodes.com';
+const SHARED_KEY   = process.env.BOT_SHARED_KEY   || '636da652600aed3e13605212381650df486f9f04db52e3e27ef3d8d1015d2cf0';
+const INVITE_TOKEN = process.env.BOT_INVITE_TOKEN || 'f4f6f26c9ee6e2b2b06be5b7020ba31f8cfb178e7b52893db9aa09156fe99159';
 
-const LLM_BASE     = 'https://arvancloudai.ir/gateway/models/Qwen3-30B-A3B/';
-const LLM_API_KEY  = 'xxxxxxx-xxxx-xxxx-xxxx-xxxxxxxx'; // ← REPLACE WITH YOUR KEY
-const LLM_MODEL    = 'Qwen3-30B-A3B-xxxxx';
+const LLM_BASE     = 'https://arvancloudai.ir/gateway/models/Qwen3-30B-A3B/HZTuTZe_QOxgUUCVQ8v3cCnbkYZrnvtmi7Sxv9jqXYDFPinkeVVe7thFJwQsQ4FALGvPPK_H0rsAGW9qHhVRmFK_7Dqgl6in0h6MW8M7kxXvcPkIVRavXIr-cpkpBUVjhgXpA65dAsDQelPbBofG4ZijbwBToyqrrYUeca2Do0Wry9E9beUz5qpQdleUsyDNH6cSbBQPFIdJ3s9dNRZLrwCf_b8uVE5szd6ZnQg2VMtW1xLmWp1-2wqFvSjCs0ej/v1';
+const LLM_API_KEY  = 'f943f38a-5346-5737-9a42-f51fe1180e82';
+const LLM_MODEL    = 'Qwen3-30B-A3B-cznny';
 
 // Compact history when total characters exceed this (~25 K tokens)
 const COMPACT_THRESHOLD = 100_000;
@@ -76,6 +76,13 @@ CRITICAL RULE: You MUST always respond with a single valid JSON object. Never ou
 === FOOTER (optional) ===
 - Use for: disclaimers, "info as of [date]", source attribution, helpful hints.
 - 1 short sentence max.
+
+=== LIMITATIONS (be upfront, never pretend you can do these) ===
+- Images: cannot view, analyze, or generate images. If asked, say so clearly.
+- URLs/links: cannot visit, fetch, or read any URL. Do not pretend to browse the web.
+- Files: cannot create, download, read, or save files of any kind.
+- Real-time data: no live search, no current news, no stock prices, weather, etc. Knowledge has a cutoff.
+- If asked to do any of the above, acknowledge the limitation honestly and offer what you *can* do instead.
 
 === WHEN TO USE BUTTONS ===
 ✓ User asks an open question where you can offer to go deeper on sub-topics
