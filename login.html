@@ -15270,15 +15270,21 @@
             // ── Messaging ────────────────────────────────────────────────
             async function _loadAllBotMessages() {
                 try {
-                    const resp = await authenticatedFetch(`/bot/${_currentBotId}/messages`, { method: 'GET' });
+                    const resp = await authenticatedFetch(`/bot/${_currentBotId}/messages`, { method: 'GET', cache: 'no-store' });
                     if (!resp.ok) return;
                     const { encrypted } = await resp.json();
                     const { messages } = JSON.parse(await decryptBlockWithServerKey(encrypted));
                     document.getElementById('bot-messages').innerHTML = '';
                     _botLastMsgId = null;
+                    let loadedBotReply = false;
                     for (const msg of (messages || [])) {
                         _appendBotMessage(msg);
                         _botLastMsgId = msg.id;
+                        if (msg.role === 'bot') loadedBotReply = true;
+                    }
+                    if (loadedBotReply && _botAwaitingReply) {
+                        _botAwaitingReply = false;
+                        _hideBotTyping();
                     }
                     _scrollBotToBottom();
                 } catch (e) {}
@@ -15290,7 +15296,7 @@
                     const url = _botLastMsgId
                         ? `/bot/${_currentBotId}/messages?after=${_botLastMsgId}`
                         : `/bot/${_currentBotId}/messages`;
-                    const resp = await authenticatedFetch(url, { method: 'GET' });
+                    const resp = await authenticatedFetch(url, { method: 'GET', cache: 'no-store' });
                     if (!resp.ok) return;
                     const { encrypted } = await resp.json();
                     const { messages } = JSON.parse(await decryptBlockWithServerKey(encrypted));
@@ -15300,6 +15306,7 @@
                         // skip if already rendered (optimistic send)
                         if (document.querySelector(`[data-msg-id="${msg.id}"]`)) {
                             _botLastMsgId = msg.id;
+                            if (msg.role === 'bot') gotBotReply = true;
                             continue;
                         }
                         _appendBotMessage(msg);
@@ -15310,7 +15317,7 @@
                     }
                     if (gotBotReply) { _botAwaitingReply = false; _hideBotTyping(); }
                     if (appended) _scrollBotToBottom();
-                } catch (e) {}
+                } catch (e) { console.error('[BotPoll]', e); }
                 _botPollCount++;
                 if (_botPollCount % 10 === 0) _refreshBotStatus();
             }

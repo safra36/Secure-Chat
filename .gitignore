@@ -12,3 +12,4 @@ requirements.md
 bot-keys.json
 bot-keys-state.json
 bot-chats.json
+**/bots/**

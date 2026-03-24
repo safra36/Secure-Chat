@@ -1,5 +1,5 @@
 // Service Worker for Secure Chat PWA
-const CACHE_NAME = 'secure-chat-v3';
+const CACHE_NAME = 'secure-chat-v5';
 const STATIC_ASSETS = [
   '/index.html',
   '/login.html',
@@ -105,12 +105,15 @@ self.addEventListener('fetch', (event) => {
   }
 
   // For API requests, always go to network
-  if (url.pathname.startsWith('/messages/') ||
+  if (url.pathname === '/bots' ||
+      url.pathname.startsWith('/messages/') ||
       url.pathname.startsWith('/send/') ||
       url.pathname.startsWith('/heartbeat/') ||
       url.pathname.startsWith('/call/') ||
       url.pathname.startsWith('/verify') ||
-      url.pathname.startsWith('/time-sync')) {
+      url.pathname.startsWith('/time-sync') ||
+      url.pathname.startsWith('/bot/') ||
+      url.pathname.startsWith('/chat/')) {
 
     event.respondWith(
       fetch(request)
