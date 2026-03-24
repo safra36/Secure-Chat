@@ -5337,6 +5337,21 @@
             transform:translateY(-1px); box-shadow:0 4px 14px rgba(99,102,241,.2); }
         .bot-btn:active { transform:scale(0.97); }
         .bot-btn:disabled { opacity:0.45; cursor:default; transform:none; box-shadow:none; }
+        .bot-card { border: 1px solid var(--accent) !important; border-radius: 12px; display: flex; flex-direction: column; width: 100%; min-width: 0; box-sizing: border-box; }
+        .bot-card > * { min-width: 0; }
+        .bot-card-title { font-weight:600; font-size:14px; margin-bottom:6px; color:var(--text-primary); }
+        .bot-card-footer { font-size:11px; color:var(--text-muted); margin-top:6px; border-top:1px solid var(--border-color); padding-top:5px; }
+        .bot-image { max-width:100%; border-radius:8px; margin-bottom:8px; display:block; }
+        .bot-btn-row.compact { gap:5px; }
+        .bot-btn-row.compact .bot-btn { padding:5px 11px; font-size:12px; }
+        .bot-btn.link { text-decoration:none; display:inline-flex; align-items:center; }
+        .bot-md pre { background:var(--bg-primary); border:1px solid var(--border-color); border-radius:6px; padding:8px; overflow-x:auto; font-size:12px; margin:4px 0; }
+        .bot-md code { background:var(--bg-primary); border-radius:3px; padding:1px 4px; font-size:12px; }
+        .bot-md ul { margin:4px 0; padding-left:18px; }
+        .bot-md a { color:var(--accent); text-decoration:none; }
+        .bot-md a:hover { text-decoration:underline; }
+        .bot-md strong { font-weight:600; }
+        .bot-md h3,.bot-md h4,.bot-md h5 { margin:4px 0; }
     </style>
 </head>
 <body>
@@ -9885,7 +9900,7 @@
                         const decrypted = await decryptMessage(message.encryptedContent, encryptionKey);
                         msgDir = detectDir(decrypted);
                         const isLong = decrypted.length > 600;
-                        contentHtml = `<div class="message-content${isLong ? ' msg-collapsed' : ''}">${linkifyText(decrypted)}</div>`;
+                        contentHtml = `<div class="message-content${message.isBot ? ' bot-md' : ''}${isLong ? ' msg-collapsed' : ''}">${message.isBot ? _renderMarkdown(decrypted) : linkifyText(decrypted)}</div>`;
                     }
                 } catch (err) {
                     if (err instanceof DOMException && err.name === 'OperationError') { renderedMessageIds.add(message.id); continue; }
@@ -10031,23 +10046,70 @@
 
                 // Rich content buttons (from bots, encrypted with chat key)
                 if (message.encryptedRichContent) {
+                    const _richSenderName = senderName;
                     decryptMessage(message.encryptedRichContent, encryptionKey).then(json => {
                         const rc = JSON.parse(json);
-                        if (!Array.isArray(rc.buttons)) return;
-                        const btnRow = document.createElement('div');
-                        btnRow.className = 'bot-btn-row';
-                        for (const btn of rc.buttons) {
-                            const b = document.createElement('button');
-                            b.className = 'bot-btn';
-                            b.textContent = btn.label;
-                            b.onclick = () => {
-                                btnRow.querySelectorAll('.bot-btn').forEach(x => { x.disabled = true; });
-                                document.getElementById('message-input').value = btn.value;
-                                sendMessage();
-                            };
-                            btnRow.appendChild(b);
+                        if (rc.layout === 'card') messageBubble.classList.add('bot-card');
+                        if (rc.title) {
+                            const titleEl = document.createElement('div');
+                            titleEl.className = 'bot-card-title';
+                            titleEl.textContent = rc.title;
+                            messageBubble.insertBefore(titleEl, messageBubble.firstChild);
                         }
-                        messageBubble.appendChild(btnRow);
+                        if (rc.imageUrl) {
+                            const img = document.createElement('img');
+                            img.className = 'bot-image';
+                            img.src = rc.imageUrl;
+                            img.alt = '';
+                            const titleEl = messageBubble.querySelector('.bot-card-title');
+                            messageBubble.insertBefore(img, titleEl ? titleEl.nextSibling : messageBubble.firstChild);
+                        }
+                        if (Array.isArray(rc.buttons) && rc.buttons.length > 0) {
+                            const btnRow = document.createElement('div');
+                            btnRow.className = 'bot-btn-row' + (rc.layout === 'compact' ? ' compact' : '');
+                            for (const btn of rc.buttons) {
+                                let el;
+                                if (btn.type === 'link') {
+                                    el = document.createElement('a');
+                                    el.className = 'bot-btn link';
+                                    el.href = btn.value;
+                                    el.target = '_blank';
+                                    el.rel = 'noopener noreferrer';
+                                    el.textContent = btn.label;
+                                } else {
+                                    el = document.createElement('button');
+                                    el.className = 'bot-btn';
+                                    el.textContent = btn.label;
+                                    el.onclick = async () => {
+                                        if (rc.singleSelect !== false) {
+                                            btnRow.querySelectorAll('.bot-btn').forEach(x => { x.disabled = true; });
+                                        }
+                                        if (message.isBot) {
+                                            const botEntry = _chatBots.find(b => b.name === _richSenderName);
+                                            if (botEntry) _mentionedBotIds.add(botEntry.botId);
+                                            try {
+                                                const contentEl = messageBubble.querySelector('.message-content');
+                                                const preview = (contentEl ? contentEl.textContent : btn.label).slice(0, 80);
+                                                const encPrev = await encryptMessage(preview, encryptionKey);
+                                                const encSender = await encryptMessage(_richSenderName, encryptionKey);
+                                                setReplyContext(message.id, encPrev, encSender);
+                                            } catch {}
+                                        }
+                                        const prefix = message.isBot ? '@' + _richSenderName + ' ' : '';
+                                        document.getElementById('message-input').value = prefix + btn.value;
+                                        sendMessage();
+                                    };
+                                }
+                                btnRow.appendChild(el);
+                            }
+                            messageBubble.appendChild(btnRow);
+                        }
+                        if (rc.footer) {
+                            const footerEl = document.createElement('div');
+                            footerEl.className = 'bot-card-footer';
+                            footerEl.textContent = rc.footer;
+                            messageBubble.appendChild(footerEl);
+                        }
                     }).catch(() => {});
                 }
 
@@ -10241,6 +10303,33 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        function _renderMarkdown(text) {
+            const parts = text.split(/(```[\s\S]*?```|`[^`\n]+`)/g);
+            return parts.map((p, i) => {
+                if (i % 2 === 1) {
+                    if (p.startsWith('```')) {
+                        const raw = p.slice(3,-3).replace(/^\n/,'').replace(/\n$/,'');
+                        // Strip optional language identifier on first line (e.g. "js\n...")
+                        const code = raw.replace(/^[a-zA-Z0-9+\-_#.]+\n/, '');
+                        if (!code.trim()) return ''; // skip empty fences (LLM uses ``` as separator)
+                        const esc = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                        return `<pre><code>${esc}</code></pre>`;
+                    }
+                    const esc = p.slice(1,-1).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                    return `<code>${esc}</code>`;
+                }
+                let s = p.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+                s = s.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                s = s.replace(/\*(.+?)\*/g, '<em>$1</em>');
+                s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\)\n]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+                s = s.replace(/((?:^[-*] .+\n?)+)/gm, m =>
+                    '<ul>' + m.replace(/^[-*] (.+)\n?/gm, '<li>$1</li>') + '</ul>');
+                s = s.replace(/\n{2,}/g, '\n'); // collapse multiple blank lines to one
+                s = s.replace(/(<ul>[\s\S]*?<\/ul>)|\n/g, (m, ul) => ul !== undefined ? ul : '<br>');
+                return s;
+            }).join('');
         }
 
         function linkifyText(text) {
@@ -15386,26 +15475,62 @@
                 col.style.cssText = 'display:flex;flex-direction:column;max-width:78%';
                 const bubble = document.createElement('div');
                 bubble.className = 'bot-bubble ' + (isUser ? 'user-side' : 'bot-side');
-                bubble.textContent = msg.content;
+                const rc = (!isUser && msg.richContent) ? msg.richContent : null;
+                if (rc && rc.layout === 'card') bubble.classList.add('bot-card');
+                if (rc && rc.title) {
+                    const titleEl = document.createElement('div');
+                    titleEl.className = 'bot-card-title';
+                    titleEl.textContent = rc.title;
+                    bubble.appendChild(titleEl);
+                }
+                if (rc && rc.imageUrl) {
+                    const img = document.createElement('img');
+                    img.className = 'bot-image';
+                    img.src = rc.imageUrl;
+                    img.alt = '';
+                    bubble.appendChild(img);
+                }
+                const contentEl = document.createElement('div');
+                if (!isUser) contentEl.className = 'bot-md';
+                contentEl.innerHTML = isUser ? msg.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>') : _renderMarkdown(msg.content);
+                bubble.appendChild(contentEl);
                 const ts = document.createElement('div');
                 ts.className = 'bot-ts' + (isUser ? ' user' : '');
                 ts.textContent = _fmtTime(msg.ts);
                 col.appendChild(bubble);
                 col.appendChild(ts);
-                if (!isUser && msg.richContent && Array.isArray(msg.richContent.buttons)) {
+                if (rc && Array.isArray(rc.buttons) && rc.buttons.length > 0) {
                     const btnRow = document.createElement('div');
-                    btnRow.className = 'bot-btn-row';
-                    for (const btn of msg.richContent.buttons) {
-                        const b = document.createElement('button');
-                        b.className = 'bot-btn';
-                        b.textContent = btn.label;
-                        b.onclick = () => {
-                            btnRow.querySelectorAll('.bot-btn').forEach(x => { x.disabled = true; });
-                            sendBotMessage(btn.value);
-                        };
-                        btnRow.appendChild(b);
+                    btnRow.className = 'bot-btn-row' + (rc.layout === 'compact' ? ' compact' : '');
+                    for (const btn of rc.buttons) {
+                        let el;
+                        if (btn.type === 'link') {
+                            el = document.createElement('a');
+                            el.className = 'bot-btn link';
+                            el.href = btn.value;
+                            el.target = '_blank';
+                            el.rel = 'noopener noreferrer';
+                            el.textContent = btn.label;
+                        } else {
+                            el = document.createElement('button');
+                            el.className = 'bot-btn';
+                            el.textContent = btn.label;
+                            el.onclick = () => {
+                                if (rc.singleSelect !== false) {
+                                    btnRow.querySelectorAll('.bot-btn').forEach(x => { x.disabled = true; });
+                                }
+                                sendBotMessage(btn.value);
+                            };
+                        }
+                        btnRow.appendChild(el);
                     }
                     col.appendChild(btnRow);
+                }
+                if (rc && rc.footer) {
+                    const footerEl = document.createElement('div');
+                    footerEl.className = 'bot-card-footer';
+                    footerEl.textContent = rc.footer;
+                    col.appendChild(footerEl);
                 }
                 row.appendChild(col);
                 document.getElementById('bot-messages').appendChild(row);

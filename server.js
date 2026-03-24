@@ -1529,6 +1529,7 @@ function handleSendMessage(req, res, pathname) {
 						encryptedContent: message.encryptedContent,
 						encryptedName: message.encryptedName,
 						senderUserId: message.senderUserId,
+						replyTo: message.replyTo || null,
 					},
 					ts: Date.now(),
 				});
@@ -3685,7 +3686,7 @@ function handleBotSendToChat(req, res, pathname) {
 				senderUserId: botId,
 				reactions: {},
 				edits: [],
-				replyTo: null,
+				replyTo: payload.replyTo || null,
 				encryptedRichContent: encryptedRichContent || null,
 			};
 			if (!messagesStorage.has(chatHandle)) messagesStorage.set(chatHandle, []);

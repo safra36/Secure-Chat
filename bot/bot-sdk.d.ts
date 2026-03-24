@@ -23,6 +23,16 @@ export interface ActivateOptions {
 export interface Button {
     label: string;
     value: string;
+    type?: 'reply' | 'link';
+}
+
+export interface RichContent {
+    buttons?: Button[];
+    title?: string;
+    footer?: string;
+    imageUrl?: string;
+    layout?: 'default' | 'card' | 'compact';
+    singleSelect?: boolean;
 }
 
 export interface BotCommand {
@@ -34,8 +44,13 @@ export type MessageHandler     = (userId: string, content: string, messageId: st
 export type ErrorHandler        = (error: Error) => void;
 export type JoinHandler         = (chatHandle: string, encryptionKey: string) => void | Promise<void>;
 export type LeaveHandler        = (chatHandle: string) => void | Promise<void>;
-export type ChatMessageHandler  = (chatHandle: string, content: string, senderUserId: string, messageId: string) => void | Promise<void>;
-export type MentionHandler      = (chatHandle: string, content: string, senderUserId: string, messageId: string) => void | Promise<void>;
+export interface ReplyTo {
+    messageId: string;
+    preview?: string;
+    senderName?: string;
+}
+export type ChatMessageHandler  = (chatHandle: string, content: string, senderUserId: string, messageId: string, replyTo: ReplyTo | null, senderName?: string) => void | Promise<void>;
+export type MentionHandler      = (chatHandle: string, content: string, senderUserId: string, messageId: string, replyTo: ReplyTo | null, senderName?: string) => void | Promise<void>;
 
 export declare class BotClient {
     readonly serverUrl: string;
@@ -68,7 +83,7 @@ export declare class BotClient {
     reply(userId: string, content: string): Promise<void>;
 
     /** Send a rich reply with glass buttons to a user in a direct bot conversation. */
-    replyRich(userId: string, content: string, buttons: Button[]): Promise<void>;
+    replyRich(userId: string, content: string, richContent: RichContent | Button[]): Promise<void>;
 
     // ── Chat API ────────────────────────────────────────────────────────────
 
@@ -76,7 +91,7 @@ export declare class BotClient {
     sendToChat(chatHandle: string, content: string, encryptionKey: string): Promise<void>;
 
     /** Send a rich message with glass buttons to a regular chat the bot has joined. */
-    sendRichToChat(chatHandle: string, content: string, buttons: Button[], encryptionKey: string): Promise<void>;
+    sendRichToChat(chatHandle: string, content: string, richContent: RichContent | Button[], encryptionKey: string, replyTo?: ReplyTo): Promise<void>;
 
     /**
      * Signal typing state in a chat. Clears automatically after 6s if not refreshed.

@@ -347,10 +347,11 @@ class BotClient {
      * Send a reply with rich content (glass buttons) to a user.
      * @param {string} userId
      * @param {string} content
-     * @param {Array<{label:string,value:string}>} buttons
+     * @param {Array<{label:string,value:string}>|RichContent} richContent
      */
-    async replyRich(userId, content, buttons) {
-        const payload = _botEncrypt({ userId, content, richContent: { buttons } }, this.sharedKey);
+    async replyRich(userId, content, richContent) {
+        const rc = Array.isArray(richContent) ? { buttons: richContent } : (richContent || {});
+        const payload = _botEncrypt({ userId, content, richContent: rc }, this.sharedKey);
         await _request(
             this.serverUrl,
             'POST',
@@ -383,14 +384,23 @@ class BotClient {
      * Send a rich message (with glass buttons) to a regular chat the bot has joined.
      * @param {string} chatHandle
      * @param {string} content
-     * @param {Array<{label:string,value:string}>} buttons
+     * @param {Array<{label:string,value:string}>|RichContent} richContent
      * @param {string} encryptionKey
      */
-    async sendRichToChat(chatHandle, content, buttons, encryptionKey) {
+    async sendRichToChat(chatHandle, content, richContent, encryptionKey, replyTo) {
+        const rc = Array.isArray(richContent) ? { buttons: richContent } : (richContent || {});
         const encryptedContent = _encryptWithChatKey(content, encryptionKey);
         const encryptedName = _encryptWithChatKey(this._botName || 'Bot', encryptionKey);
-        const encryptedRichContent = buttons ? _encryptWithChatKey(JSON.stringify({ buttons }), encryptionKey) : null;
-        const payload = _botEncrypt({ encryptedContent, encryptedName, encryptedRichContent }, this.sharedKey);
+        const encryptedRichContent = _encryptWithChatKey(JSON.stringify(rc), encryptionKey);
+        const payloadObj = { encryptedContent, encryptedName, encryptedRichContent };
+        if (replyTo && replyTo.messageId) {
+            payloadObj.replyTo = {
+                messageId: replyTo.messageId,
+                encryptedPreview: _encryptWithChatKey(String(replyTo.preview || '').slice(0, 80), encryptionKey),
+                encryptedSenderName: _encryptWithChatKey(String(replyTo.senderName || ''), encryptionKey),
+            };
+        }
+        const payload = _botEncrypt(payloadObj, this.sharedKey);
         await _request(
             this.serverUrl,
             'POST',
@@ -553,7 +563,15 @@ class BotClient {
                     if (encryptionKey) {
                         try {
                             const content = _decryptWithChatKey(msg.message.encryptedContent, encryptionKey);
-                            await handler(msg.chatHandle, content, msg.message.senderUserId, msg.message.id);
+                            let senderName = msg.message.senderUserId;
+                            try { senderName = _decryptWithChatKey(msg.message.encryptedName, encryptionKey); } catch {}
+                            let replyTo = null;
+                            if (msg.message.replyTo) {
+                                replyTo = { messageId: msg.message.replyTo.messageId };
+                                try { replyTo.preview = _decryptWithChatKey(msg.message.replyTo.encryptedPreview, encryptionKey); } catch {}
+                                try { replyTo.senderName = _decryptWithChatKey(msg.message.replyTo.encryptedSenderName, encryptionKey); } catch {}
+                            }
+                            await handler(msg.chatHandle, content, msg.message.senderUserId, msg.message.id, replyTo, senderName);
                         } catch (e) { this._errorHandler(e); }
                     }
                 }
