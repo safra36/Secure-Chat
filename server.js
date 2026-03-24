@@ -1040,7 +1040,8 @@ function evictOldestIfOverQuota() {
 
 	if (!oldestFile) return;
 	const lines = fs.readFileSync(oldestFile, 'utf8').split('\n').filter(l => l.trim());
-	const trimmed = lines.slice(EVICT_BATCH);
+	const toRemove = Math.min(EVICT_BATCH, lines.length);
+	const trimmed = lines.slice(toRemove);
 	if (trimmed.length === 0) {
 		fs.unlinkSync(oldestFile);
 	} else {
