@@ -12,7 +12,7 @@
  *   node example.js
  */
 
-const { BotClient } = require('./bot-sdk');
+const { BotClient } = require('../../bot-sdk');
 const fs = require('fs');
 const path = require('path');
 
