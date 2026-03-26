@@ -7,7 +7,7 @@
 class ContentCacheDB {
     constructor() {
         this.dbName = 'SecureChatDB';
-        this.dbVersion = 2;
+        this.dbVersion = 6; // Match existing database version
         this.storeName = 'content';
         this.db = null;
         this.isInitialized = false;

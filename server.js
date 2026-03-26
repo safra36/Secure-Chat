@@ -1054,7 +1054,14 @@ function evictOldestIfOverQuota() {
 			fs.closeSync(fd);
 			const firstLine = buf.slice(0, n).toString('utf8').split('\n')[0];
 			const entry = JSON.parse(firstLine);
-			const ts = decryptTimestamp(entry.msg.encryptedTimestamp);
+			let ts;
+			if (entry.msg.encryptedTimestamp) {
+				ts = decryptTimestamp(entry.msg.encryptedTimestamp);
+			} else if (entry.msg.ts) {
+				ts = entry.msg.ts;
+			} else {
+				continue;
+			}
 			if (ts < oldestTs) { oldestTs = ts; oldestFile = fp; }
 		} catch (e) {}
 	}
@@ -1066,7 +1073,14 @@ function evictOldestIfOverQuota() {
 	if (trimmed.length === 0) {
 		fs.unlinkSync(oldestFile);
 	} else {
-		fs.writeFileSync(oldestFile, trimmed.join('\n') + '\n');
+		const tmp = oldestFile + '.tmp';
+		const fd = fs.openSync(tmp, 'w');
+		try {
+			for (const line of trimmed) { fs.writeSync(fd, line + '\n'); }
+		} finally {
+			fs.closeSync(fd);
+		}
+		fs.renameSync(tmp, oldestFile);
 	}
 }
 
@@ -1470,8 +1484,23 @@ function handleSendMessage(req, res, pathname) {
 				decryptTimestamp(messageData.encryptedTimestamp);
 			} catch (err) {
 				console.warn('Failed to decrypt timestamp:', err);
+				console.warn('Received encryptedTimestamp:', messageData.encryptedTimestamp);
+				console.warn('Chat handle:', chatHandle);
+				console.warn('Sender userId:', senderUserId);
+
+				let errorMessage = 'Invalid encrypted timestamp';
+				if (err.message.includes('decrypt')) {
+					errorMessage = 'Timestamp decryption failed - possible key mismatch';
+				} else if (err.message.includes('format')) {
+					errorMessage = 'Timestamp format invalid';
+				}
+
 				res.writeHead(400, { 'Content-Type': 'application/json' });
-				res.end(JSON.stringify({ error: 'Invalid encrypted timestamp' }));
+				res.end(JSON.stringify({
+					error: errorMessage,
+					details: err.message,
+					timestamp: messageData.encryptedTimestamp?.substring(0, 20) + '...'
+				}));
 				return;
 			}
 

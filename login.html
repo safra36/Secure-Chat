@@ -5883,6 +5883,48 @@
                 <button id="enable-notifications-btn" class="btn btn-primary" style="margin:0;width:100%">Enable Notifications</button>
             </div>
 
+            <!-- Storage section -->
+            <div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:var(--radius-md);padding:16px;margin-top:16px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+                    <div style="width:36px;height:36px;border-radius:50%;background:var(--accent-gradient);flex-shrink:0;display:flex;align-items:center;justify-content:center">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
+                    </div>
+                    <div>
+                        <div style="font-size:13px;font-weight:600;color:var(--text-primary)">Storage</div>
+                        <div id="storage-status-label" style="font-size:11px;color:var(--text-muted)">Checking...</div>
+                    </div>
+                </div>
+                <!-- Progress bar -->
+                <div style="height:6px;background:var(--bg-elevated);border-radius:3px;overflow:hidden;margin-bottom:10px">
+                    <div id="storage-bar" style="height:100%;width:0%;border-radius:3px;background:var(--accent-gradient);transition:width .4s ease"></div>
+                </div>
+                <!-- Stats grid -->
+                <div id="storage-stats-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">
+                    <div style="background:var(--bg-elevated);border-radius:var(--radius-sm);padding:8px 10px">
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">localStorage</div>
+                        <div id="storage-ls-value" style="font-size:13px;font-weight:600;color:var(--text-primary)">—</div>
+                        <div id="storage-ls-detail" style="font-size:10px;color:var(--text-muted)">—</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);border-radius:var(--radius-sm);padding:8px 10px">
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">IndexedDB</div>
+                        <div id="storage-idb-value" style="font-size:13px;font-weight:600;color:var(--text-primary)">—</div>
+                        <div id="storage-idb-detail" style="font-size:10px;color:var(--text-muted)">—</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);border-radius:var(--radius-sm);padding:8px 10px">
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Cached media</div>
+                        <div id="storage-media-value" style="font-size:13px;font-weight:600;color:var(--text-primary)">—</div>
+                        <div id="storage-media-detail" style="font-size:10px;color:var(--text-muted)">items</div>
+                    </div>
+                    <div style="background:var(--bg-elevated);border-radius:var(--radius-sm);padding:8px 10px">
+                        <div style="font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px">Message cache</div>
+                        <div id="storage-msgs-value" style="font-size:13px;font-weight:600;color:var(--text-primary)">—</div>
+                        <div id="storage-msgs-detail" style="font-size:10px;color:var(--text-muted)">chats cached</div>
+                    </div>
+                </div>
+                <div id="storage-recommendation" style="font-size:12px;color:var(--text-muted);line-height:1.5;margin-bottom:12px;padding:8px 10px;border-radius:var(--radius-sm);background:var(--bg-elevated);display:none"></div>
+                <button id="clear-cache-btn" class="btn btn-secondary" style="margin:0;width:100%">Clear Media Cache</button>
+            </div>
+
             <div id="settings-msg" style="display:none;margin-top:12px;font-size:13px;padding:10px 14px;border-radius:var(--radius-sm);border:1px solid"></div>
         </div>
     </div>
@@ -6694,49 +6736,57 @@
                 return false;
             }
             
-            // Try up to 10 times with progressive eviction
+            // Try up to 3 times with aggressive eviction
             let attempts = 0;
-            const maxAttempts = 10;
-            
+            const maxAttempts = 3;
+
             while (attempts < maxAttempts) {
                 try {
                     // Try to store directly
                     localStorage.setItem(`${CONTENT_KEY_PREFIX}${messageId}`, encryptedBase64);
                     console.log(`✅ Cached content for message ${messageId} in localStorage (${dataSize} bytes)`);
                     return true;
-                    
+
                 } catch (e) {
                     window.reportClientError(e, 'cache content in localStorage');
                     if (e.name === 'QuotaExceededError') {
                         console.warn(`QuotaExceededError on attempt ${attempts + 1}/${maxAttempts}`);
-                        
+
                         // Get current usage stats
                         const usage = getLocalStorageUsage();
                         const contentCount = getContentKeyCount();
                         console.log(`Current usage: ${usage} bytes, ${contentCount} cached items`);
-                        
-                        // Try to evict oldest content
-                        let evicted = evictOldestCachedContent();
-                        
-                        if (!evicted) {
+
+                        // Evict multiple items at once (more aggressive)
+                        let totalEvicted = 0;
+                        for (let i = 0; i < 3; i++) {
+                            const evicted = evictOldestCachedContent();
+                            if (evicted) totalEvicted++;
+                            else break;
+                        }
+
+                        if (totalEvicted === 0) {
                             // No more content to evict - try evicting message cache
-                            evicted = evictOldestMessageCache();
-                            if (!evicted) {
+                            const msgEvicted = evictOldestMessageCache();
+                            if (!msgEvicted) {
                                 console.error('No more items to evict, cache is full');
                                 return false;
                             }
                         }
-                        
-                        // Wait a bit before retry to let browser process
-                        await new Promise(resolve => setTimeout(resolve, 50));
-                        
+
+                        console.log(`Evicted ${totalEvicted} items, retrying...`);
+
+                        // Exponential backoff: 100ms, 200ms, 400ms
+                        const delay = 100 * Math.pow(2, attempts);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+
                     } else {
                         // Other error - don't retry
                         console.error('Unexpected cache error:', e);
                         return false;
                     }
                 }
-                
+
                 attempts++;
             }
             
@@ -6755,6 +6805,38 @@
             return count;
         }
         
+        // Get storage health status
+        function getStorageHealth() {
+            const usage = getLocalStorageUsage();
+            const usagePercent = (usage / MAX_CACHE_SIZE_BYTES) * 100;
+            const contentCount = getContentKeyCount();
+            return {
+                usageBytes: usage,
+                usagePercent: usagePercent,
+                contentCount: contentCount,
+                isCritical: usagePercent > 90,
+                isWarning: usagePercent > 75,
+                recommendation: usagePercent > 90
+                    ? 'Storage critical - clear old chats or media'
+                    : usagePercent > 75
+                        ? 'Storage warning - consider clearing old content'
+                        : 'Storage healthy'
+            };
+        }
+
+        // Log storage health periodically
+        function logStorageHealth() {
+            const health = getStorageHealth();
+            if (health.isCritical) {
+                console.error(`🚨 Storage critical: ${health.usagePercent.toFixed(1)}% used (${health.contentCount} items)`);
+            } else if (health.isWarning) {
+                console.warn(`⚠️ Storage warning: ${health.usagePercent.toFixed(1)}% used (${health.contentCount} items)`);
+            }
+        }
+
+        // Check storage health every 5 minutes
+        setInterval(logStorageHealth, 5 * 60 * 1000);
+
         // Evict the entire LRU chat from localStorage to free space in bulk.
         // Avoids calling savePollingCursors()/setItemWithEviction() to prevent re-entrant eviction.
         // Never evicts the currently open chat to prevent cursor loss and re-render loops.
@@ -11693,6 +11775,16 @@
                         body: JSON.stringify(messageData)
                     });
 
+                    // Cache content ONLY after successful send
+                    if (messageData.content && messageData.content !== "None") {
+                        try {
+                            await cacheContentWithQuota(optimisticId, messageData.content, currentChat.handle);
+                        } catch (cacheError) {
+                            // Cache failure is non-fatal - log but don't fail the send
+                            console.warn('Failed to cache message content:', cacheError);
+                        }
+                    }
+
                     confirmOptimisticMessage(optimisticId);
                     fetchMessages();
                 } catch (error) {
@@ -12335,10 +12427,55 @@
             
             // Update notification status
             updateNotificationStatus();
-            
+            refreshStorageHealth();
+
             chatListContainer.style.display = 'none';
             chatContainer.style.display = 'none';
             document.getElementById('settings-container').style.display = 'flex';
+        }
+
+        // Populate storage health section in settings
+        async function refreshStorageHealth() {
+            const stats = await getStorageStats();
+            const ls = stats.localStorage;
+            const idb = stats.indexedDB;
+
+            const pct = ls.usagePercent;
+            const bar = document.getElementById('storage-bar');
+            const label = document.getElementById('storage-status-label');
+            const rec = document.getElementById('storage-recommendation');
+
+            bar.style.width = Math.min(pct, 100) + '%';
+            if (pct > 90) {
+                bar.style.background = 'var(--error)';
+                label.style.color = 'var(--error)';
+                label.textContent = `Critical — ${pct}% used`;
+                rec.style.display = 'block';
+                rec.style.color = 'var(--error-light, #fca5a5)';
+                rec.style.borderLeft = '2px solid var(--error)';
+                rec.textContent = 'Storage critical — tap "Clear Media Cache" to free space.';
+            } else if (pct > 75) {
+                bar.style.background = '#f59e0b';
+                label.style.color = '#f59e0b';
+                label.textContent = `Warning — ${pct}% used`;
+                rec.style.display = 'block';
+                rec.style.color = 'var(--text-muted)';
+                rec.style.borderLeft = '2px solid #f59e0b';
+                rec.textContent = 'Storage getting full. Consider clearing old media.';
+            } else {
+                bar.style.background = 'var(--success)';
+                label.style.color = 'var(--success)';
+                label.textContent = `Healthy — ${pct}% used`;
+                rec.style.display = 'none';
+            }
+
+            const fmt = b => b < 1024 * 1024 ? (b / 1024).toFixed(1) + ' KB' : (b / (1024 * 1024)).toFixed(2) + ' MB';
+            document.getElementById('storage-ls-value').textContent = fmt(ls.totalBytes);
+            document.getElementById('storage-ls-detail').textContent = `of ${fmt(ls.maxBytes)} limit`;
+            document.getElementById('storage-idb-value').textContent = idb.totalBytes > 0 ? fmt(idb.totalBytes) : 'N/A';
+            document.getElementById('storage-idb-detail').textContent = idb.itemCount > 0 ? `${idb.itemCount} items` : 'unavailable';
+            document.getElementById('storage-media-value').textContent = ls.contentCount + (idb.itemCount > 0 ? ' + ' + idb.itemCount : '');
+            document.getElementById('storage-msgs-value').textContent = ls.messageCount;
         }
 
         // Update notification permission status display
@@ -12420,6 +12557,11 @@
             }
             
             updateNotificationStatus();
+        });
+
+        document.getElementById('clear-cache-btn').addEventListener('click', () => {
+            clearAllCache();
+            refreshStorageHealth();
         });
 
         function closeSettings() {
@@ -13091,8 +13233,8 @@
                         const url = createTrackedBlobUrl(blob);
                         img.src = url;
                         img.style.cssText = '';
-                        // Cache it
-                        await cacheContentWithQuota(message.id, encB64);
+                        // Don't cache here - cache only after successful send
+                        // await cacheContentWithQuota(message.id, encB64);
                     } catch (e) {
                         img.style.opacity = '0.25';
                         img.alt = '?';
