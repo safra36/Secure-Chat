@@ -7255,6 +7255,7 @@
         let currentChat = null;
         let isPolling = false;
         let pollingInterval = null;
+        let messagePollDelay = 2000;
         let isFetchingMessages = false;
         let selectedMedia = null;      // image: dataUrl; video: objectUrl
         let selectedMediaType = null;  // 'image' | 'video'
@@ -7336,6 +7337,7 @@
 
         // Heartbeat and connection status
         let heartbeatInterval = null;
+        let isHeartbeatRunning = false;
         let connectionStatus = 'disconnected'; // 'connected', 'connecting', 'disconnected'
         let connectionState = 'disconnected'; // 'connected', 'connecting', 'disconnected', 'reconnecting'
         let consecutiveHeartbeatFailures = 0;
@@ -7389,6 +7391,7 @@
 
         // Chat list polling for background updates
         let chatListPollingInterval = null;
+        let isChatListPollingRunning = false;
         let shouldPollBackgroundChats = false; // Track if we should poll other chats
         const isChatListVisible = () => chatListContainer.style.display === 'flex';
 
@@ -7861,13 +7864,10 @@
             function pausePollingForBackground() {
                 // Stop heartbeat and message polling - they're not needed when hidden
                 // Chat list polling will continue at a reduced rate via the server
-                if (heartbeatInterval) {
-                    clearInterval(heartbeatInterval);
-                    heartbeatInterval = null;
-                }
+                if (isHeartbeatRunning) stopHeartbeat();
                 stopPolling(); // Stops message polling
-                
-                // Note: We DON'T stop chatListPollingInterval - we need it for notifications
+
+                // Note: We DON'T stop chatListPolling - we need it for notifications
                 // But the server-side already throttles based on heartbeat presence
             }
             
@@ -7884,9 +7884,9 @@
                     }, 500);
                 }
                 
-                // Restart heartbeat interval
-                if (currentChat && !heartbeatInterval) {
-                    heartbeatInterval = setInterval(() => sendHeartbeat(false), 5000);
+                // Restart heartbeat loop
+                if (currentChat && !isHeartbeatRunning) {
+                    startHeartbeat();
                 }
                 
                 // Resume polling — server will detect gaps via cursor age and signal gap: true
@@ -7901,6 +7901,14 @@
                 }
             }
             
+            // Restart polling loops when network comes back online
+            window.addEventListener('online', () => {
+                console.log('[Network] Back online - restarting stopped loops');
+                if (isPolling && !pollingInterval) pollingLoop();
+                if (isHeartbeatRunning && !heartbeatInterval) heartbeatLoop();
+                if (isChatListPollingRunning && !chatListPollingInterval) chatListLoop();
+            });
+
             // Standard visibilitychange event (most browsers)
             document.addEventListener('visibilitychange', handleVisibilityChange);
             
@@ -9021,32 +9029,43 @@
         }
 
         function startHeartbeat() {
-            if (heartbeatInterval) return;
-            
+            if (isHeartbeatRunning) return;
+
             // Don't start intensive heartbeat if page is hidden
             if (!isPageVisible) {
                 console.log('[Heartbeat] Skipping heartbeat start - page is hidden');
                 return;
             }
 
-            sendHeartbeat();
-
-            // Send heartbeat every 5 seconds
-            heartbeatInterval = setInterval(() => {
-                if (isPageVisible) {
-                    sendHeartbeat(false);
-                }
-            }, 5000);
+            isHeartbeatRunning = true;
+            heartbeatLoop();
         }
 
         function stopHeartbeat() {
+            isHeartbeatRunning = false;
             if (heartbeatInterval) {
-                clearInterval(heartbeatInterval);
+                clearTimeout(heartbeatInterval);
                 heartbeatInterval = null;
             }
             // Reset failure counters on explicit stop
             consecutiveHeartbeatFailures = 0;
             reconnectAttempts = 0;
+        }
+
+        async function heartbeatLoop() {
+            if (!isHeartbeatRunning) return;
+            if (!navigator.onLine) {
+                console.log('[Heartbeat] Offline - stopping loop');
+                heartbeatInterval = null;
+                return;
+            }
+            try {
+                if (isPageVisible) await sendHeartbeat(false);
+            } finally {
+                if (isHeartbeatRunning) {
+                    heartbeatInterval = setTimeout(heartbeatLoop, 5000);
+                }
+            }
         }
 
         async function sendHeartbeat(isWakeHeartbeat = false) {
@@ -9527,7 +9546,7 @@
 
         function startPolling() {
             if (isPolling) return;
-            
+
             // Don't start intensive polling if page is hidden
             if (!isPageVisible) {
                 console.log('[Polling] Skipping polling start - page is hidden');
@@ -9535,21 +9554,34 @@
             }
 
             isPolling = true;
-            fetchMessages(); // immediate fetch; interval fires subsequent ones
-            pollingInterval = setInterval(() => {
-                if (isPageVisible) {
-                    fetchMessages();
-                }
-            }, 2000);
+            pollingLoop();
         }
 
         function stopPolling() {
             if (!isPolling) return;
 
             isPolling = false;
+            messagePollDelay = 2000;
             if (pollingInterval) {
-                clearInterval(pollingInterval);
+                clearTimeout(pollingInterval);
                 pollingInterval = null;
+            }
+        }
+
+        async function pollingLoop() {
+            if (!isPolling) return;
+            if (!navigator.onLine) {
+                console.log('[Polling] Offline - stopping loop');
+                pollingInterval = null;
+                return;
+            }
+            try {
+                if (isPageVisible) await fetchMessages();
+            } finally {
+                if (isPolling) {
+                    const jitter = Math.random() * 500 - 250;
+                    pollingInterval = setTimeout(pollingLoop, messagePollDelay + jitter);
+                }
             }
         }
 
@@ -11423,20 +11455,33 @@
 
         // Start polling chat list in background
         function startChatListPolling() {
-            if (chatListPollingInterval) return;
-
-            // Poll every 12-15 seconds with some randomness
-            const pollInterval = 12000 + Math.random() * 3000;
-            chatListPollingInterval = setInterval(pollAllChatsForNewMessages, pollInterval);
-            
-            // Poll immediately
-            pollAllChatsForNewMessages();
+            if (isChatListPollingRunning) return;
+            isChatListPollingRunning = true;
+            chatListLoop();
         }
 
         function stopChatListPolling() {
+            isChatListPollingRunning = false;
             if (chatListPollingInterval) {
-                clearInterval(chatListPollingInterval);
+                clearTimeout(chatListPollingInterval);
                 chatListPollingInterval = null;
+            }
+        }
+
+        async function chatListLoop() {
+            if (!isChatListPollingRunning) return;
+            if (!navigator.onLine) {
+                console.log('[ChatList] Offline - stopping loop');
+                chatListPollingInterval = null;
+                return;
+            }
+            try {
+                await pollAllChatsForNewMessages();
+            } finally {
+                if (isChatListPollingRunning) {
+                    const delay = 12000 + Math.random() * 3000;
+                    chatListPollingInterval = setTimeout(chatListLoop, delay);
+                }
             }
         }
 
@@ -14914,6 +14959,7 @@
             isMuted = false;
             isPttTalking = false;
             dismissedCallIds.clear();
+            messagePollDelay = 2000; // Restore normal polling rate after call
             updateCallUI();
 
             // If call is still active with other participants, show banner immediately
@@ -14974,10 +15020,7 @@
 
                 startCallTimer();
 
-                if (pollingInterval) {
-                    clearInterval(pollingInterval);
-                    pollingInterval = setInterval(fetchMessages, 5000);
-                }
+                messagePollDelay = 5000; // Slow down message polling during calls
             } catch (err) {
                 window.reportClientError(err, 'start call audio capture');
                 showToast('Failed to access microphone', 'error');
@@ -15016,11 +15059,7 @@
                 callRingInterval = null;
             }
 
-            // Restore normal message polling
-            if (isPolling && currentChat) {
-                clearInterval(pollingInterval);
-                pollingInterval = setInterval(fetchMessages, 2000);
-            }
+            // messagePollDelay is reset in leaveCall()
 
             document.body.classList.remove('call-active');
         }
