@@ -26,6 +26,42 @@ export interface Button {
     type?: 'reply' | 'link';
 }
 
+export interface TextInput {
+    type: 'input';
+    id: string;
+    label?: string;
+    placeholder?: string;
+    multiline?: boolean;
+    required?: boolean;
+    maxLength?: number;
+    default?: string;
+}
+
+export interface SelectInput {
+    type: 'select';
+    id: string;
+    label?: string;
+    placeholder?: string;
+    options: { label: string; value: string }[];
+    required?: boolean;
+}
+
+export interface ToggleInput {
+    type: 'toggle';
+    id: string;
+    label: string;
+    default?: boolean;
+}
+
+export interface FormElement {
+    type: 'form';
+    id: string;
+    submitLabel?: string;
+    elements: (TextInput | SelectInput | ToggleInput)[];
+}
+
+export type InteractiveElement = TextInput | SelectInput | ToggleInput | FormElement;
+
 export interface RichContent {
     buttons?: Button[];
     title?: string;
@@ -33,6 +69,7 @@ export interface RichContent {
     imageUrl?: string;
     layout?: 'default' | 'card' | 'compact';
     singleSelect?: boolean;
+    elements?: InteractiveElement[];
 }
 
 export interface BotCommand {

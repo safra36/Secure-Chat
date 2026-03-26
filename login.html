@@ -5367,6 +5367,24 @@
         .bot-md h4,.bot-md h5,.bot-md h6 { font-size:13px; font-weight:600; margin:4px 0; }
         .bot-md ol { margin:4px 0; padding-left:18px; }
         .bot-md blockquote { border-left:3px solid var(--accent); margin:8px 0; padding:8px 14px; color:var(--text-muted); background:rgba(99,102,241,.08); border-radius:0 8px 8px 0; }
+        .bot-element { margin:8px 0; }
+        .bot-input-label,.bot-select-label,.bot-toggle-label { display:block; font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:4px; }
+        .bot-input-field { width:100%; padding:8px 12px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); font-size:14px; box-sizing:border-box; font-family:inherit; resize:vertical; }
+        .bot-input-field:focus { border-color:var(--accent); outline:none; }
+        .bot-select-field { width:100%; padding:8px 12px; border-radius:8px; border:1px solid var(--border-color); background:var(--bg-primary); color:var(--text-primary); font-size:14px; box-sizing:border-box; font-family:inherit; }
+        .bot-select-field:focus { border-color:var(--accent); outline:none; }
+        .bot-toggle { display:flex; align-items:center; justify-content:space-between; min-height:44px; }
+        .bot-toggle-switch { position:relative; width:40px; height:22px; cursor:pointer; flex-shrink:0; }
+        .bot-toggle-switch input { opacity:0; width:0; height:0; }
+        .bot-toggle-slider { position:absolute; inset:0; background:var(--bg-tertiary); border-radius:22px; transition:.2s; }
+        .bot-toggle-slider::before { content:''; position:absolute; width:16px; height:16px; left:3px; bottom:3px; background:white; border-radius:50%; transition:.2s; }
+        .bot-toggle-switch input:checked + .bot-toggle-slider { background:var(--accent); }
+        .bot-toggle-switch input:checked + .bot-toggle-slider::before { transform:translateX(18px); }
+        .bot-form { border-top:1px solid var(--border-color); margin-top:8px; padding-top:8px; }
+        .bot-form-submit { width:100%; padding:10px; border:none; border-radius:10px; background:var(--accent); color:white; font-weight:600; font-size:14px; cursor:pointer; margin-top:8px; font-family:inherit; transition:opacity .15s; min-height:44px; }
+        .bot-form-submit:hover { opacity:.9; }
+        .bot-form-submit:disabled { opacity:.4; cursor:default; }
+        @media (max-width:768px) { .bot-input-field,.bot-select-field { font-size:16px; } .bot-btn-row { max-width:100%; } }
         .bot-md del { opacity:0.6; text-decoration:line-through; }
         @media (min-width:1024px) {
             #bot-messages { padding:20px 32px !important; }
@@ -10092,6 +10110,17 @@
                             const titleEl = messageBubble.querySelector('.bot-card-title');
                             messageBubble.insertBefore(img, titleEl ? titleEl.nextSibling : messageBubble.firstChild);
                         }
+                        if (Array.isArray(rc.elements) && rc.elements.length > 0) {
+                            _renderElements(rc.elements, messageBubble, (formId, values) => {
+                                if (message.isBot) {
+                                    const botEntry = _chatBots.find(b => b.name === _richSenderName);
+                                    if (botEntry) _mentionedBotIds.add(botEntry.botId);
+                                }
+                                const prefix = message.isBot ? '@' + _richSenderName + ' ' : '';
+                                document.getElementById('message-input').value = prefix + `[form:${formId}] ${JSON.stringify(values)}`;
+                                sendMessage();
+                            });
+                        }
                         if (Array.isArray(rc.buttons) && rc.buttons.length > 0) {
                             const btnRow = document.createElement('div');
                             btnRow.className = 'bot-btn-row' + (rc.layout === 'compact' ? ' compact' : '');
@@ -10331,6 +10360,96 @@
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+
+        // Render bot interactive elements (input/select/toggle/form) into a container.
+        // onSubmit(formId, values) is called when a form is submitted.
+        function _renderElements(elements, container, onSubmit) {
+            if (!Array.isArray(elements) || elements.length === 0) return;
+            for (const el of elements) {
+                if (el.type === 'form') {
+                    const formDiv = document.createElement('div');
+                    formDiv.className = 'bot-form';
+                    formDiv.dataset.formId = el.id;
+                    _renderElements(el.elements, formDiv, null);
+                    const submitBtn = document.createElement('button');
+                    submitBtn.className = 'bot-form-submit';
+                    submitBtn.textContent = el.submitLabel || 'Submit';
+                    submitBtn.onclick = () => {
+                        const values = {};
+                        formDiv.querySelectorAll('[data-element-id]').forEach(input => {
+                            values[input.dataset.elementId] = input.type === 'checkbox' ? input.checked : input.value;
+                        });
+                        submitBtn.disabled = true;
+                        if (onSubmit) onSubmit(el.id, values);
+                    };
+                    formDiv.appendChild(submitBtn);
+                    container.appendChild(formDiv);
+                } else if (el.type === 'input') {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'bot-element bot-input';
+                    if (el.label) {
+                        const lbl = document.createElement('label');
+                        lbl.className = 'bot-input-label';
+                        lbl.textContent = el.label;
+                        wrap.appendChild(lbl);
+                    }
+                    const input = el.multiline ? document.createElement('textarea') : document.createElement('input');
+                    input.className = 'bot-input-field';
+                    input.dataset.elementId = el.id;
+                    if (!el.multiline) input.type = 'text';
+                    if (el.placeholder) input.placeholder = el.placeholder;
+                    if (el.maxLength) input.maxLength = el.maxLength;
+                    if (el.default) input.value = el.default;
+                    if (el.multiline) { input.rows = 3; }
+                    wrap.appendChild(input);
+                    container.appendChild(wrap);
+                } else if (el.type === 'select') {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'bot-element bot-select';
+                    if (el.label) {
+                        const lbl = document.createElement('label');
+                        lbl.className = 'bot-select-label';
+                        lbl.textContent = el.label;
+                        wrap.appendChild(lbl);
+                    }
+                    const sel = document.createElement('select');
+                    sel.className = 'bot-select-field';
+                    sel.dataset.elementId = el.id;
+                    if (el.placeholder) {
+                        const opt = document.createElement('option');
+                        opt.value = ''; opt.disabled = true; opt.selected = true;
+                        opt.textContent = el.placeholder;
+                        sel.appendChild(opt);
+                    }
+                    for (const o of (el.options || [])) {
+                        const opt = document.createElement('option');
+                        opt.value = o.value; opt.textContent = o.label;
+                        sel.appendChild(opt);
+                    }
+                    wrap.appendChild(sel);
+                    container.appendChild(wrap);
+                } else if (el.type === 'toggle') {
+                    const wrap = document.createElement('div');
+                    wrap.className = 'bot-element bot-toggle';
+                    const lbl = document.createElement('label');
+                    lbl.className = 'bot-toggle-label';
+                    lbl.textContent = el.label;
+                    wrap.appendChild(lbl);
+                    const switchLbl = document.createElement('label');
+                    switchLbl.className = 'bot-toggle-switch';
+                    const checkbox = document.createElement('input');
+                    checkbox.type = 'checkbox';
+                    checkbox.dataset.elementId = el.id;
+                    checkbox.checked = el.default === true;
+                    const slider = document.createElement('span');
+                    slider.className = 'bot-toggle-slider';
+                    switchLbl.appendChild(checkbox);
+                    switchLbl.appendChild(slider);
+                    wrap.appendChild(switchLbl);
+                    container.appendChild(wrap);
+                }
+            }
         }
 
         function _renderMarkdown(text) {
@@ -15535,6 +15654,11 @@
                 ts.textContent = _fmtTime(msg.ts);
                 col.appendChild(bubble);
                 col.appendChild(ts);
+                if (rc && Array.isArray(rc.elements) && rc.elements.length > 0) {
+                    _renderElements(rc.elements, bubble, (formId, values) => {
+                        sendBotMessage(`[form:${formId}] ${JSON.stringify(values)}`);
+                    });
+                }
                 if (rc && Array.isArray(rc.buttons) && rc.buttons.length > 0) {
                     const btnRow = document.createElement('div');
                     btnRow.className = 'bot-btn-row' + (rc.layout === 'compact' ? ' compact' : '');

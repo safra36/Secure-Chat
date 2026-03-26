@@ -1019,6 +1019,27 @@ function getTotalDataSizeBytes() {
 	return total;
 }
 
+// Reads an NDJSON file line-by-line without loading the whole file into a string.
+// Avoids ERR_STRING_TOO_LONG for large files.
+function* readLinesSync(fp) {
+	const CHUNK = 65536;
+	const fd = fs.openSync(fp, 'r');
+	let leftover = '';
+	const buf = Buffer.alloc(CHUNK);
+	let n;
+	try {
+		while ((n = fs.readSync(fd, buf, 0, CHUNK, null)) > 0) {
+			const chunk = leftover + buf.slice(0, n).toString('utf8');
+			const lines = chunk.split('\n');
+			leftover = lines.pop();
+			for (const line of lines) { if (line.trim()) yield line; }
+		}
+		if (leftover.trim()) yield leftover;
+	} finally {
+		fs.closeSync(fd);
+	}
+}
+
 function evictOldestIfOverQuota() {
 	if (getTotalDataSizeBytes() <= MAX_DISK_BYTES) return;
 
@@ -1039,7 +1060,7 @@ function evictOldestIfOverQuota() {
 	}
 
 	if (!oldestFile) return;
-	const lines = fs.readFileSync(oldestFile, 'utf8').split('\n').filter(l => l.trim());
+	const lines = [...readLinesSync(oldestFile)];
 	const toRemove = Math.min(EVICT_BATCH, lines.length);
 	const trimmed = lines.slice(toRemove);
 	if (trimmed.length === 0) {
@@ -1054,7 +1075,7 @@ function loadPersistentStorage() {
 		const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.ndjson'));
 		for (const file of files) {
 			const fp = path.join(DATA_DIR, file);
-			const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+			const rawLines = [...readLinesSync(fp)];
 			if (rawLines.length === 0) continue;
 
 			// Read chatHandle from first valid line
@@ -1209,7 +1230,7 @@ function loadMessagesFromDisk(chatHandle, afterTimestamp, limit) {
 	const fp = chatToFilePath(chatHandle);
 	if (!fs.existsSync(fp)) return { messages: [], gap: false };
 
-	const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+	const rawLines = [...readLinesSync(fp)];
 	const messageMap = new Map();
 	const reactionPatches = [];
 
@@ -2218,8 +2239,7 @@ function handleDownloadContent(req, res, pathname) {
 		// Fallback: scan disk (e.g. after server restart or for history messages)
 		const fp = chatToFilePath(chatHandle);
 		if (fs.existsSync(fp)) {
-			const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
-			for (const line of rawLines) {
+			for (const line of readLinesSync(fp)) {
 				try {
 					const entry = JSON.parse(line);
 					if (entry.msg.id === messageId && entry.content) {
@@ -2275,7 +2295,7 @@ function handleGetHistory(req, res, pathname) {
 		return;
 	}
 
-	const rawLines = fs.readFileSync(fp, 'utf8').split('\n').filter(l => l.trim());
+	const rawLines = [...readLinesSync(fp)];
 	const messageMap = new Map(); // preserve order, deduplicate
 	const patches = [];
 	const orderedIds = []; // track insertion order

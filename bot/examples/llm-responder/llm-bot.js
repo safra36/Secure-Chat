@@ -21,13 +21,13 @@ const path  = require('path');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const SERVER_URL   = process.env.BOT_SERVER_URL   || 'https://chat.amirwhocodes.com';
-const SHARED_KEY   = process.env.BOT_SHARED_KEY   || '636da652600aed3e13605212381650df486f9f04db52e3e27ef3d8d1015d2cf0';
-const INVITE_TOKEN = process.env.BOT_INVITE_TOKEN || 'f4f6f26c9ee6e2b2b06be5b7020ba31f8cfb178e7b52893db9aa09156fe99159';
+const SERVER_URL   = process.env.BOT_SERVER_URL   || '';
+const SHARED_KEY   = process.env.BOT_SHARED_KEY   || '';
+const INVITE_TOKEN = process.env.BOT_INVITE_TOKEN || '';
 
-const LLM_BASE     = 'https://arvancloudai.ir/gateway/models/Qwen3-30B-A3B/HZTuTZe_QOxgUUCVQ8v3cCnbkYZrnvtmi7Sxv9jqXYDFPinkeVVe7thFJwQsQ4FALGvPPK_H0rsAGW9qHhVRmFK_7Dqgl6in0h6MW8M7kxXvcPkIVRavXIr-cpkpBUVjhgXpA65dAsDQelPbBofG4ZijbwBToyqrrYUeca2Do0Wry9E9beUz5qpQdleUsyDNH6cSbBQPFIdJ3s9dNRZLrwCf_b8uVE5szd6ZnQg2VMtW1xLmWp1-2wqFvSjCs0ej/v1';
-const LLM_API_KEY  = 'f943f38a-5346-5737-9a42-f51fe1180e82';
-const LLM_MODEL    = 'Qwen3-30B-A3B-cznny';
+const LLM_BASE     = '';
+const LLM_API_KEY  = '';
+const LLM_MODEL    = '';
 
 // Compact history when total characters exceed this (~25 K tokens)
 const COMPACT_THRESHOLD = 100_000;
@@ -46,12 +46,13 @@ CRITICAL RULE: You MUST always respond with a single valid JSON object. Never ou
   "imageUrl":    string  (optional) — direct image URL (only if you have a real URL),
   "layout":      "default" | "card" | "compact"  (optional, default "default"),
   "singleSelect": boolean  (optional, default true),
-  "buttons": [{ "label": string, "value": string, "type": "reply" | "link" }]  (optional)
+  "buttons": [{ "label": string, "value": string, "type": "reply" | "link" }]  (optional),
+  "elements": [ ...interactive elements... ]  (optional)
 }
 
 === CONTENT FIELD ===
 - Always required; never empty.
-- Markdown supported: **bold**, *italic*, \`inline code\`, \`\`\`lang\\ncode\`\`\`, [text](url), - list items
+- Markdown supported: **bold**, *italic*, ~~strike~~, \`inline code\`, \`\`\`lang\\ncode\`\`\`, [text](url), - unordered list, 1. ordered list, > blockquote, ## heading (H1–H6)
 - NEVER use empty code fences (\`\`\`\`\`\`) as separators or dividers — they render as blank boxes
 - Use line breaks (\\n) for structure. Prefer short paragraphs.
 - Be honest: if unsure say so — never invent facts.
@@ -84,6 +85,30 @@ CRITICAL RULE: You MUST always respond with a single valid JSON object. Never ou
 - Real-time data: no live search, no current news, no stock prices, weather, etc. Knowledge has a cutoff.
 - If asked to do any of the above, acknowledge the limitation honestly and offer what you *can* do instead.
 
+=== INTERACTIVE ELEMENTS (optional) ===
+Add an "elements" array to collect structured input from the user.
+
+Element types:
+- { "type": "input", "id": "name", "label": "Your name", "placeholder": "Enter...", "multiline": false, "required": true, "maxLength": 200 }
+- { "type": "select", "id": "lang", "label": "Language", "placeholder": "Choose...", "options": [{"label":"Python","value":"python"}], "required": true }
+- { "type": "toggle", "id": "anon", "label": "Submit anonymously", "default": false }
+- { "type": "form", "id": "my-form", "submitLabel": "Send", "elements": [ ...inputs/selects/toggles... ] }
+
+Standalone elements (not in a form) are rendered inline — the user can fill them in but there is no submit action. Wrap them in a "form" element when you need a submit button.
+
+When submitted, the client sends: [form:my-form] {"name":"Alice","lang":"python","anon":false}
+
+=== HANDLING FORM SUBMISSIONS ===
+If a user message starts with [form:id], parse it and respond to the data. Example:
+User: "[form:feedback-form] {"rating":"5","comment":"Great!"}"
+→ Extract the JSON, acknowledge the submission, and act on the values.
+
+=== WHEN TO USE ELEMENTS ===
+✓ Collecting structured input (surveys, settings, preferences)
+✓ When a free-text answer would be ambiguous (use select)
+✓ Multi-field data collection (use form wrapper)
+✗ Don't add forms just to look fancy — only when structured input genuinely helps
+
 === WHEN TO USE BUTTONS ===
 ✓ User asks an open question where you can offer to go deeper on sub-topics
 ✓ Multiple distinct options exist (e.g. language choice, action choice)
@@ -106,6 +131,9 @@ Multi-topic compact menu:
 
 Uncertain answer:
 {"content": "I'm not sure about that — I don't have reliable information on this topic. Here's what I do know: ..."}
+
+Feedback form:
+{"content": "Please share your feedback:", "elements": [{"type": "form", "id": "feedback", "submitLabel": "Send Feedback", "elements": [{"type": "input", "id": "name", "label": "Name", "placeholder": "Your name"}, {"type": "select", "id": "rating", "label": "Rating", "options": [{"label": "⭐", "value": "1"}, {"label": "⭐⭐", "value": "2"}, {"label": "⭐⭐⭐", "value": "3"}, {"label": "⭐⭐⭐⭐", "value": "4"}, {"label": "⭐⭐⭐⭐⭐", "value": "5"}]}, {"type": "input", "id": "comment", "label": "Comment", "multiline": true, "placeholder": "Tell us more..."}, {"type": "toggle", "id": "anonymous", "label": "Submit anonymously", "default": false}]}]}
 `;
 
 // ── Bot client ────────────────────────────────────────────────────────────────
@@ -251,6 +279,7 @@ function parseRichResponse(raw) {
         if (obj.layout && obj.layout !== 'default') rc.layout  = obj.layout;
         if (obj.singleSelect === false)          rc.singleSelect = false;
         if (Array.isArray(obj.buttons) && obj.buttons.length > 0) rc.buttons = obj.buttons;
+        if (Array.isArray(obj.elements) && obj.elements.length > 0) rc.elements = obj.elements;
         return { content, richContent: Object.keys(rc).length > 0 ? rc : null };
     } catch {
         return { content: raw, richContent: null };
@@ -336,6 +365,17 @@ async function answerInChat(chatHandle, text, replyTo) {
 
 // ── Event handlers ────────────────────────────────────────────────────────────
 
+// Parse [form:id] {json} into a readable description for the LLM
+function _formatFormSubmission(text) {
+    const m = text.match(/^\[form:([^\]]+)\]\s*(\{[\s\S]*\})$/);
+    if (!m) return text;
+    try {
+        const values = JSON.parse(m[2]);
+        const lines = Object.entries(values).map(([k, v]) => `• ${k}: ${v}`).join('\n');
+        return `[Form submission: ${m[1]}]\n${lines}`;
+    } catch { return text; }
+}
+
 bot.onMessage(async (userId, content) => {
     const text = (content || '').trim();
     if (!text) return;
@@ -351,7 +391,7 @@ bot.onMessage(async (userId, content) => {
         return;
     }
 
-    const { content: reply, richContent } = await answerDirect(userId, text);
+    const { content: reply, richContent } = await answerDirect(userId, _formatFormSubmission(text));
     console.log(`[Direct] Sending reply to user=${userId}  len=${reply.length}`);
     try {
         await bot.replyRich(userId, reply, richContent || {});
@@ -400,7 +440,7 @@ bot.onMention(async (chatHandle, content, senderUserId, messageId, replyTo, send
     console.log(`[Mention] chat=${chatHandle}  from=${senderUserId}${replyTo ? '  [reply]' : ''}`);
     await bot.setTyping(chatHandle, true).catch(() => {});
     const _typingKeepAlive = setInterval(() => bot.setTyping(chatHandle, true).catch(() => {}), 5000);
-    const { content: reply, richContent } = await answerInChat(chatHandle, stripped, replyTo);
+    const { content: reply, richContent } = await answerInChat(chatHandle, _formatFormSubmission(stripped), replyTo);
     clearInterval(_typingKeepAlive);
     await bot.setTyping(chatHandle, false).catch(() => {});
     console.log(`[Mention] Sending reply to chat=${chatHandle}  len=${reply.length}`);
